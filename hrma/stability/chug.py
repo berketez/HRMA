@@ -444,7 +444,7 @@ def chug_rightmost_root(dp_ratio_j, tau_s, tau_c_s, tau_f_s=0.0,
             f'{tau / tau_c:.6g}). The magnitude that overflows is z, not '
             f'tau/tau_c alone: a small injector stiffness J inflates z even '
             f'when tau/tau_c is well inside its guard. This is a numerical '
-            f'guard, not a physical threshold; no root is invented.')
+            f'guard, not a physical threshold; no root is reported.')
 
     z = -(tau / (2.0 * j * tau_c)) * math.exp(tau / tau_c)
     s0 = complex(lambertw(z, 0)) / tau - 1.0 / tau_c

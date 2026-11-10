@@ -401,6 +401,13 @@ function kur(spec, tur) {
   const alan = {};
   (spec.fields || []).forEach(f => { alan[f[0]] = ilkDeger(f); });
   let sug = null;
+  // V306 ana model (9 Kas): sayfanın GÜVERTE-HATA sözleşmesi (4 Kas,
+  // analysis_dock.js applySuggestions + tamOnDolumDegeri) — kutuya 6 anlamlı
+  // basamak YAZILIR, kullanıcı dokunmadıkça gövdeye motorun TAM sayısı GİDER.
+  // Ayna bunu üretmiyordu: termal güvertede boğaz çapı 0,0184045 gidiyor,
+  // motorun konturu 0,0184045333 diyordu; uç (kontur ⟷ boğaz 1e-6) 422
+  // veriyordu (test_v301_kabul K2/U2 katı + hibrit). Sayfa tam değeri yollar.
+  const tam = {};
   if (typeof spec.fromResults === 'function') {
     try { sug = spec.fromResults(results); } catch (e) { out.errors.push('fromResults: ' + String(e && e.message || e)); }
   }
@@ -426,6 +433,7 @@ function kur(spec, tur) {
       }
       if (typeof v === 'number' && Number.isFinite(v)) {
         el.value = String(sig(v));
+        tam[k] = v;
         if (ger[k]) out.withheld[k] = String(ger[k]); else out.suggested.push(k);
       }
     });
@@ -441,7 +449,10 @@ function kur(spec, tur) {
       out.payload[k] = el.value; return;
     }
     const x = parseFloat(el.value);
-    if (Number.isFinite(x)) { out.payload[k] = x; return; }
+    if (Number.isFinite(x)) {
+      out.payload[k] = Object.prototype.hasOwnProperty.call(tam, k) ? tam[k] : x;
+      return;
+    }
     if (!opt) out.missing.push(k);
   });
   if (tur === 'center' && typeof spec.body === 'function') {

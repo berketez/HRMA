@@ -235,7 +235,14 @@ def test_example_fields_exist_on_the_page(motor_type):
     doc = load_example_doc(motor_type)
     specs = inventory.field_specs_for(motor_type)
     unknown, bad_options = [], []
+    # V306/KATI-KALAN (kalem 5): sayfadan KALDIRILAN alanlar (ör. katı
+    # 'star_fillet') yüklemede göçle adıyla yok sayılır
+    # (projects.SOLID_RETIRED_FIELDS, uyarı kaydıyla); sayfaya hiç ulaşmaz.
+    from hrma.utils.projects import SOLID_RETIRED_FIELDS
+    emekli = set(SOLID_RETIRED_FIELDS) if motor_type == 'solid' else set()
     for field_id, value in doc['inputs']['fields'].items():
+        if field_id in emekli:
+            continue
         spec = specs.get(field_id)
         if spec is None:
             bulunan = _sayfa_betigi_kuruyor(motor_type, field_id)

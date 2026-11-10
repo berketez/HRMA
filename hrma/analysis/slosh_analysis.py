@@ -2,56 +2,71 @@
 
 Linear free-surface slosh dynamics of the propellant in a rigid, vertical
 (axis parallel to the acceleration vector) circular cylindrical tank, following
-the classical NASA reference literature:
+the classical NASA reference literature (source notes with page/equation
+numbers: ``docs/arastirma/2026-11-02/calkanti/KAYNAK_*.md``):
 
     - Abramson, H.N. (ed.), "The Dynamic Behavior of Liquids in Moving
       Containers", NASA SP-106, 1966, Chapter 2 (Abramson & Bauer, lateral
       sloshing in cylindrical tanks).
     - Dodge, F.T., "The New Dynamic Behavior of Liquids in Moving Containers",
-      Southwest Research Institute, 2000 (the SP-106 update), Chapters 1-2, 4.
+      Southwest Research Institute, 2000 (the SP-106 update), Chapters 1-3,
+      read with the SwRI errata list REV 1 (10 Dec 2025).
     - Miles, J.W., "Ring Damping of Free Surface Oscillations in a Circular
-      Tank", J. Applied Mechanics 25 (1958) 274-276 (ring-baffle damping).
-    - NASA SP-8009, "Propellant Slosh Loads", 1968 (design guidance).
+      Tank", J. Applied Mechanics 25 (1958) 274-276 (ring-baffle damping, used
+      in the form given by Dodge 2000 Eq. (2.16)).
+    - NASA SP-8009, "Propellant Slosh Loads", 1968: Table I (first-mode
+      mechanical model of a cylindrical tank) and Sec. 2.3 (Bond number).
+      SP-8009 does not state the Miles formula; it cites Miles 1958 (its
+      ref. 29) and shows ring-baffle damping only as a chart (Fig. 4).
 
 Governing relations (upright circular cylinder, radius R, static liquid depth h,
 axial/effective gravity g_eff, first antisymmetric mode).  ``lambda_1 = 1.8412``
-is the first root of J1'(x) = 0 (derivative of the first-order Bessel function).
+is the first root of J1'(x) = 0 (derivative of the first-order Bessel function;
+Dodge 2000 Eq. (1.41) gives 1.841, the exact root is 1.841184).
 
-Natural frequency of the n-th antisymmetric slosh mode (SP-106 Eq. 2.4 /
-Dodge Eq. 1.13):
+Natural frequency of the n-th antisymmetric slosh mode (Dodge 2000 Eq. (1.40);
+SP-8009 Table I, omega_1 row).  The previously cited "SP-106 Eq. 2.4" and
+"Dodge Eq. 1.13" are not this relation (SP-106 Eqs. (2.1)-(2.5) are the
+potential-flow kinematics):
 
     omega_n^2 = (lambda_n * g_eff / R) * tanh(lambda_n * h / R)          (1)
 
 Fundamental-mode (n=1) sloshing-mass fraction of the total liquid mass
-(SP-106 equivalent-mechanical-model, Dodge Eq. 1.20; cross-checked against the
-Dodge fill-level chart: h/R = 1 -> m1/m_liq ~ 0.43):
+(Dodge 2000 Table 3.2 with d = 2R; SP-8009 Table I, where
+0.4547 = 2 / (lambda_1 (lambda_1^2 - 1)); at h/R = 1 the relation gives
+m1/m_liq = 0.4322):
 
     m_1 / m_liquid = (2 R / (lambda_1 * h * (lambda_1^2 - 1)))
                      * tanh(lambda_1 * h / R)                            (2)
 
-Equivalent-pendulum length of the slosh mass (a simple pendulum whose swing
-frequency equals the slosh frequency, l = g / omega^2):
+Equivalent-pendulum length of the slosh mass (Dodge 2000 Table 3.2,
+L_n = g / omega_n^2; errata REV 1 item 29 corrects the misprinted form in the
+chapter summary):
 
     l_1 = g_eff / omega_1^2                                             (3)
 
-Ring-baffle damping (Miles 1958; Dodge Eq. 4.12 / SP-8009), damping ratio
-supplied by a single flat rigid ring baffle of radial width w at depth d_s
-below the undisturbed free surface, in a tank of radius R:
+Ring-baffle damping (Miles 1958 in the form of Dodge 2000 Eq. (2.16); the
+previously cited "Dodge Eq. 4.12 / SP-8009" is wrong: Dodge Ch. 4 is the
+low-gravity chapter and SP-8009 has no formula), damping ratio supplied by a
+single flat rigid ring baffle of radial width w at depth d_s below the
+undisturbed free surface, in a tank of radius R, at wall wave amplitude eta:
 
-    gamma_baffle ~ 2.83 * exp(-4.60 * d_s / R) * (A_baffle / A_tank)^1.5 (4)
+    gamma_baffle = 2.83 * exp(-4.60 * d_s / R) * C1^1.5 * (eta / R)^0.5 (4)
 
-with A_baffle / A_tank = 1 - (1 - w/R)^2.  Equation (4) is a semi-empirical
-engineering estimate: reported values are tagged ``'approximate'`` and returned
-with an uncertainty band (roughly a factor of two), consistent with the scatter
-noted in the slosh literature.
+with C1 = (w/R)(2 - w/R) = 1 - (1 - w/R)^2 = A_baffle / A_tank.  Equation (4)
+is a semi-empirical engineering estimate: reported values are tagged
+``'approximate'`` and returned with a low/high band of a factor of two.  The
+factor-of-two band is an HRMA choice: the source gives no numeric band (design
+rationale: the experimental scatter of Dodge 2000 Fig. 2.7, CALKANTI §A.5).
 
 Limitations
 -----------
 - Linear (small-amplitude) free-surface theory; no propellant vortexing,
   breaking waves, or large-amplitude non-linear effects.
 - Rigid, upright, right-circular-cylinder geometry.  Domed heads, oblate
-  bulkheads and non-cylindrical sections are not modelled (they mainly shift
-  the slosh mass by a few percent for a nearly full tank).
+  bulkheads and non-cylindrical sections are not modelled; the size of the
+  resulting error has not been verified (no source was found for the earlier
+  "a few percent" statement; CALKANTI §A.1.3).
 - Constant effective axial acceleration ``g_eff`` per evaluation.  For a
   varying flight acceleration, sweep ``g_eff``/fill level with ``fill_sweep``.
 - Baffle damping is an order-estimate (Eq. 4), not a CFD result.
@@ -68,17 +83,23 @@ from hrma.constants import G_0
 # Modal constants: roots of J1'(x) = 0 (antisymmetric slosh modes, SP-106).
 # ---------------------------------------------------------------------------
 #: First root of J1'(x)=0 -> dominant (fundamental) lateral slosh mode.
+#: Dodge 2000 Eq. (1.41): 1.841; four-digit value (exact root 1.841184).
 LAMBDA_1 = 1.8412
-#: First four roots of J1'(x)=0 (SP-106 Table 2.1) for higher-mode reporting.
+#: First four roots of J1'(x)=0 for higher-mode reporting (Dodge 2000
+#: Eq. (1.41); four-digit values; the 5.329 / 8.531 printed in the heading of
+#: Dodge Table 3.2 contradict (1.41) and are not used).
 SLOSH_ROOTS = (1.8412, 5.3314, 8.5363, 11.7060)
 
 #: Standard gravity (BIPM / ISO 80000) as the default axial acceleration.
 G0 = G_0
 
-# Miles ring-baffle correlation constants (Eq. 4), Miles 1958 / Dodge Eq. 4.12.
+# Miles ring-baffle correlation constants (Eq. 4): Dodge 2000 Eq. (2.16)
+# (Miles 1958).
 _MILES_C = 2.83
 _MILES_DECAY = 4.60
 #: +/- factor applied to the Miles damping estimate to form the reported band.
+#: HRMA choice: the source states no numeric band (rationale: scatter of
+#: Dodge 2000 Fig. 2.7; CALKANTI §A.5).
 _MILES_BAND_FACTOR = 2.0
 
 # Wave-amplitude ratio eta/R used by the Miles correlation.
@@ -95,10 +116,13 @@ _MILES_BAND_FACTOR = 2.0
 #
 # The correlation scales as sqrt(eta/R), so the amplitude must be stated.  It is
 # now an explicit argument; the default below is a documented small-amplitude
-# design point, not a physical constant.  Callers doing real stability work
+# design point, not a physical constant (HRMA choice; Dodge 2000 Eq. (2.16a)
+# uses eta = 0.2 R as its design amplitude).  Callers doing real stability work
 # should pass their own design slosh amplitude.
 _MILES_DEFAULT_AMPLITUDE_RATIO = 0.05
 #: Envelope of the linear theory the correlation rests on (eta/R).
+#: HRMA choice; Dodge 2000 p. 33 places the end of linear wave behaviour at
+#: about 0.2 R (wave amplitude ~10 % of the diameter).
 _MILES_AMPLITUDE_MIN, _MILES_AMPLITUDE_MAX = 1e-3, 0.25
 
 # ---------------------------------------------------------------------------
@@ -161,7 +185,8 @@ SLOSH_SIZE_ENVELOPE_BASIS = (
     'relations: Eqs. (1)-(3) are scale-free in R, so an upper radius gate '
     'would be an invented number and none is applied. The one '
     'size-dependent validity criterion the sources DO state is the Bond '
-    'number Bo = rho * g_eff * R^2 / sigma (Dodge Ch. 1): below Bo ~ %g '
+    'number Bo = rho * g_eff * R^2 / sigma (NASA SP-8009 Sec. 2.3): below '
+    'Bo ~ %g '
     'surface tension governs the free surface and this gravity-wave model '
     'no longer applies. It CANNOT be evaluated here because the liquid '
     'surface tension (sigma) is not an input to this model, so the '
@@ -367,7 +392,8 @@ class CylindricalTankSlosh:
 
     def baffle_damping(self, width_ratio, depth_ratio,
                        amplitude_ratio=_MILES_DEFAULT_AMPLITUDE_RATIO):
-        """Estimated damping ratio of a single flat ring baffle (Miles, Eq. 4).
+        """Estimated damping ratio of a single flat ring baffle (Eq. 4: Dodge
+        2000 Eq. (2.16), Miles 1958).
 
         Parameters
         ----------
@@ -385,7 +411,8 @@ class CylindricalTankSlosh:
 
         Returns
         -------
-        dict with the nominal damping ratio, a low/high band (factor of two),
+        dict with the nominal damping ratio, a low/high band (factor of two,
+        an HRMA choice),
         the blocked-area ratio, the amplitude assumed, and an ``'approximate'``
         confidence flag.
         """
@@ -420,8 +447,9 @@ class CylindricalTankSlosh:
         """Recommend a ring-baffle width to reach a target damping ratio.
 
         Inverts Eq. (4) for the blocked-area ratio, then the radial width.
-        The default target (1% of critical) is a common slosh-stability goal
-        (NASA SP-8009).  Result is ``'approximate'``.
+        The default target (1% of critical) is an HRMA default; no source
+        value is claimed for it (it is not taken from SP-8009).  Result is
+        ``'approximate'``.
 
         ``amplitude_ratio`` (eta/R) must match the value used when evaluating
         :meth:`baffle_damping`; the correlation scales as sqrt(eta/R), so an

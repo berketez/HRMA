@@ -29,7 +29,12 @@ KOK = Path(__file__).resolve().parent.parent
 
 
 def _band(kombin='n2o_htpb'):
-    return ValidationSystem().performance_limits['of_ratio'][kombin]
+    # V306/HİBRİT-SAYI (M-HIBRIT-23): bandın tek kaynağı doğrulayıcının
+    # tablosundan ``hybrid_of_band``a taşındı (sayılar aynen); optimum
+    # araması ve doğrulayıcı aynı bandı okur.
+    from hrma.engines.hybrid_rocket_engine import hybrid_of_band
+    ox, _, yakit = kombin.partition('_')
+    return hybrid_of_band(ox, yakit)['band']
 
 
 def _sayfa_varsayilani():

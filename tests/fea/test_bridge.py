@@ -235,14 +235,21 @@ def test_sivi_uctan_uca_yapisal(sivi_motor):
 
 
 def test_kati_uctan_uca_yapisal(kati_motor):
-    out = run_structural_from_motor(kati_motor, **KUCUK_MESH)
+    # V306/KATI-MODEL (M-KATI-10): katıda ürün akışı artık kasa silindirini ağa koyar; bu sadakat denetimi yalnız-lüle konturunda ölçülmüştü, o geometri köprünün beyanlı kipiyle (include_chamber=False) korunur. Kasa silindirli ürün yolunun bekçisi: tests/test_v306_kati_model.py::TestMKati10YapisalAg.
+    out = run_structural_from_motor(kati_motor, include_chamber=False,
+                                    **KUCUK_MESH)
     cidar_mm = (kati_motor['structural_analysis']['case_analysis']
                 ['wall_thickness_mm'])
     _kosuyu_dogrula(out, kati_motor, cidar_mm, 'solid')
-    # Katı üst düzeyde kasa boyu yayımlamaz — uzantı OLMAMALI ve bu
-    # sessizce değil beyanla atlanmalı.
     assert out['inputs']['chamber_extension_m'] is None
-    assert 'eklenmedi' in out['inputs']['_basis']['kamara_uzantisi']['beyan']
+    assert 'istenmedi' in out['inputs']['_basis']['kamara_uzantisi']['beyan']
+    # Ürün akışı (varsayılan): kasa silindiri CAD'in kasa iç çapında ve
+    # lüle CAD'in örneklediği konturla (motor_geometry).
+    from hrma.fea.bridge import extract_structural_inputs
+    g = extract_structural_inputs(kati_motor)
+    assert g['chamber_extension_m'] is not None
+    assert float(g['contour'][0, 1]) == pytest.approx(
+        kati_motor['motor_geometry']['chamber_diameter'] / 2.0, rel=1e-12)
 
 
 def test_kati_akma_cozucunun_degeri(kati_motor):

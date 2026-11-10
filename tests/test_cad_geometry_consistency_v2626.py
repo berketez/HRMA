@@ -425,14 +425,39 @@ class TestNozzleMassUsesSelectedMaterial:
         # (t=7,79 mm ölçüldü) kütleyi %7,7 eksik verir — yani beklenen değer
         # ÇİZİLEN katıya ait değildi. Bu sınıfın konusu yoğunluk seçimi
         # olduğu için ölçüt katının kendi geometrisine hizalandı.
-        volume = 0.0
-        for (z0, r0), (z1, r1) in zip(points[:-1], points[1:]):
-            r_mid = (r0 + r1) / 2000.0
-            volume += (math.pi * ((r_mid + wall_m) ** 2 - r_mid ** 2)
-                       * abs((z1 - z0) / 1000.0))
-        assert mass == pytest.approx(volume * density, rel=1e-9), (
+        def _halka(t_m):
+            v = 0.0
+            for (z0, r0), (z1, r1) in zip(points[:-1], points[1:]):
+                r_mid = (r0 + r1) / 2000.0
+                v += (math.pi * ((r_mid + t_m) ** 2 - r_mid ** 2)
+                      * abs((z1 - z0) / 1000.0))
+            return v
+
+        # V306/HİBRİT-KÜTLE (kalem 1): grafit basınç kabuğu değil boğaz
+        # EKİDİR (V306/HİBRİT-MODEL M-HIBRIT-22, Sutton & Biblarz Böl. 15):
+        # çizilen cidar = ek (seçilen malzeme) + yapısal gövde (kamara
+        # malzemesi). Beklenen kütle iki halkanın kendi yoğunluklarıyla
+        # toplamıdır; EK seçilen malzemenin yoğunluğunu taşımak ZORUNDADIR.
+        # Bu testin önceki hâli tek malzeme varsayıyordu (grafit × yığın
+        # hacim) ve M-HIBRIT-22'den beri kırmızıydı (rc.0 :433).
+        yapim = (motor.get('nozzle_geometry') or {}).get('nozzle_construction')
+        if isinstance(yapim, dict) and yapim.get('type') == \
+                'insert_plus_structural_housing':
+            ek, gov = yapim['insert'], yapim['housing']
+            assert ek['density_kg_m3'] == density, (
+                f'{material} eki seçilen malzemenin yoğunluğunu taşımıyor')
+            t_ek = ek['thickness_mm'] / 1000.0
+            t_top = t_ek + gov['thickness_mm'] / 1000.0
+            assert t_top == pytest.approx(wall_m, rel=1e-12), (
+                'çizilen cidar ek + gövde değil')
+            beklenen = (_halka(t_ek) * density
+                        + (_halka(t_top) - _halka(t_ek))
+                        * gov['density_kg_m3'])
+        else:
+            beklenen = _halka(wall_m) * density
+        assert mass == pytest.approx(beklenen, rel=1e-9), (
             f'{material} lüle kütlesi seçilen malzemenin yoğunluğundan '
-            f'gelmiyor (beklenen {volume * density:.5f} kg, gelen {mass:.5f})')
+            f'gelmiyor (beklenen {beklenen:.5f} kg, gelen {mass:.5f})')
 
     def test_solver_declares_when_it_falls_back_to_steel(self, run):
         """Malzeme verilmediğinde SESSİZ çelik düşüşü olmamalı; beyan edilmeli."""
@@ -459,7 +484,26 @@ class TestNozzleMassUsesSelectedMaterial:
         mass = cad['performance_summary']['mass_breakdown']['nozzle_mass']
         meshes = dict(cad['assembly_meshes'])
         from hrma.data.materials_db import get_material
-        density = get_material(motor['nozzle_material'])['density']
+        # V306/HİBRİT-KÜTLE (kalem 1): çizilen katının YAYIMLANAN yoğunluğu
+        # (``material_summary.nozzle_mass_density_kg_m3``) × çizilen hacim =
+        # yayımlanan lüle kütlesi. Ek + gövde lülesinde katı iki malzemedir:
+        # yayımlanan yoğunluk katının kendi kütle/hacim oranıdır ve seçilen
+        # ek malzemesinin yoğunluğu DEĞİLDİR (önceki hâli 1800 × hacim =
+        # 0,14352 kg ⟷ 0,42420 kg ile kırmızıydı: rc.0 :464).
+        ms = cad['performance_summary']['material_summary']
+        density = ms['nozzle_mass_density_kg_m3']
+        yapim = (motor.get('nozzle_geometry') or {}).get('nozzle_construction')
+        if isinstance(yapim, dict) and yapim.get('type') == \
+                'insert_plus_structural_housing':
+            bilesen = ms['nozzle_mass_components']
+            assert (bilesen['insert']['mass_kg'] + bilesen['housing']['mass_kg']
+                    == pytest.approx(mass, rel=1e-12))
+            assert density == pytest.approx(
+                mass / bilesen['drawn_volume_m3'], rel=1e-12)
+            assert bilesen['insert']['density_kg_m3'] == get_material(
+                motor['nozzle_material'])['density']
+        else:
+            assert density == get_material(motor['nozzle_material'])['density']
         # Revolve fasetlemesi hacimde ~%1 sapma bırakır; oran 1'e yakın olmalı
         assert mass == pytest.approx(meshes['Nozzle'].volume * density,
                                      rel=0.05), (

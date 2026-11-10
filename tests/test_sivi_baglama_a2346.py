@@ -21,7 +21,7 @@ Bu dosya üç şeyi kilitler:
 1. **Bağlama gerçek** — bloklar var ve analizör GERÇEKTEN koşmuş
    (status alanları), girdileri motorun KENDİ çözümüyle birebir aynı.
 2. **Fizik doğru** — frekans/Joukowsky/kopma değerleri buradaki bağımsız el
-   hesabıyla yeniden üretilir (SP-106 Eq. 2.4; dP = rho*a*dv; ince cidar
+   hesabıyla yeniden üretilir (Dodge 2000, Eq. (1.40); dP = rho*a*dv; ince cidar
    plastik limit). Bağlama girdileri yanlış birimle geçirilirse bu
    karşılaştırmalar kırılır.
 3. **Uydurma yok** — kullanıcı girdisi verilmediğinde cıvata birleşimi
@@ -132,7 +132,7 @@ class TestA2Slosh:
 
     @pytest.mark.parametrize('tank_adi', ['oxidizer_tank', 'fuel_tank'])
     def test_frekans_el_hesabiyla_ayni(self, wired, tank_adi):
-        """SP-106 Eq. 2.4: omega^2 = (lam*g/R)*tanh(lam*h/R) — bağımsız el
+        """Dodge 2000, Eq. (1.40): omega^2 = (lam*g/R)*tanh(lam*h/R) — bağımsız el
         hesabı bloğun kendi girdileriyle aynı frekansı üretmeli. Bağlama
         yarıçapı/yüksekliği yanlış birimle geçirirse burası kırılır."""
         blok = _tank(wired[1], tank_adi)['slosh']
@@ -336,7 +336,7 @@ class TestA6WaterHammer:
             blok = wh[hat]
             assert blok['status'] == 'NOT_MODELLED'
             assert 'feed_line_wall_thickness' in blok['required_inputs']
-            assert 'not invented' in blok['basis']
+            assert 'not assumed' in blok['basis']
             sayisal = [k for k, v in blok.items()
                        if isinstance(v, (int, float)) and k != 'status']
             assert not sayisal, f'NOT_MODELLED blokta sayı var: {sayisal}'

@@ -112,8 +112,9 @@ ORNEK_H1 = {
 #: Artık plan devrenindir (``design_like_doublet``). Bu dosyanın ölçtüğü
 #: plaka KIRPMA yolu yalnız ΔP AÇIK ezmesinde koşar (ALAN ve ΔP AYRILMAZ);
 #: o yolu ESKİ sayılarla ölçmek için ezme devrenin kendi ΔP'siyle yapılır
-#: (Ornek-H1: P_sat(293,15 K) − Pc = 30,5433585 bar, aşağıdaki çapa testiyle
-#: aynı sayı). Beklentiler değişmedi; değişen yalnız yolun seçimidir.
+#: (Ornek-H1: P_sat(293,15 K) − Pc = 30,5433585 bar — V306/SAYI'dan önceki
+#: tablo P_sat'ıyla; devrenin bugünkü ΔP'si 30,5250928. Sayı burada bir ΔP
+#: EZMESİ girdisidir, beklentiler bu girdiyle tutarlı kalır.)
 H1_DEVRE_DP_BAR = 30.5433585
 KANON_DISI_DP = {'pressure_drop': H1_DEVRE_DP_BAR,
                  'pressure_drop_source': 'user'}
@@ -513,18 +514,23 @@ def test_f10_sayi_degismedi_capasi(h1_plakali):
     # v3.0.1 port kulvarı (20 Eki): grain dış çapı = son port (eski 1,5·D_son);
     # kamara küçüldü -> gerçekleşen L* ↓ -> kinetik verim ↓ -> Isp −%0,17 -> ṁ ↑
     # -> delik çapı +%0,08. Pencere/bant hükmü DEĞİŞMEDİ, yalnız ölçüm çapası.
-    assert idd['orifice_diameter_mm'] == pytest.approx(2.124505645947217, rel=1e-9)
-    assert idd['injection_pressure_drop_bar'] == pytest.approx(30.5433585, rel=1e-7)
+    # V306/SAYI (PANEL-SAYI DEVİR 1, 2 Kas): devre P_sat'ı tank modeliyle
+    # AYNI kaynaktan (CoolProp EOS) okur — tablo ara değeri 50,5433585 ⟷
+    # EOS 50,5250928 bar. ΔP −%0,060, delik çapı +%0,022, plaka SF 1,192 →
+    # 1,193, η_lig 0,9232 → 0,9231, eğilme 201,292 → 201,176 MPa
+    # (docs/scofield/raw/OH/V306/sayi/RAPOR.md Kalem 4). Ölçüm çapası.
+    assert idd['orifice_diameter_mm'] == pytest.approx(2.1249645540942517, rel=1e-9)
+    assert idd['injection_pressure_drop_bar'] == pytest.approx(30.52509283127987, rel=1e-7)
     inj = h1_plakali['injector']
     assert (inj['n_holes'], inj['hole_diameter']) == (
-        3, pytest.approx(2.124505645947217, rel=1e-9))
+        3, pytest.approx(2.1249645540942517, rel=1e-9))
     ps = inj['plate_structural']
     # v3.0.1 port kulvarı (20 Eki): plaka çapı = kamara iç çapı 80,68 -> 54,04 mm
     # (grain dış çapı artık son port). Eğilme gerilmesi ~D²/η ile ölçeklenir:
     # 440,114·(54,04/80,68)²·(0,9488/0,9232) ≈ 202,9 MPa (ölçülen 201,292;
     # fark yuvarlanmış çaplardan). Eski çapa (0,545, 0,9488, 440,114 MPa).
-    assert (ps['safety_factor'], ps['ligament_efficiency']) == (1.192, 0.9232)
-    assert ps['bending_stress_MPa'] == pytest.approx(201.292, abs=1e-3)
+    assert (ps['safety_factor'], ps['ligament_efficiency']) == (1.193, 0.9231)
+    assert ps['bending_stress_MPa'] == pytest.approx(201.176, abs=1e-3)
 
 
 # ===========================================================================
@@ -684,7 +690,8 @@ def test_f10_t9_carpismali_tek_cift_istegi_bantta_karsilanir(carpismali):
     # olduğu gibi karşılanır (1 çift) ve bant hükmü kullanıcıya iner
     # (devre uyarısı ekran bloğuna taşınır; ana model, çapraz kırılma).
     assert d > ust
-    assert d == pytest.approx(2.6020, abs=5e-4)
+    # V306/SAYI: tek N₂O doyma kaynağıyla 2,60254 mm (önce 2,6020; Kalem 4).
+    assert d == pytest.approx(2.6025, abs=5e-4)
     kodlar = [w.get('code') for w in inj['warnings'] if isinstance(w, dict)]
     assert 'warn.injector.fixed_n_outside_manufacturing_band' in kodlar, (
         'bant dışı tek çift planı sessiz yayımlanıyor: %r' % inj['warnings'])
@@ -1071,7 +1078,9 @@ def test_yb04_tank_pressure_devreye_girmiyor_beyani_h1_de(h1):
     idd = h1['motor']['injector_design']
     assert h1['motor']['tank_pressure'] == 50.0
     assert idd['feed_pressure_source'] == 'n2o_saturation_at_tank_temperature'
-    assert idd['feed_pressure_bar'] == pytest.approx(50.5433585, rel=1e-7)
+    # V306/SAYI (PANEL-SAYI DEVİR 1): devre P_sat'ı = tank modelinin P_sat'ı.
+    from hrma.analysis.tank_blowdown import N2OSaturation
+    assert idd['feed_pressure_bar'] == N2OSaturation().psat(293.15) / 1e5
     assert idd['feed_pressure_bar'] != h1['motor']['tank_pressure']
 
 
@@ -1560,9 +1569,9 @@ _YOL_SIVI_YAKIT = ('injection_system', 'injector_design_detail',
 #: çağrısı). (ad, uç, yük, devre yolu, n, ölçülen d [mm], 'yakın' uyarısı?)
 S6_YAKINLIK_ARAMA = (
     ('H20', '/calculate', dict(ORNEK_H1, thrust=20.0), _YOL_CALCULATE_OX,
-     1, 0.5243, True),  # v3.0.1 port kulvarı: 0,5240 -> 0,5243
+     1, 0.5244, True),  # port kulvarı 0,5240 -> 0,5243; V306/SAYI tek P_sat -> 0,5244
     ('H24', '/calculate', dict(ORNEK_H1, thrust=24.0), _YOL_CALCULATE_OX,
-     1, 0.5743, False),  # v3.0.1 port kulvarı: 0,5740 -> 0,5743
+     1, 0.5744, False),  # port kulvarı 0,5740 -> 0,5743; V306/SAYI tek P_sat -> 0,5744
     ('api_0.005', '/api/injector-design', dict(_API_HIBRIT_DUS, mdot_ox=0.005),
      _YOL_API_OX, 1, 0.5198, True),
     ('api_0.00557', '/api/injector-design',
@@ -1581,12 +1590,19 @@ S6_YAKINLIK_SABIT_N = (
     ('api_n2_0.012', '/api/injector-design',
      dict(_API_HIBRIT_DUS, mdot_ox=0.012, n_orifices_ox=2), _YOL_API_OX,
      2, 0.5694, False),
+    # V306/SIVI-ONARIM kalem 6: iki sıvı vakasının çapı 964ce24b1
+    # (SIVI-DEFTER K5 debi defteri) ile kaydı — gaz jeneratörlü çevrimde ana
+    # enjektör yalnız ana oda debisini taşır (türbin debisi jeneratörden):
+    # yakıt devresi 0,10677 -> 0,10629 kg/s (250 N), çap 0,51806 -> 0,51690
+    # mm; 300 N 0,56714 -> 0,56588 mm. Uyarı KODLARI aynı (250 N pencerede,
+    # 300 N dışında); ölçüm git archive kopyalarında
+    # (docs/scofield/raw/OH/V306/sivi-onarim/kalem6_delik.json).
     ('sivi_250N_e2', '/calculate_liquid',
      dict(_SIVI_S6, thrust=250.0, injector_elements=2), _YOL_SIVI_YAKIT,
-     2, 0.5181, True),
+     2, 0.5169, True),
     ('sivi_300N_e2', '/calculate_liquid',
      dict(_SIVI_S6, thrust=300.0, injector_elements=2), _YOL_SIVI_YAKIT,
-     2, 0.5671, False),
+     2, 0.5659, False),
 )
 
 _YAKIN_KODU = 'warn.injector.orifice_d_near_manufacturing_min'
@@ -1772,7 +1788,12 @@ S7_PLANLAR = (
     ('imp_m0.02_e8', 'impingement', 0.02, 8, True, True),
     ('imp_m0.02_oto', 'impingement', 0.02, 0, False, False),
     ('sh_m0.5_n4', 'showerhead', 0.5, 4, True, True),
-    ('sh_m0.01_oto', 'showerhead', 0.01, 0, True, True),
+    # V306/HİBRİT-NOZUL kalem 2: plakasız otomatik plan artık devre
+    # çözücüsünün kuralıyla (bandı tutan EN AZ delik) — 1 × Ø0,807 mm, bant
+    # içinde, kırpma yok, hedef debi tam. Eski beklenti (kırpıldı, hedef
+    # tutmuyor) kazanılmamış 3,0 mm plakalı amaç işlevinin 4 delik tabanının
+    # çıktısıydı: 4 × Ø0,40 mm bant altı → Ø0,5'e kırpma → alan fazlası.
+    ('sh_m0.01_oto', 'showerhead', 0.01, 0, False, False),
     ('sh_m0.5_n150', 'showerhead', 0.5, 150, True, False),
     ('sh_m0.5_oto', 'showerhead', 0.5, 0, False, False),
 )
@@ -1878,7 +1899,7 @@ S7_CALCULATE_KARSILANMIYOR = (
 S7_CALCULATE_KARSILANIYOR = ((200.0, 8), (100.0, 0))
 
 
-#: Ornek-H1 devresinin ΔP'si [bar] (P_sat(293,15 K) − Pc; f10 çapası).
+#: ΔP ezme girdisi [bar] (V306/SAYI öncesi devre ΔP'si; bkz. H1_DEVRE_DP_BAR).
 ORNEK_H1_DEVRE_DP_BAR = 30.5433585
 
 
@@ -1958,7 +1979,7 @@ def test_s7_m2_uyari_metni_iki_dilde_esigi_beyan_eder():
 #: Ş6-3 kenar vakaları: ölçülen plan ve Sunum 2 satırındaki 4 ondalıklı çap.
 S7_KENAR = (
     ('H22', '/calculate', dict(ORNEK_H1, thrust=22.0), _YOL_CALCULATE_OX,
-     0.5499),  # v3.0.1 port kulvarı: 0,5496 -> 0,5499 (pencere içinde kalır)
+     0.54998),  # port kulvarı 0,5496 -> 0,5499; V306/SAYI tek P_sat -> 0,54998 (pencere içinde, kenara 0,00002)
     ('api_0.00557', '/api/injector-design',
      dict(_API_HIBRIT_DUS, mdot_ox=0.00557), _YOL_API_OX, 0.5486),
 )
@@ -2369,7 +2390,15 @@ def test_t9_d32_isaretleme_islevi_fail_closed():
               'unit': 'bar', 'message': 'm'}]
     iyi = {'feed_pressure_source': _N2O_DOYMA, 'feed_pressure_bar': 50.5}
     assert _n2o_doyma_tank_kunyesi(kayit, iyi, 'user override')[0]['applied'] is False
-    for blok in (None, {}, dict(iyi, feed_pressure_source='chamber_pressure_plus_design_pressure_drop'),
+    # V306/SAYI (NR-6): tasarım ΔP kipi (LOX/H₂O₂) de tank basıncını
+    # okumaz — kayıt aynı biçimde "kullanılmadı" işaretlenir (eski bekçi bu
+    # kipte kaydın AYNEN kalmasını, yani NR-6 kusurunu kilitliyordu).
+    tasarim = dict(iyi, feed_pressure_source='chamber_pressure_plus_design_pressure_drop',
+                   feed_pressure_bar=36.0)
+    isaretli = _n2o_doyma_tank_kunyesi(kayit, tasarim, 'user override')[0]
+    assert isaretli['applied'] is False and isaretli['used_by_model'] == 36.0
+    assert isaretli['used_by_model_source'] == tasarim['feed_pressure_source']
+    for blok in (None, {}, dict(iyi, feed_pressure_source='user_tank_pressure'),
                  dict(iyi, feed_pressure_bar=float('nan')),
                  dict(iyi, feed_pressure_bar=float('inf')),
                  dict(iyi, feed_pressure_bar=-1.0),

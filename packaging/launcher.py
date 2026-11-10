@@ -295,6 +295,227 @@ SPLASH_HTML = """<!DOCTYPE html>
 </html>"""
 
 
+# ---------------------------------------------------------------------------
+# Güncelleme kilidi (V306/GÜNCELLEME kalem 1-2): güncelleme sürerken eski
+# sürüm AÇILMAZ, "güncelleme sürüyor" penceresi gösterilir.
+#
+# KUSUR (15 Eki 2026): güncelleme ~4 dk sürerken kullanıcı HRMA'yı açınca
+# hedefte hâlâ eski paket durduğu için ESKİ sürüm açıldı ("güncelleme
+# bozuk"). Kilit sözleşmesi ve bayatlık kuralı tek yerde:
+# hrma/utils/self_install.py (UPDATE_LOCK_*). Bu bölüm FAIL-SAFE'tir: kilit
+# okunamazsa, modül yüklenemezse ya da kilit bayatsa uygulama NORMAL açılır.
+# ---------------------------------------------------------------------------
+
+#: Bekleme penceresinin kilidi yoklama aralığı (s) — HRMA SEÇİMİ. Betik
+#: "eski sürüm kapatılıyor" aşamasına geçtiğinde pencere en geç bu kadar
+#: sonra kapanır; betik o aşamada pencerenin kapanmasını bekler.
+GUNCELLEME_YOKLAMA_S = 0.5
+
+#: Bekleme penceresi boyutu (px, başlık çubuğu dahil) — HRMA SEÇİMİ; içerik
+#: bu boyutlarda kaydırmasız ve yazı çakışmasız ölçüldü (TR/EN 520×332 iç
+#: alan, iki dil 520×432 iç alan; ekran/bekleme_olcum.json).
+BEKLEME_GENISLIK = 520
+BEKLEME_YUKSEKLIK_TEK_DIL = 360
+BEKLEME_YUKSEKLIK_IKI_DIL = 460
+
+BEKLEME_HTML = """<!DOCTYPE html>
+<html lang="__LANG__">
+<head>
+<meta charset="utf-8">
+<title>HRMA</title>
+<style>
+  html, body { height: 100%; margin: 0; }
+  html { background: #04070d; }
+  body {
+    display: flex; align-items: center; justify-content: center;
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    color: #cfe8f2;
+    background: linear-gradient(165deg, #04070d 0%, #0a1322 60%, #070d18 100%);
+  }
+  .kutu { width: 100%; max-width: 460px; padding: 22px 26px; box-sizing: border-box; }
+  .logo { font-size: 22px; font-weight: 800; letter-spacing: 5px; color: #00e5ff;
+          margin-bottom: 10px; }
+  .baslik { font-size: 15px; font-weight: 600; color: #eaf7fb; margin-bottom: 14px;
+            white-space: pre-line; }
+  .adim { font-size: 14px; color: #eaf7fb; margin-bottom: 8px; white-space: pre-line; }
+  .ilerleme { font-size: 13px; color: #cfe8f2; margin-bottom: 6px; white-space: pre-line; }
+  .cubuk { height: 6px; border-radius: 3px; background: rgba(0,229,255,0.15);
+           margin-bottom: 10px; overflow: hidden; display: none; }
+  .dolu { height: 100%; width: 0; background: #00e5ff; }
+  .sure { font-size: 12px; color: #7d97a5; margin-bottom: 14px; white-space: pre-line; }
+  .ipucu { font-size: 12px; color: #9fb6c2; line-height: 1.5; margin-bottom: 8px;
+           white-space: pre-line; }
+  .gunluk { font-size: 12px; color: #5f7a88; white-space: pre-line; word-break: break-all; }
+</style>
+</head>
+<body>
+  <div class="kutu">
+    <div class="logo">HRMA</div>
+    <div class="baslik" id="baslik"></div>
+    <div class="adim" id="adim"></div>
+    <div class="ilerleme" id="ilerleme"></div>
+    <div class="cubuk" id="cubuk"><div class="dolu" id="dolu"></div></div>
+    <div class="sure" id="sure"></div>
+    <div class="ipucu" id="ipucu"></div>
+    <div class="gunluk" id="gunluk"></div>
+  </div>
+<script>
+  // Yalnız sunucunun (launcher) okuduğu GERÇEK kilit verisini basar:
+  // zamanlayıcı yok, çubuk yalnız betiğin du ile ölçtüğü kopya oranıdır.
+  function yaz(id, metin) {
+    var el = document.getElementById(id);
+    el.textContent = metin || '';
+    el.style.display = metin ? 'block' : 'none';
+  }
+  function hrmaGuncellemeDurumu(v) {
+    yaz('baslik', v.heading);
+    yaz('adim', v.step);
+    yaz('ilerleme', v.progress);
+    yaz('sure', v.elapsed);
+    yaz('ipucu', v.hint);
+    yaz('gunluk', v.log);
+    var c = document.getElementById('cubuk');
+    if (typeof v.fraction === 'number' && isFinite(v.fraction)) {
+      c.style.display = 'block';
+      document.getElementById('dolu').style.width =
+        (v.fraction * 100).toFixed(1) + '%';
+    } else {
+      c.style.display = 'none';
+    }
+  }
+  hrmaGuncellemeDurumu(__VIEW__);
+</script>
+</body>
+</html>"""
+
+
+def _guncelleme_kilidi_karari():
+    """Açılışın kilit kararı: 'normal' | 'wait' | 'exit'. FAIL-SAFE.
+
+    'wait': güncelleme sürüyor → bekleme penceresi, sunucu BAŞLATILMAZ.
+    'exit': betik eski sürümü kapatıyor → hiçbir şey açmadan çık (yeni
+            sürümü betik açar).
+    Bayat kilit kaldırılır, günlüğe yazılır ve 'normal' döner: kilit
+    uygulamayı asla kalıcı olarak açılmaz hâle getiremez.
+    """
+    if sys.platform != "darwin":
+        return "normal"
+    try:
+        from hrma.utils import self_install
+        karar = self_install.update_lock_decision()
+        if karar["decision"] == "stale":
+            self_install.remove_stale_update_lock(karar["reason"])
+            print("  Stale update lock ignored and removed: %s" % karar["reason"])
+            return "normal"
+        if karar["decision"] in ("wait", "exit"):
+            print("  Update in progress (%s) — %s." % (
+                karar["reason"],
+                "showing the update window" if karar["decision"] == "wait"
+                else "exiting, the updater opens the new version"))
+            return karar["decision"]
+    except Exception:
+        print("  Update lock could not be checked — starting normally:")
+        traceback.print_exc()
+    return "normal"
+
+
+def _guncelleme_bitene_kadar_bekle(aralik_s=GUNCELLEME_YOKLAMA_S,
+                                   gozlemci=None, durdur=None):
+    """Kilit 'wait' aşamasından çıkana kadar bekler; bitiş nedenini döndürür.
+
+    ``gozlemci(lock)`` her yoklamada gerçek kilit verisiyle çağrılır
+    (bekleme penceresi bunu ekrana basar). Kilit kalkarsa, bayatlarsa ya da
+    aşama değişirse döner; bayat kilidi kaldırır ve günlüğe yazar.
+    """
+    from hrma.utils import self_install
+    while True:
+        if durdur is not None and durdur.is_set():
+            return "window closed"
+        try:
+            karar = self_install.update_lock_decision()
+        except Exception as exc:
+            return "lock not readable (%s)" % exc
+        d = karar["decision"]
+        if d == "none":
+            return "lock removed"
+        if d == "stale":
+            self_install.remove_stale_update_lock(karar["reason"])
+            return "lock stale (%s)" % karar["reason"]
+        if d != "wait":
+            return "phase: %s" % d
+        if gozlemci is not None:
+            try:
+                gozlemci(karar["lock"])
+            except Exception:
+                pass
+        time.sleep(aralik_s)
+
+
+def _guncelleme_bildirimi(metin):
+    """Pencere açılamazsa tek sistem bildirimi (metin kullanıcının dilinde)."""
+    try:
+        subprocess.run(
+            ["osascript", "-e", "on run argv",
+             "-e", 'display notification (item 1 of argv) with title "HRMA"',
+             "-e", "end run", metin],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=10)
+    except Exception:
+        pass
+
+
+def _guncelleme_bekleme_penceresi():
+    """Güncelleme bitene kadar küçük "güncelleme sürüyor" penceresi.
+
+    Pencere yalnız betiğin kilide yazdığı GERÇEK adımı ve ölçülen kopya
+    miktarını gösterir (sahte ilerleme yok). Aşama değişince ya da kilit
+    kalkınca kendiliğinden kapanır; yeni sürümü betik açar.
+    """
+    from hrma.utils import self_install
+    karar = self_install.update_lock_decision()
+    gorunum = self_install.update_waiting_view(karar.get("lock"))
+    if os.environ.get("HRMA_NO_WINDOW"):
+        print("  HRMA_NO_WINDOW=1 — update window suppressed, waiting.")
+        print("  Update wait ended: %s" % _guncelleme_bitene_kadar_bekle())
+        return
+    try:
+        import webview
+    except Exception as exc:
+        print("  pywebview unavailable (%s) — notification only." % exc)
+        _guncelleme_bildirimi(gorunum["notify_wait"])
+        return
+    _macos_app_identity(_hrma_version())
+    html = BEKLEME_HTML.replace(
+        "__LANG__", gorunum.get("lang") or "en").replace(
+        "__VIEW__", json.dumps(gorunum, ensure_ascii=False))
+    # İki dilli metin (dil bilinmiyor) daha uzun: pencere yüksekliği ona göre
+    # (ölçüm: docs/scofield/raw/OH/V306/guncelleme/ekran/bekleme_olcum.json).
+    pencere = webview.create_window(
+        gorunum["title"], html=html, width=BEKLEME_GENISLIK,
+        height=BEKLEME_YUKSEKLIK_TEK_DIL if gorunum.get("lang")
+        else BEKLEME_YUKSEKLIK_IKI_DIL,
+        resizable=False, background_color="#04070d")
+
+    def _izle():
+        def _bas(lock):
+            v = self_install.update_waiting_view(lock)
+            pencere.evaluate_js("hrmaGuncellemeDurumu(%s)"
+                                % json.dumps(v, ensure_ascii=False))
+        son = _guncelleme_bitene_kadar_bekle(gozlemci=_bas)
+        print("  Update wait ended: %s" % son)
+        try:
+            pencere.destroy()
+        except Exception:
+            sys.stdout.flush()
+            os._exit(0)
+
+    try:
+        webview.start(_izle)
+    except Exception:
+        print("  Update window failed — notification only:")
+        traceback.print_exc()
+        _guncelleme_bildirimi(gorunum["notify_wait"])
+
+
 def _shim_app(environ, start_response):
     """Gerçek uygulama yüklenene kadar splash + /health servis eden WSGI shim."""
     path = environ.get("PATH_INFO", "/")
@@ -1171,6 +1392,16 @@ def main():
     print("  HRMA - Rocket Motor Analysis"
           + (" v" + _app_state["version"] if _app_state["version"] else ""))
     print("=" * 62)
+
+    # Güncelleme sürüyorsa eski sürüm açılmaz (V306/GÜNCELLEME kalem 1).
+    # Sunucu/port seçiminden ÖNCE: bekleyen süreç hiçbir portu tutmaz.
+    guncelleme = _guncelleme_kilidi_karari()
+    if guncelleme in ("wait", "exit"):
+        if guncelleme == "wait":
+            _guncelleme_bekleme_penceresi()
+        print("  Exiting; the updater opens the new version.")
+        sys.stdout.flush()
+        os._exit(0)
 
     port, already_running = _pick_port()
     url = "http://127.0.0.1:%d" % port

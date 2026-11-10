@@ -506,8 +506,15 @@ SIXDOF_GOVDE = {'dry_mass': 20.0, 'propellant_mass': 10.0,
                 'thrust': 3000.0, 'burn_time': 5.0}
 #: ``series`` bloğunun bugünkü anahtar kümesi (D25 OH-D24-16 ``altitude_datum``
 #: dâhil). Künye bu kümeye GİRMEZ.
+#: V306/UÇUŞ-2 (3 Kas): ``dynamic_pressure_pa`` BİLEREK eklendi — α hüküm
+#: penceresinin dinamik basınç koşulu (M-KATI-25); panel grafiği aynı
+#: pencereyi bu seriden uygular (sixdof_panel.js ``_buildAlphaFigure``).
 SIXDOF_SERIES_ANAHTARLARI = {'time', 'altitude', 'north', 'east', 'speed',
-                             'mach', 'alpha_deg', 'altitude_datum'}
+                             'mach', 'alpha_deg', 'altitude_datum',
+                             'dynamic_pressure_pa'}
+#: V306/UÇUŞ-2: 'uzun' koşunun YENİ çapası (6-DOF yanma sonu kırılma
+#: noktasından sonra) — ölçüm betiği aynı dizinde.
+KANIT_UCUS2 = 'docs/scofield/raw/OH/V306/ucus2'
 SIXDOF_SAMPLING_ADLARI = {'decimated', 'n_total', 'n_returned', '_basis'}
 
 
@@ -584,14 +591,33 @@ class TestB2R4SeriesSampling:
 
     def test_seri_once_sonra_bit_ayni(self, sixdof):
         """Kanıttaki ÖNCE ölçümünün (dal ``9ea1dfc4``) seri sha256'ları ile
-        bugünkü yanıt eşit."""
+        bugünkü yanıt eşit.
+
+        V306/UÇUŞ-2 (3 Kas) — İKİ ÇAPA. 6-DOF entegrasyonu yanma sonunda
+        ikiye bölündü (itki süreksizliği; ölçüm ve gerekçe
+        ``docs/scofield/raw/OH/V306/ucus2/olcum_kirilma.json``) ve seriye
+        ``dynamic_pressure_pa`` eklendi.
+          * 'kisa' (t_max = 1 s < t_burn = 5 s): kırılma noktasına hiç
+            varılmaz, çözücü yolu DEĞİŞMEDİ — eski anahtarların sha256'ları
+            D37 ÖNCE ölçümüyle BİT-AYNI kalmalı (yeni anahtar eskileri
+            bozmaz).
+          * 'uzun': değerler bilerek değişti; çapa UÇUŞ-2'nin ölçümüdür
+            (``b2r4_sonra_ucus2.json``, betik ``betik/olcum_b2r4.py``).
+        """
         yol = kanit_gerekli(os.path.join(KOK, KANIT, 'once', 'b2r4.json'))
         once = json.load(open(yol, encoding='utf-8'))['sixdof']
-        for ad, anahtar in (('uzun', 'uzun'), ('kisa', 'kisa_t_max_1s')):
-            j, _res = sixdof[ad]
-            simdi = {k: hashlib.sha256(json.dumps(v).encode()).hexdigest()
-                     for k, v in sorted(j['series'].items())}
-            assert simdi == once[anahtar]['series_sha256'], ad
+        j, _res = sixdof['kisa']
+        eski = once['kisa_t_max_1s']['series_sha256']
+        simdi = {k: hashlib.sha256(json.dumps(v).encode()).hexdigest()
+                 for k, v in sorted(j['series'].items()) if k in eski}
+        assert simdi == eski, 'kisa'
+        yol2 = kanit_gerekli(os.path.join(KOK, KANIT_UCUS2,
+                                          'b2r4_sonra_ucus2.json'))
+        yeni = json.load(open(yol2, encoding='utf-8'))['uzun']
+        j, _res = sixdof['uzun']
+        simdi = {k: hashlib.sha256(json.dumps(v).encode()).hexdigest()
+                 for k, v in sorted(j['series'].items())}
+        assert simdi == yeni['series_sha256'], 'uzun'
 
 
 # ===========================================================================

@@ -1,7 +1,7 @@
 # HRMA - Rocket Motor Analysis Suite
 
 [![tests](https://github.com/berketez/HRMA/actions/workflows/tests.yml/badge.svg)](https://github.com/berketez/HRMA/actions/workflows/tests.yml)
-[![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![license: GPL-3.0-or-later](https://img.shields.io/badge/license-GPL--3.0--or--later-blue.svg)](LICENSE)
 
 A comprehensive desktop tool for designing and analyzing hybrid, solid, and liquid rocket motors. Input your parameters, get optimized motor geometry, performance metrics, and an interactive 3D model of your motor built live from the solver output.
 
@@ -27,8 +27,8 @@ and you're done:
 
 | Platform | Direct download |
 |---|---|
-| **Windows 10/11** | [**HRMA-Setup-3.0.5.exe**](https://github.com/berketez/HRMA/releases/download/v3.0.5/HRMA-Setup-3.0.5.exe) (double-click, then Next → Next → Install) |
-| **macOS 11+ (Apple Silicon)** | [**HRMA-Setup-3.0.5-macOS.dmg**](https://github.com/berketez/HRMA/releases/download/v3.0.5/HRMA-Setup-3.0.5-macOS.dmg) (drag HRMA to Applications) |
+| **Windows 10/11** | [**HRMA-Setup-3.0.6.exe**](https://github.com/berketez/HRMA/releases/download/v3.0.6/HRMA-Setup-3.0.6.exe) (double-click, then Next → Next → Install) |
+| **macOS 11+ (Apple Silicon)** | [**HRMA-Setup-3.0.6-macOS.dmg**](https://github.com/berketez/HRMA/releases/download/v3.0.6/HRMA-Setup-3.0.6-macOS.dmg) (drag HRMA to Applications) |
 
 Everything is bundled (Python, all libraries, offline charts). HRMA opens in
 its own native window and notifies you automatically when a new version is
@@ -154,8 +154,8 @@ Download the latest installers from the
 
 | Platform | Installer | Notes |
 |---|---|---|
-| **Windows 10/11** | [`HRMA-Setup-3.0.5.exe`](https://github.com/berketez/HRMA/releases/download/v3.0.5/HRMA-Setup-3.0.5.exe) | English setup wizard (Next → Next → Install); per-user, desktop shortcut, no admin rights |
-| **macOS 11+ (Apple Silicon)** | [`HRMA-Setup-3.0.5-macOS.dmg`](https://github.com/berketez/HRMA/releases/download/v3.0.5/HRMA-Setup-3.0.5-macOS.dmg) | Drag & drop to Applications; right-click → Open on first launch |
+| **Windows 10/11** | [`HRMA-Setup-3.0.6.exe`](https://github.com/berketez/HRMA/releases/download/v3.0.6/HRMA-Setup-3.0.6.exe) | English setup wizard (Next → Next → Install); per-user, desktop shortcut, no admin rights |
+| **macOS 11+ (Apple Silicon)** | [`HRMA-Setup-3.0.6-macOS.dmg`](https://github.com/berketez/HRMA/releases/download/v3.0.6/HRMA-Setup-3.0.6-macOS.dmg) | Drag & drop to Applications; right-click → Open on first launch |
 
 Once installed, HRMA notifies you at startup when a new version is released
 and updates itself with one click.
@@ -251,7 +251,7 @@ HRMA/
 
 ## Version
 
-**HRMA v3.0.5**
+**HRMA v3.0.6**
 - Developed by: Berke Tezgocen
 - Idea & Testing: Ayberk Cem Aksoy
 - A preliminary-design and analysis tool for rocket propulsion
@@ -427,7 +427,15 @@ window with automatic updates.
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+HRMA is free software: you can redistribute it and/or modify it under the
+terms of the GNU General Public License as published by the Free Software
+Foundation, either version 3 of the License, or (at your option) any later
+version (`GPL-3.0-or-later`). See [LICENSE](LICENSE).
+
+Releases up to and including v3.0.5 were published under the MIT License and
+remain available under it. The macOS and Windows packages bundle RocketCEA
+(GPLv3), which HRMA imports in-process for the NASA CEA comparison; the
+package as a whole is therefore distributed under the GPL.
 
 ## Tests
 

@@ -167,6 +167,8 @@ console.log(JSON.stringify([once, sonra, bilinmeyen]));
     once, sonra, bilinmeyen = json.loads(p.stdout.strip().splitlines()[-1])
     assert once == '[invalid_input] X'
     assert sonra == '[geçersiz girdi] X'
-    assert bilinmeyen == '[baska_kod] X'
+    # V306/DİL-ORTAK: sözlükte olmayan kod ÇEVRİLMEZ (uydurma yok) ama ekranda
+    # alt çizgili ham anahtar yerine okunur biçimde basılır; ham kod ipucunda.
+    assert bilinmeyen == '[baska kod] X'
     hat = _oku(JS, 'i18n_charts.js')
     assert "'invalid_input': 'geçersiz girdi'" in hat

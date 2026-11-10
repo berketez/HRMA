@@ -751,19 +751,41 @@ class TestOHD2105IlkIstekGecikmesi:
     """
 
     def test_onbellek_IKINCI_istegi_sifirlar(self, hibrit_motor):
-        import time
+        """İkinci istek pahalı yüzey çözümüne GİRMEZ (önbellekten gelir).
+
+        V306 CI-SÜREÇ (4 Kas 2026): eski hâli iki isteğin DUVAR SAATİNİ
+        karşılaştırıyordu (``sureler[1] < sureler[0]``). Önbellek modül
+        düzeyindedir ve süreç boyu yaşar: aynı süreçte daha önce koşan bir
+        test (ör. aynı uca istek atan d15_fea_viz_a2) önbelleği ısıtmışsa
+        iki istek de ~20 ms sürer ve karşılaştırma yazı-tura olur; yük
+        altında da tersine dönebilir. Artık belirlenimci: önbellek boşaltılır
+        ve ``lru_cache`` sayaçları okunur. ÖLÇÜLDÜ (277e53c10): istek 1
+        4,68 s (yüzey çözümü 1 ıska, tavan 1 ıska), istek 2 0,022 s
+        (ıska sabit, isabet +1). İddia aynı: ikinci istek pahalı çözümü
+        tekrarlamaz.
+        """
+        import hrma.visualization.visualization as V
         from hrma.app import app
         app.config['TESTING'] = True
         cli = app.test_client()
         gonderi = {'motor_data': hibrit_motor}
-        sureler = []
+        onbellekler = (V._isp_surface_solve_cached,
+                       V._isp_surface_ceiling_cached)
+        for o in onbellekler:
+            o.cache_clear()
+        sayac = []
         for _ in range(2):
-            t0 = time.perf_counter()
             r = cli.post('/api/advanced-performance-analysis', json=gonderi)
-            sureler.append(time.perf_counter() - t0)
-        assert r.status_code == 200
-        # İkinci istek her hâlükârda birinciden HIZLI olmalı (lru_cache).
-        assert sureler[1] < sureler[0]
+            assert r.status_code == 200
+            sayac.append([(o.cache_info().hits, o.cache_info().misses)
+                          for o in onbellekler])
+        # Birinci istek GERÇEKTEN çözdü (soğuk önbellek: en az bir ıska).
+        assert all(iska >= 1 for _isabet, iska in sayac[0]), sayac
+        # İkinci istek hiç yeni çözüm yapmadı (ıska sabit) ve önbellekten
+        # okudu (isabet arttı).
+        for (isabet1, iska1), (isabet2, iska2) in zip(sayac[0], sayac[1]):
+            assert iska2 == iska1, sayac
+            assert isabet2 > isabet1, sayac
 
     def test_tek_tepe_varsayimi_ve_OLCUM_docstringde(self):
         from hrma.visualization.visualization import _altin_oran_tepe

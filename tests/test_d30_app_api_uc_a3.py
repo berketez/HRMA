@@ -392,13 +392,23 @@ class TestP16B340OrnekSayisi:
         assert 'status' in g and g['status'] == 'error'
 
     def test_taban_TEK_KAYNAKTAN_okunur(self, istemci):
+        # V306/HIZ (M-KATI-35): bant artık ÇÖZÜCÜNÜN UYGULADIĞI banttır
+        # (``SOLID_MC_SAMPLE_BAND``). ÖLÇÜLDÜ (taban 700a67586,
+        # docs/scofield/raw/OH/V306/hiz/olcum_kati_mc_once.json): kapı
+        # ``UQ_MIN_SAMPLES`` (2) tabanıyla 5 örneği kabul ediyor, motor
+        # ``run_monte_carlo`` içinde SESSİZCE 20'ye çıkarıyordu (yanıt
+        # n_samples 20, n_samples_requested 5). Eski beklenti bu kırpmayı
+        # kilitliyordu. Tek kaynak ilkesi korunur: taban motorun adlı
+        # sabitinden okunur ve ``UQ_MIN_SAMPLES``ı kapsar.
         from hrma.app import UQ_MIN_SAMPLES
+        from hrma.engines.solid_rocket_engine import SOLID_MC_SAMPLE_BAND
         kod, g = _post(istemci, '/api/solid-monte-carlo',
                        dict(MC_TABAN, n_samples=0))
         k = _kunye(g, 'n_samples')
-        assert k['accepted_range'][0] == UQ_MIN_SAMPLES, (
-            'taban kopyalanmış; kardeş belirsizlik ucunun sabitiyle aynı '
-            'olmalı (Doktrin 4)')
+        assert k['accepted_range'] == list(SOLID_MC_SAMPLE_BAND), (
+            'bant kopyalanmış; çözücünün adlı sabitiyle aynı olmalı '
+            '(Doktrin 4)')
+        assert k['accepted_range'][0] >= UQ_MIN_SAMPLES
 
     def test_sayi_olmayan_ornek_sayisi_422(self, istemci):
         kod, g = _post(istemci, '/api/solid-monte-carlo',

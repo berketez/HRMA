@@ -11,8 +11,6 @@ sonra.json, ters-mutasyon: .../mutasyon.py):
 
 Bekçilerin HEPSİ ters-mutasyonla kırmızıya döndürülerek doğrulanmıştır.
 """
-import time
-
 import numpy as np
 import pytest
 
@@ -29,9 +27,31 @@ def istemci():
 
 
 #: Ölçülen kusur koşusu 11,1 saniye sürüyordu (once.json K1). Kapı çalışıyorsa
-#: yanıt çözücüye HİÇ girmez; bu tavan makine hızından bağımsız olarak
-#: "tam CFD koşusu YAPILMADI" der (en yavaş ölçülen kusur koşusunun onda biri).
-_KOSU_YAPILMADI_TAVANI_S = 2.0
+#: yanıt çözücüye HİÇ girmez.
+#:
+#: V306 CI-SÜREÇ (4 Kas 2026): iddia eskiden DUVAR SAATİYLE ölçülüyordu
+#: (red < 2,0 s). Ölçüldü (277e53c10, yük ~8): red 0,2-0,8 ms sürüyor; yani
+#: tavan red yolunu değil ÇÖZÜCÜNÜN YAVAŞLIĞINI sınıyordu — kusurlu kapı,
+#: kaba ızgara koşusunu 2 s'nin altında bitiren hızlı bir koşucuda YEŞİL
+#: kalırdı (v3.0.5 'yörünge bütçe bombası' sınıfı, 3f1699050). Artık iddia
+#: belirlenimci: çözücü giriş noktaları (``hrma.cfd.steady``) sayaçla
+#: sarılır ve red yanıtında HİÇ çağrılmadıkları doğrulanır.
+_COZUCU_GIRISLERI = ('solve_steady_axisym', 'solve_with_y_plus_target')
+
+
+@pytest.fixture
+def cozucu_cagrilari(monkeypatch):
+    """Çözücü giriş noktalarına yapılan çağrıların listesi (sayaç)."""
+    import hrma.cfd.steady as steady
+    cagrilar = []
+    for ad in _COZUCU_GIRISLERI:
+        asil = getattr(steady, ad)
+
+        def sarici(*args, _asil=asil, _ad=ad, **kwargs):
+            cagrilar.append(_ad)
+            return _asil(*args, **kwargs)
+        monkeypatch.setattr(steady, ad, sarici)
+    return cagrilar
 
 _KONTUR = {'points': [[0.0, 0.05], [0.05, 0.03], [0.08, 0.02],
                       [0.14, 0.03], [0.20, 0.04]]}
@@ -44,7 +64,8 @@ class TestP16B3_42CfdLuleGirdiKapisi:
 
     @pytest.mark.parametrize('p_ortam', [2.0e6, 5.0e6])
     def test_ortam_basinci_oda_basincindan_kucuk_olmali(self, istemci,
-                                                        p_ortam):
+                                                        p_ortam,
+                                                        cozucu_cagrilari):
         """P_ortam ≥ P0 iken lüleden akış YOKTUR: koşu başlamadan reddedilir.
 
         ÖLÇÜLDÜ (once.json K1): P_ortam = 5e6 > P0 = 2e6 gövdesi HTTP 200 +
@@ -54,22 +75,21 @@ class TestP16B3_42CfdLuleGirdiKapisi:
         (K3); iki ucun aynı fiziksel imkânsızlığa aynı cevabı vermesi
         sözleşmedir.
         """
-        t0 = time.perf_counter()
         r = istemci.post('/api/cfd/nozzle', json=dict(_TABAN,
                                                       P_ambient_Pa=p_ortam))
-        sure = time.perf_counter() - t0
         assert r.status_code == 400, (
             f'P_ortam = {p_ortam:g} Pa >= P0 = {_TABAN["P0_Pa"]:g} Pa iken '
             f'uç {r.status_code} döndü — akış olmayan bir lüle çözüldü')
         j = r.get_json() or {}
         assert j.get('field') == 'P_ambient_Pa', j
-        assert sure < _KOSU_YAPILMADI_TAVANI_S, (
-            f'red {sure:.2f} s sürdü: kapı çözücüden SONRA çalışıyor, '
-            f'pahalı koşu yine harcandı')
+        assert cozucu_cagrilari == [], (
+            f'red yanıtından önce çözücü çağrıldı ({cozucu_cagrilari}): '
+            f'kapı çözücüden SONRA çalışıyor, pahalı koşu yine harcandı')
 
     @pytest.mark.parametrize('alan', ['P0_Pa', 'T0_K', 'gamma',
                                       'R_J_per_kgK', 'P_ambient_Pa'])
-    def test_bool_sayisal_alan_olarak_kabul_edilmez(self, istemci, alan):
+    def test_bool_sayisal_alan_olarak_kabul_edilmez(self, istemci, alan,
+                                                    cozucu_cagrilari):
         """``True`` bir basınç/sıcaklık değildir — ``float(True)`` = 1,0.
 
         ÖLÇÜLDÜ (once.json K2): ``P0_Pa = true`` gövdesi 1 Pa'lık bir kamara
@@ -77,17 +97,16 @@ class TestP16B3_42CfdLuleGirdiKapisi:
         üretiyordu. Aynı uçtaki ``max_iterations`` kapısı bool'u zaten
         reddediyordu; disiplin sayısal alanların hepsine uygulanır.
         """
-        t0 = time.perf_counter()
         r = istemci.post('/api/cfd/nozzle', json=dict(_TABAN, **{alan: True}))
-        sure = time.perf_counter() - t0
         assert r.status_code == 400, (
             f'{alan} = True iken uç {r.status_code} döndü')
         j = r.get_json() or {}
         assert j.get('field') == alan, j
         # Uç 400'de kodu ``error``, insan metnini ``message`` alanında verir.
         assert 'boolean' in (j.get('message') or ''), j
-        assert sure < _KOSU_YAPILMADI_TAVANI_S, (
-            f'red {sure:.2f} s sürdü — koşu yine başlamış')
+        assert cozucu_cagrilari == [], (
+            f'red yanıtından önce çözücü çağrıldı ({cozucu_cagrilari}) — '
+            f'koşu yine başlamış')
 
     def test_gecerli_govde_hala_kosuyor(self, istemci):
         """Kapı yalnız imkânsız vakayı keser: geçerli koşu 200 kalır."""

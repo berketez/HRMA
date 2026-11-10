@@ -77,8 +77,17 @@ MESH_MAX_INJECTOR_ORIFICES = 512
 # hem de kullanıcının override ettiği boy AYNI banda tabidir. Bandın dışına
 # düşen değer KELEPÇELENMEZ: ihraç adlandırılmış bir hatayla durur.
 #: İhracatın KENDİ üst sınırı [m]. Doğrulayıcının bandı (20 m) daha geniştir;
-#: mesh/Plotly ölçeğinde bundan uzun bir gövde çizilmez.
+#: mesh/Plotly ölçeğinde bundan uzun bir gövde çizilmez. HRMA SEÇİMİDİR
+#: (kaynaklı bir fiziksel sınır değil): bellek içi montaj (STL, 3B Plotly,
+#: kütle dökümü) bu bandı çizer; STEP paketi ayrı üreticidir (V306/
+#: HİBRİT-KÜTLE kalem 8: ret iletisi bunu söyler).
 CHAMBER_LENGTH_MAX_M = 5.0
+#: Ret iletisinin üst sınır beyanı (EN; TR karşılığı i18n_charts.js sunucu
+#: tablosunda, aynı cümle).
+CHAMBER_LENGTH_MAX_BASIS = (
+    'the upper bound is an HRMA choice for the in-memory assembly (STL, '
+    '3D view, mass breakdown), not a physical limit; the STEP package is '
+    'built by a separate generator')
 
 #: Doğrulayıcının bandı okunamazsa kullanılacak alt sınır [m].
 CHAMBER_LENGTH_MIN_FALLBACK_M = 0.02
@@ -1556,6 +1565,76 @@ def _nozzle_density_resolved(motor_data):
         f'({rho:g} kg/m3) was used - NOT a material this run selected')
 
 
+def nozzle_insert_housing_declaration(motor_data):
+    """Ek + yapısal gövde lülesinin ÇİZİLEN TEK katısı için yoğunluk künyesi.
+
+    V306/HİBRİT-KÜTLE (kalem 1, S1). ÖLÇÜLDÜ (taban bab5ba0b9,
+    ``docs/scofield/raw/OH/V306/hibrit-kutle/olcum_once.json``,
+    HYBRID_BASE): kütle dökümü lüleyi iki malzemeyle doğru tartıyordu
+    (grafit ek 3,4004e-5 m³ × 1800 + steel_4130 gövde 4,6242e-5 m³ × 7850
+    = 0,42420 kg; motorun kuru kütlesiyle aynı sayı), ama
+    ``material_summary.nozzle_mass_density_kg_m3`` 1800 (yalnız grafit) ve
+    künye "Density used: nozzle material graphite" diyordu. Çizilen katı
+    TEK parçadır (STEP/STL 'Nozzle', ek + gövde): 1800 × çizilen hacim
+    0,14352 kg verir — aynı parçaya iki kütle. Kütle değişmez; çizilen
+    katının yoğunluğu, katının KENDİ kütlesinin kendi kesin hacmine oranıdır
+    (ρ_eş = m / V_toplam) ve iki bileşen adıyla yayımlanır.
+
+    Dönüş: ek + gövde lülesi değilse ``None``; çözülemezse ``None`` (eski
+    künye kalır, sayı uydurulmaz). Aksi hâlde
+    ``{'density_kg_m3', 'source', 'components'}``.
+    """
+    md = motor_data or {}
+    ng = md.get('nozzle_geometry') if isinstance(
+        md.get('nozzle_geometry'), dict) else {}
+    yap = ng.get('nozzle_construction')
+    if not (isinstance(yap, dict)
+            and yap.get('type') == 'insert_plus_structural_housing'):
+        return None
+    try:
+        from hrma.analysis.structural_analysis import (
+            drawn_nozzle_shell_mass_kg)
+        pts = nozzle_wall_profile(md, unit='mm')['inner']
+        ek, gov = yap['insert'], yap['housing']
+        t_ek = float(ek['thickness_mm']) / 1000.0
+        t_gov = float(gov['thickness_mm']) / 1000.0
+        rho_ek = float(ek['density_kg_m3'])
+        rho_gov = float(gov['density_kg_m3'])
+        v_ek = float(drawn_nozzle_shell_mass_kg(pts, t_ek, 1.0))
+        v_top = float(drawn_nozzle_shell_mass_kg(pts, t_ek + t_gov, 1.0))
+    except Exception:
+        return None
+    v_gov = v_top - v_ek
+    if not all(np.isfinite(v) and v > 0 for v in (v_ek, v_gov, rho_ek,
+                                                   rho_gov)):
+        return None
+    m_ek = v_ek * rho_ek
+    m_gov = v_gov * rho_gov
+    rho_eq = (m_ek + m_gov) / v_top
+    ad_ek = ek.get('material_key') or ek.get('material')
+    ad_gov = gov.get('material_key') or gov.get('material')
+    return {
+        'density_kg_m3': rho_eq,
+        'source': (
+            f'insert + structural housing nozzle drawn as ONE solid: '
+            f'equivalent density of that solid = its mass / its volume = '
+            f'({m_ek:.6g} + {m_gov:.6g} kg) / {v_top:.6g} m3 '
+            f'= {rho_eq:.6g} kg/m3; insert "{ad_ek}" {rho_ek:g} kg/m3 x '
+            f'{v_ek:.6g} m3 (thickness {t_ek * 1e3:.3f} mm), housing '
+            f'"{ad_gov}" {rho_gov:g} kg/m3 x {v_gov:.6g} m3 (thickness '
+            f'{t_gov * 1e3:.3f} mm), same contour as the STEP/STL part'),
+        'components': {
+            'insert': {'material_key': ad_ek, 'density_kg_m3': rho_ek,
+                       'thickness_mm': t_ek * 1e3, 'volume_m3': v_ek,
+                       'mass_kg': m_ek},
+            'housing': {'material_key': ad_gov, 'density_kg_m3': rho_gov,
+                        'thickness_mm': t_gov * 1e3, 'volume_m3': v_gov,
+                        'mass_kg': m_gov},
+            'drawn_volume_m3': v_top,
+        },
+    }
+
+
 # ---------------------------------------------------------------------------
 # Lüle et kalınlığı — üreteç kuralı (ÖH Z5S / defter P9B2-29)
 # ---------------------------------------------------------------------------
@@ -2093,13 +2172,13 @@ def _grain_gap_reading(gd, etiket):
         return (False, 0.0, kaynak_kodu,
                 f'; inter-segment gap NOT modelled: {alan} is '
                 f'{GRAIN_GAP_ABSENT} (the result carries no gap value), so '
-                'the segments are placed flush and no gap value is invented')
+                'the segments are placed flush and no gap value is assumed')
     deger = finite_number(gd.get('grain_gap_mm'))
     if deger is None or deger < 0.0:
         return (False, 0.0, kaynak_kodu,
                 f'; inter-segment gap NOT modelled: {alan}='
                 f'{gd.get("grain_gap_mm")!r} is not a finite value >= 0, so '
-                'the segments are placed flush and no gap value is invented')
+                'the segments are placed flush and no gap value is assumed')
     if kaynak_kodu in GRAIN_GAP_SOURCE_TEXT:
         # Kaynak yayımlı: 0,0 dâhil değer ONA göre okunur (kural 4 inceltmesi).
         aciklama = GRAIN_GAP_SOURCE_TEXT[kaynak_kodu]
@@ -2125,7 +2204,7 @@ def _grain_gap_reading(gd, etiket):
     return (False, 0.0, kaynak_kodu,
             f'; inter-segment gap NOT modelled: {alan}=0 is published but '
             f'{kod_metni}, and a bare 0.0 is read as not published, so the '
-            'segments are placed flush and no gap value is invented')
+            'segments are placed flush and no gap value is assumed')
 
 
 def grain_axial_layout_mm(motor_data, chamber_length_mm, stack_length_mm):
@@ -2650,7 +2729,7 @@ def injector_plate_axial_span_mm(thickness_mm):
     note = (f'plate seated on the closure-head inner face, x = {x0:.2f} to '
             f'{x1:.2f} mm (the axis convention\'s injector face is x = 0); '
             'no solver places the injector plate axially or publishes a '
-            'clearance, so none is invented, and the analysis chamber '
+            'clearance, so none is assumed, and the analysis chamber '
             'volume spans the whole bore without subtracting the plate')
     return x0, x1, note
 
@@ -3600,9 +3679,24 @@ def manufacturing_safety_refusals(motor_data):
             and nozzle_analysis.get('safety_factor') is not None):
         # Yapısal lüle analizi SF'yi BOĞAZ cidarında yayımlar; çizilen lüle
         # tek tip ofset etle kurulduğu için boğaz cidarı çizilen ettir.
+        # V306/HİBRİT-MODEL (M-HIBRIT-22): ek + yapısal gövde lülesinde SF
+        # GÖVDENİNDİR; çizilen gövde eti = çizilen yığın − ek (ek basınç
+        # kabuğu değildir, SF'ye girmez).
+        _sf_ait_mm = drawn_noz_mm
+        _ng = md.get('nozzle_geometry') if isinstance(
+            md.get('nozzle_geometry'), dict) else {}
+        _yapim = _ng.get('nozzle_construction')
+        if (isinstance(_yapim, dict) and _yapim.get('type')
+                == 'insert_plus_structural_housing'):
+            _ek_mm = _strict_number((_yapim.get('insert') or {}).get(
+                'thickness_mm'))
+            # Ek kalınlığı okunamazsa yığın kalır: uyuşmazlık kapısı
+            # reddeder (fail-closed).
+            _sf_ait_mm = (drawn_noz_mm - _ek_mm if _ek_mm is not None
+                          else drawn_noz_mm)
         out += _sf_check(
             'nozzle', 'structural_analysis.nozzle_analysis.safety_factor',
-            nozzle_analysis.get('safety_factor'), drawn_noz_mm,
+            nozzle_analysis.get('safety_factor'), _sf_ait_mm,
             _strict_number(nozzle_analysis.get('throat_thickness_used_mm')),
             'structural_analysis.nozzle_analysis.throat_thickness_used_mm')
     return out
@@ -4159,13 +4253,34 @@ def _injector_plate_design(motor_data, chamber_diameter_m=None, wall_m=None):
                 source = 'motor result injector_design.plate_thickness_mm'
                 mass_kg = None
     if t_mm is None:
+        # V306/SIVI-MODEL kalem 4 (FİZİK-2 DEVİR 3): sıvı motorun plaka
+        # yapısal denetimi (``injector_plate_structural``, Roark 11.2/10b +
+        # ASME PG-52) plaka boyutlandırdıysa CAD AYNI plakayı çizer ve
+        # tartar; kütle motorun ``apply_injector_plate_mass`` ile yazdığı
+        # ``plate_mass_kg``dir (motor kuru kütlesiyle tek sayı). Plaka
+        # boyutlanmadıysa bu dal da sayı vermez (fail-closed aynı).
+        lps = md.get('injector_plate_structural')
+        if isinstance(lps, dict) and lps.get('status') in ('sized',
+                                                           'analyzed'):
+            t_mm = _real_scalar(lps.get('plate_thickness_mm'))
+            if t_mm is None:
+                t_mm = _real_scalar(lps.get('required_thickness_mm'))
+            if t_mm is not None:
+                d_mm = _real_scalar(lps.get('plate_diameter_mm'))
+                mass_kg = _real_scalar(lps.get('plate_mass_kg'))
+                material = lps.get('material')
+                source = ('liquid injector plate structural check '
+                          '(injector_plate_structural: Roark Table 11.2 case '
+                          '10b, ASME PG-52; the engine dry mass weighs the '
+                          'same plate)')
+    if t_mm is None:
         return {'thickness_m': None, 'radius_m': None, 'mass_kg': None,
                 'material': None,
                 'source': ('injector_plate_thickness_not_available: this '
                            'analysis run publishes no injector plate '
                            'thickness (injector_results.plate_structural '
                            '.plate_thickness_mm / injector_results'
-                           '.plate_thickness); no plate thickness is invented')}
+                           '.plate_thickness); no plate thickness is assumed')}
 
     if d_mm is None:
         bore_m = _real_scalar(chamber_diameter_m)
@@ -4274,7 +4389,7 @@ def _drawable_length_m(motor_data, field, human, scale=1.0):
             f'{field}_not_available: this analysis run publishes no {human} '
             f'({field}) as a finite positive number; the previous code drew '
             'a default body instead, so the drawing was not the analysed '
-            'motor. No substitute dimension is invented.')
+            'motor. No substitute dimension is used.')
     return value * scale
 
 
@@ -4361,14 +4476,14 @@ class MotorCADDesigner:
                         f'drawable length ({_etiket}: neither its metre nor '
                         'its millimetre reading lands in the validated '
                         'band). Declare length_units to resolve it; no '
-                        'substitute diameter is invented.')
+                        'substitute diameter is used.')
                 # (b) Alan hiç yayımlanmamış (ya da 0 / negatif / sayı değil).
                 raise ValueError(
                     f'{_ad}_not_available: this analysis run publishes no '
                     f'{_insan} ({_ad}) as a finite positive number; the '
                     'previous code drew a default body instead, so the '
                     'exported solid was not the analysed motor. No '
-                    'substitute diameter is invented.')
+                    'substitute diameter is used.')
 
             chamber_diameter = _yayimlanmis_olcu(
                 'chamber_diameter', 'chamber diameter')      # m
@@ -4454,13 +4569,22 @@ class MotorCADDesigner:
                     # yerine 300 mm uydurmak kullanıcının motorunu sessizce
                     # değiştirmek olurdu (ölçüldü: 5 m, 15 mm ve "alan yok"
                     # üçü de 300 mm çiziyordu).
-                    raise ValueError(
+                    _hata = ValueError(
                         f'chamber_length_out_of_range: chamber length '
                         f'{_girdi_kunyesi("chamber_length")} is outside the '
                         f'band this exporter can draw '
                         f'[{CHAMBER_LENGTH_MIN_M:g}, '
                         f'{CHAMBER_LENGTH_MAX_M:g}] m (both bounds '
-                        'included); no substitute length is invented')
+                        'included); no substitute length is used; '
+                        + CHAMBER_LENGTH_MAX_BASIS)
+                    # V306/HİBRİT-KÜTLE (kalem 8): adlı ret makine-okur
+                    # (kod + sayılar); ekran sayıyı gövdeden basar.
+                    _hata.hrma_code = 'chamber_length_out_of_range'
+                    _hata.hrma_params = {
+                        'chamber_length_m': float(given),
+                        'min_m': float(CHAMBER_LENGTH_MIN_M),
+                        'max_m': float(CHAMBER_LENGTH_MAX_M)}
+                    raise _hata
                 # ÖH D16 birleşme etkileşimi — ALAN VARDI AMA BİRİMİ
                 # KAZANILMADI. Bu dal "boy hiç yayımlanmamış" dalıdır ve
                 # buraya yalnız GERÇEKTEN alan yokken girilmelidir. Normalize
@@ -4515,7 +4639,7 @@ class MotorCADDesigner:
                         'drew a body derived from the characteristic length '
                         '(L*) instead, which made a rejected input '
                         'indistinguishable from no input at all. No '
-                        'substitute length is invented.')
+                        'substitute length is used.')
 
                 # Boy hiç yayımlanmamış: L* bağıntısından TÜRETİLİR
                 # (V_c = L* x A_t  ve  V_c = A_c x L  =>  L = L* A_t / A_c).
@@ -4525,7 +4649,7 @@ class MotorCADDesigner:
                         'chamber_length_not_available: this analysis run '
                         'publishes neither chamber_length nor a characteristic '
                         'length (l_star) to derive it from; no chamber length '
-                        'is invented')
+                        'is assumed')
                 throat_area = np.pi * (throat_diameter / 2) ** 2
                 chamber_length = ((l_star_real * throat_area)
                                   / (np.pi * (chamber_diameter / 2) ** 2))
@@ -4618,7 +4742,7 @@ class MotorCADDesigner:
                     'grain_outer_diameter_not_available: ' +
                     grain_r_outer_source +
                     '; the grain is NOT drawn because the previous code '
-                    'shrank it by an invented liner thickness instead')
+                    'shrank it by an assumed liner thickness instead')
                 print(f'CAD Debug - {grain_not_drawn_reason}')
                 grain_geo = None
             if grain_geo is not None:
@@ -4919,13 +5043,24 @@ class MotorCADDesigner:
 
         except Exception as e:
             print(f"CAD generation error: {str(e)}")
-            import traceback
-            traceback.print_exc()
+            # V306/HİBRİT-KÜTLE (kalem 8): ADLI ret (girdinin çizilebilir
+            # bant dışında olması, ``ValueError``) bir yazılım arızası
+            # değildir — günlükte tek satır kalır, stderr'e traceback
+            # düşmez. ÖLÇÜLDÜ (tur L5, 100 kN / 90 s, kamara 15,02 m): her
+            # /calculate ve tam paket isteği 4 satırlık traceback basıyordu.
+            # Beklenmeyen istisnalar (ValueError dışı) izini korur.
+            if not isinstance(e, ValueError):
+                import traceback
+                traceback.print_exc()
+            _kod = getattr(e, 'hrma_code', None)
             return {
                 # Başarısız üretim de KENDİ şeklini söyler: okuyucu 'bu benim
                 # şeklim değil' ile 'benim şeklim ama üretilemedi'yi ayırır.
                 'schema': CAD_VISUALIZATION_SCHEMA,
                 'error': f'CAD generation failed: {str(e)}',
+                **({'error_code': _kod,
+                    'error_params': getattr(e, 'hrma_params', None)}
+                   if _kod else {}),
                 'assembly_meshes': [],
                 'plotly_visualization': None,
                 'technical_drawings': None,
@@ -6278,6 +6413,14 @@ class MotorCADDesigner:
         # künye artık kendi dayanaklarını adıyla söyleyebilir.
         _noz_wall_m, _noz_wall_src = _nozzle_wall_design_m(motor_data)
         _noz_rho, _noz_rho_src = _nozzle_density_resolved(motor_data)
+        # V306/HİBRİT-KÜTLE (kalem 1): ek + gövde lülesinde çizilen tek
+        # katının yoğunluğu iki bileşenden (künye ve sayı kütleyle aynı
+        # kaynaktan); öbür lülelerde değişiklik yok (bit-aynı).
+        _noz_ekgov = nozzle_insert_housing_declaration(motor_data)
+        if _noz_ekgov is not None:
+            _noz_rho = _noz_ekgov['density_kg_m3']
+            _noz_rho_src = (_noz_rho_src + ' is the throat INSERT; '
+                            + _noz_ekgov['source'])
         dry_mass = chamber_mass + nozzle_mass + injector_mass
 
         wall_design = _chamber_wall_design(motor_data)
@@ -6570,6 +6713,8 @@ class MotorCADDesigner:
                 'chamber_mass_density_source': mat_rho_src,
                 'nozzle_mass_density_kg_m3': _noz_rho,
                 'nozzle_mass_density_source': _noz_rho_src,
+                **({'nozzle_mass_components': _noz_ekgov['components']}
+                   if _noz_ekgov is not None else {}),
                 'density_scope': (
                     'The densities the mass_breakdown masses were actually '
                     'computed with. material_specifications (top level of '
@@ -6681,6 +6826,17 @@ class MotorCADDesigner:
                 # ihmal edilebilir ama cidar kalınlaşınca büyür (oran
                 # 1 + t/(2r)): ölçülen koşuda t=7,79 mm ile kütle 0,694 kg
                 # çıkıyordu, çizilen katı 0,751 kg idi (%7,7 eksik).
+                # V306/HİBRİT-MODEL (M-HIBRIT-22): ek + yapısal gövde lülesi
+                # (hibrit grafit) iki malzemeyle tartılır — motorun kuru
+                # kütlesiyle AYNI işlev (tek tanım).
+                _yapim = noz_geo.get('nozzle_construction')
+                if (isinstance(_yapim, dict) and _yapim.get('type')
+                        == 'insert_plus_structural_housing'):
+                    from hrma.analysis.structural_analysis import (
+                        drawn_nozzle_insert_housing_mass_kg)
+                    _m2 = drawn_nozzle_insert_housing_mass_kg(pts_mm, _yapim)
+                    if _m2 is not None and _m2 > 0:
+                        return _m2
                 _iki = _noz_profile.get('two_layer')
                 if _iki is not None:
                     # V301 CAD-2 kalem 8: ceketli lüle iki malzemeyle,

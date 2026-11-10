@@ -27,7 +27,11 @@ USAGE:
   downloads the update and starts the installer.
 - Closing the HRMA window also closes the program. Double-click
   the icon to open it again.
-- Your CAD and drawing outputs are saved to Documents\HRMA.
+- Reports, CAD files and drawings you export are saved through a
+  save dialog that starts in your Downloads folder; you choose the
+  final location there. Documents\HRMA (menu: Open Output Folder)
+  holds your saved projects (Documents\HRMA\projects) and the
+  program log (hrma_log.txt).
 
 UNINSTALL:
 
@@ -36,3 +40,13 @@ Settings → Apps → HRMA → Uninstall
 
 If you run into problems, open an issue at https://github.com/berketez/HRMA/issues and attach this file:
 Documents\HRMA\hrma_log.txt
+
+
+LICENSE:
+
+HRMA is free software under the GNU General Public License, version 3
+or (at your option) any later version. The full licence text and the
+third-party licence notices are installed with the program, in the
+installation folder (by default %LOCALAPPDATA%\HRMA): app\LICENSE and the
+app\licenses folder.
+Source code: https://github.com/berketez/HRMA

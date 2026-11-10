@@ -315,9 +315,19 @@ class TestB219I18nBogazi:
 class TestB306OptimumEgrisi:
     """15 noktalık Isp⟷O/F eğrisi DOM'a girmelidir."""
 
+    @staticmethod
+    def _cizim_govdesi(s):
+        """V306/DİL-HİBRİT: çizim ``optimumOfEgrisiniCiz``e taşındı (dil
+        değişiminde aynı yanıttan yeniden çizim için); ``findOptimumOF`` onu
+        çağırmak ZORUNDA, aksi hâlde eğri hiç çizilmez."""
+        bul = govde(s, 'findOptimumOF')
+        assert 'optimumOfEgrisiniCiz(result)' in bul, (
+            'findOptimumOF eğriyi çizdirmiyor')
+        return bul + govde(s, 'optimumOfEgrisiniCiz')
+
     def test_egri_dom_a_ekleniyor(self):
         s = metin(ADV)
-        g = govde(s, 'findOptimumOF')
+        g = self._cizim_govdesi(s)
         assert g, 'findOptimumOF bulunamadı'
         i = g.find("plotDiv.id = 'of-optimization-plot'")
         assert i >= 0, 'O/F eğrisinin çizim düğümü bulunamadı'
@@ -330,7 +340,7 @@ class TestB306OptimumEgrisi:
             "Eğri serbest bir düğüme çiziliyor ve DOM'a hiç eklenmiyor.")
 
     def test_kapsiz_dugume_cizilmez(self):
-        g = govde(metin(ADV), 'findOptimumOF')
+        g = self._cizim_govdesi(metin(ADV))
         assert 'if (plotDiv.parentNode)' in g, (
             'Kap bulunamazsa serbest düğüme çizip atmak yerine hiç çizilmemeli.')
 

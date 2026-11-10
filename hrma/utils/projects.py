@@ -722,6 +722,7 @@ def load_project_records(name: str) -> Tuple[Dict, List[Dict]]:
     goc = _solid_legacy_case_bore_migration(doc)
     if goc is not None:
         records.append(goc)
+    records.extend(_solid_retired_fields_migration(doc))
     return doc, records
 
 
@@ -737,6 +738,7 @@ def load_project_records(name: str) -> Tuple[Dict, List[Dict]]:
 LOAD_WARNING_APP_VERSION_MISMATCH = 'warn.project.app_version_mismatch'
 LOAD_WARNING_MISSING_STAMP = 'warn.project.missing_stamp'
 LOAD_WARNING_SOLID_LEGACY_CASE_BORE = 'warn.project.solid_legacy_case_bore'
+LOAD_WARNING_SOLID_RETIRED_STAR_FILLET = 'warn.project.solid_retired_star_fillet'
 #: Sunucunun İngilizce yedek metinleri (i18n_common.js 'en' ile birebir;
 #: bekçi tests/test_v3_kucuk.py::TestProjeYuklemeUyarisi).
 _LOAD_WARNING_TEXT_EN = {
@@ -752,6 +754,12 @@ _LOAD_WARNING_TEXT_EN = {
         'inner diameter, which must hold the grain, liner and insulation. The '
         'field was left empty, so the case is derived from the grain, liner '
         'and insulation. Enter your own case inner diameter if you have one.'),
+    LOAD_WARNING_SOLID_RETIRED_STAR_FILLET: (
+        'This solid project stores a value for the star valley fillet '
+        'radius. No calculation read that input, so no saved result '
+        'depended on it, and the box has been removed from the solid page. '
+        'The stored value is ignored and is not written back when you save '
+        'the project.'),
 }
 
 #: Katı sayfada ``chamber_diameter``ın KASA İÇ ÇAPI anlamına geçtiği sürüm
@@ -816,6 +824,55 @@ def _solid_legacy_case_bore_migration(doc: Dict) -> Optional[Dict]:
             'params': {'saved_version': doc.get('app_version'),
                        'chamber_diameter_mm': _yaz(kasa),
                        'outer_diameter_mm': _yaz(tane)}}
+
+
+#: V306/KATI-KALAN (kalem 5, TANE C1-K2): katı sayfadan KALDIRILAN, hiçbir
+#: hesabın okumadığı alanlar -> adlı yükleme uyarısının kodu. ÖLÇÜLDÜ:
+#: ``star_fillet`` (yıldız vadisi kavis yarıçapı) 1 / 5 / 10 mm'de bütün
+#: sonuçlar bit-aynıydı (çözücünün beyanı ``unwired_inputs.
+#: geometry_not_modelled``); kutu kalktı. Eski dosyalar (dağıtılan katı örnek
+#: dahil: ``star_fillet`` 2) anahtarı taşır.
+SOLID_RETIRED_FIELDS = {
+    'star_fillet': LOAD_WARNING_SOLID_RETIRED_STAR_FILLET,
+}
+
+
+def _solid_retired_fields_migration(doc: Dict) -> List[Dict]:
+    """Katı projede sayfadan kaldırılmış (hiç okunmayan) alanları yok say.
+
+    Alan bellekteki belgeden çıkarılır: sayfa onu "karşılığı olmayan alan"
+    diye saymaz ve bir sonraki kayıtta dosyaya yazılmaz. Değer DOLUYSA adlı
+    bir yükleme uyarısı döner (sessiz düşme yok); boşsa (kayıtta değer
+    yoksa) kaybolan bir şey olmadığı için uyarı üretilmez. Diskteki dosya
+    DEĞİŞMEZ. Sonuçlar bu alana hiç bağlı olmadığı için hiçbir sayı
+    değişmez.
+    """
+    if doc.get('motor_type') != 'solid':
+        return []
+    fields = (doc.get('inputs') or {}).get('fields')
+    if not isinstance(fields, dict):
+        return []
+    kayitlar: List[Dict] = []
+    for alan, kod in SOLID_RETIRED_FIELDS.items():
+        if alan not in fields:
+            continue
+        ham = fields.pop(alan)
+        if ham in (None, ''):
+            continue
+        sayi = _finite_number(ham)
+        if sayi is not None:
+            deger: Any = int(sayi) if float(sayi).is_integer() else round(sayi, 3)
+        else:
+            # Sayı değilse (bozuk/elle yazılmış) kırpılmış metin olarak söylenir.
+            deger = str(ham)[:40]
+        # Değer kayıtta (API) durur; ekran cümlesi sayıyı basmaz (sayfa
+        # yükleme uyarısının parametrelerini ham yerleştirir, TR ondalık
+        # virgülü uygulanmaz).
+        kayitlar.append({'code': kod, 'severity': 'warning',
+                         'params': {'field': alan, 'value': deger}})
+    return kayitlar
+
+
 _LOAD_STAMPS = ('app_version', 'created_at', 'updated_at')
 
 

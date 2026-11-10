@@ -65,7 +65,10 @@ class TestP4B412DoymaBandKapisi:
         ok = InjectorDesign(mdot_ox=1.0, chamber_pressure=20.0,
                             oxidizer_temp=293.15, oxidizer_type='n2o',
                             oxidizer_density=900.0)
-        assert ok.p_vapor_bar == pytest.approx(50.5434, abs=1e-3)
+        # V306/SAYI (PANEL-SAYI DEVİR 1): 50,5434 tablo ara değeriydi; tek
+        # kaynak (N2OSaturation, CoolProp varsa EOS) 293,15 K'de 50,5251 bar.
+        from hrma.analysis.tank_blowdown import N2OSaturation
+        assert ok.p_vapor_bar == N2OSaturation().psat(293.15) / 1e5
 
 
 # ---------------------------------------------------------------- P4B4-13

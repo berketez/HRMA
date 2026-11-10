@@ -507,7 +507,17 @@ class TestP4B3_10IrtifaTelafisi:
     #: Bekçinin SORDUĞU soru (A_e yokken kol bit-aynı kalır mı, uyarı
     #: çıkar mı) DEĞİŞMEDİ; yalnız referans sayı yeni dinamikten alındı.
     #: Gerekçe: docs/scofield/raw/OH/D25/termo-ucus/a1/rapor.md
-    TABAN_APOJE = 9421.654293549778
+    #:
+    #: V306/UÇUŞ-2 (3 Kas) — SAYI YİNE YENİLENDİ (bekçi çevirisi, ENTEGRASYON
+    #: düzeltildi, dinamik değişmedi). 6-DOF entegrasyonu yanma sonunda
+    #: (itki süreksizliği) ikiye bölündü: tek parça RK45 adımı t_burn'ü
+    #: içine alıyor, adım hatası süreksizliği görmüyordu. ÖLÇÜLDÜ
+    #: (docs/scofield/raw/OH/V306/ucus2/olcum_kirilma.json; referans = aynı
+    #: model, rtol 1e-10, max_step 0,002 s): 9421,654293549778 (referanstan
+    #: +%0,054) -> 9415,427065397815 m (−%0,012); referans 9416,584 m.
+    #: Bekçinin SORDUĞU soru (A_e yokken kol bit-aynı kalır mı, uyarı çıkar
+    #: mı) DEĞİŞMEDİ; yalnız referans sayı düzeltilmiş entegrasyondan alındı.
+    TABAN_APOJE = 9415.427065397815
 
     def test_A_e_yokken_davranis_bit_ayni_ve_uyari_var(self):
         s = _arac(nozzle_exit_area=None)
@@ -532,8 +542,14 @@ class TestP4B3_10IrtifaTelafisi:
     # kolu yazıldı (bu araç M = 1,78-2,00 bandında uçuyor) — yeniden
     # ÖLÇÜLDÜ: 10853,053030333556 -> 10868,017810637533 (+14,96 m) ve
     # 9528,166610018414 -> 9531,248991311082 (+3,08 m). Soru aynı.
-    @pytest.mark.parametrize('ae,beklenen', [(0.05, 10868.017810637533),
-                                             (0.0041907, 9531.248991311082)])
+    # V306/UÇUŞ-2 (3 Kas): yanma sonu entegrasyon kırılma noktası (TABAN_APOJE
+    # notu) — yeniden ÖLÇÜLDÜ (olcum_kirilma.json): 10868,017810637533 ->
+    # 10850,247014854089 (referans 10850,628; eski hata +%0,160, yeni
+    # −%0,0035) ve 9531,248991311082 -> 9529,800580237561 (referans
+    # 9531,220; eski +%0,0003, yeni −%0,015 — eski sayı süreksizlik hatasının
+    # tolerans hatasını tesadüfen sıfırladığı bir koşuydu). Soru aynı.
+    @pytest.mark.parametrize('ae,beklenen', [(0.05, 10850.247014854089),
+                                             (0.0041907, 9529.800580237561)])
     def test_A_e_verilince_yorunge_fiilen_degisir(self, ae, beklenen):
         s = _arac(nozzle_exit_area=ae)
         r = s.solve(t_max=400.0)

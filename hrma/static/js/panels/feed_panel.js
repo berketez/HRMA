@@ -169,7 +169,7 @@
         const s = (data && data.slosh) || {};
         const cards = '<div style="display:flex; flex-wrap:wrap; gap:10px; margin:10px 0;">'
             + U.statCard(T('panel.feed.cardF1', 'SLOSH FREQ f1'), fmtL(s.f1_hz, 3), 'Hz', 'info',
-                T('panel.feed.cardF1Tip', 'Fundamental lateral slosh natural frequency (SP-106 Eq. 2.4)'))
+                T('panel.feed.cardF1Tip', 'Fundamental lateral slosh natural frequency (Dodge 2000, Eq. (1.40))'))
             + U.statCard(T('panel.feed.cardMassFrac', 'SLOSH MASS FRACTION'), fmtL(s.slosh_mass_ratio, 3), '', 'dim',
                 T('panel.feed.cardMassFracTip',
                   'm1/m_liquid — fraction of liquid that participates in the fundamental mode'))
@@ -223,9 +223,14 @@
                 yaxis: { title: T('panel.feed.axisF1', 'Frequency f1 (Hz)'), rangemode: 'tozero' },
                 yaxis2: { title: T('panel.feed.sMassFrac', 'Slosh mass fraction'),
                           overlaying: 'y', side: 'right', showgrid: false },
-                legend: { orientation: 'h' },
+                // V306/GÜVERTE-HATA: yatay lejant varsayılan konumunda
+                // (y ≈ -0,1) x ekseni başlığının üstüne biniyordu (ölçüldü,
+                // TR 1440: "Doluluk oranı h/R" ⟷ "Çalkalanan kütle oranı");
+                // lejant eksen başlığının altına alınır, alt pay ona göre.
+                legend: { orientation: 'h', y: -0.32 },
+                margin: { t: 90, b: 110 },
                 shapes: shapes,
-                height: 340,
+                height: 420,
             }, { responsive: true, displaylogo: false });
         }
 
@@ -863,9 +868,30 @@
             const key = el.getAttribute('data-field');
             if (el.tagName === 'SELECT') { payload[key] = el.value; return; }
             const v = parseFloat(el.value);
-            if (Number.isFinite(v)) payload[key] = v;
+            if (Number.isFinite(v)) payload[key] = tamTohumDegeri(el, v);
         });
         return payload;
+    }
+
+    // V306/GÜVERTE-HATA (kalem 5, K2-P22): tohumlanan alanın TAM değeri.
+    // ÖLÇÜLDÜ (kilavuz-2 img/v3_0_5/{hibrit,sivi}_guverte_besleme_tr.png):
+    // alan motor sayısını HAM basıyordu (Tank Yarıçapı 0,2374709232874…,
+    // w/R 0,7499999999999…). Gösterim artık güvertenin basamak kuralıyla
+    // (U.sigFig, 6 anlamlı basamak); hesaba giden değer motorun TAM sayısı.
+    // Kutudaki metin yazdığımız gösterimle aynı kaldıkça (kullanıcı
+    // dokunmadı) tam değer gider; aksi hâlde kutudaki sayı.
+    function tamTohumDegeri(el, kutudaki) {
+        const d = el.dataset || {};
+        if (d.dirty === '1' || d.seeded !== '1' || d.fullValue === undefined
+                || d.shownValue !== String(el.value)) {
+            return kutudaki;
+        }
+        const tam = Number(d.fullValue);
+        return Number.isFinite(tam) ? tam : kutudaki;
+    }
+
+    function gosterimDegeri(v) {
+        return (typeof U.sigFig === 'function') ? U.sigFig(v) : v;
     }
 
     // Motor sonucundan önerileri (dirty olmayan alanlara) uygula.
@@ -894,7 +920,12 @@
                 if (var_) el.value = String(v);
                 return;
             }
-            if (Number.isFinite(v)) { el.value = v; el.dataset.seeded = '1'; }
+            if (Number.isFinite(v)) {
+                el.value = gosterimDegeri(v);
+                el.dataset.fullValue = String(v);
+                el.dataset.shownValue = String(el.value);
+                el.dataset.seeded = '1';
+            }
         });
         if (!paneEl) return;
         paneEl.querySelectorAll('input[data-field]').forEach(function (el) {
@@ -903,6 +934,7 @@
             if (!Object.prototype.hasOwnProperty.call(sug, k)) {
                 el.value = '';
                 delete el.dataset.seeded;
+                delete el.dataset.fullValue; delete el.dataset.shownValue;
             }
         });
     }
@@ -984,7 +1016,8 @@
        okunur cümle ``message``tadır. */
     function retMetni(tab, data, httpKod) {
         const govde = (data && typeof data === 'object') ? data : {};
-        const ham = String(govde.error || ('HTTP ' + httpKod));
+        const ham = String(govde.error || ((window.HRMAReject && window.HRMAReject.yedek)
+            ? window.HRMAReject.yedek(httpKod) : ('HTTP ' + httpKod)));
         const zorunlu = /^'(\w+)' is required/.exec(ham);
         if (zorunlu) {
             const f = tab.fields.filter(function (x) { return x[0] === zorunlu[1]; })[0];

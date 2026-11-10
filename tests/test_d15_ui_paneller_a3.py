@@ -538,8 +538,12 @@ class TestSixDofBuyuklukKapisi:
     def test_hiz_ekranda_ve_kirmizi(self):
         e = self._ekran('sixdof_absurd')
         s = govde('sixdof_absurd')['summary']
-        i = e['badges'].find('max_speed')
-        assert i >= 0, 'max_speed hâlâ ekranda değil'
+        # V306/UÇUŞ (dil): rozet ham alan adı 'max_speed' yerine etiketle
+        # basılır (sixdof.badgeMaxSpeed; sözlüksüz koşumda EN yedek
+        # 'MAX SPEED'). Bekçinin kilitlediği şey hızın ekranda ve kırmızı
+        # olmasıdır, etiket metni değil.
+        i = e['badges'].find('MAX SPEED')
+        assert i >= 0, 'azami hız hâlâ ekranda değil'
         assert ('%.1f' % s['max_speed']) in duz(e['badges'])
         assert renk_geri(e['badges'], i) == 'kirmizi'
 
@@ -552,7 +556,13 @@ class TestSixDofBuyuklukKapisi:
     def test_apoje_yokken_grafik_apojeye_kadar_demez(self):
         e = self._ekran('sixdof_absurd')
         assert 'apogee' not in str(e['title']).lower(), e['title']
-        assert 'TIME_LIMIT' in str(e['title'])
+        # V306/UÇUŞ-FEA (ek kalem 6): bitiş nedeni artık ekranın dilinde
+        # (V306/UÇUŞ-2, M-SIVI-25: 'sixdof.endTimeLimit'; sözlüksüz koşumda
+        # EN yedek 'INTEGRATION TIME LIMIT'). Ham kod 'TIME_LIMIT' kullanıcıya
+        # gösterilmez — eski satır ham kodu ARIYORDU. Bekçinin sorusu
+        # (apoje yokken başlık bitiş nedenini söyler) değişmedi.
+        assert 'INTEGRATION TIME LIMIT' in str(e['title']), e['title']
+        assert 'TIME_LIMIT' not in str(e['title']), e['title']
 
     def test_normal_kosuda_hicbiri_kirmizi_degil(self):
         """Aşırı düzeltme koruması: fiziksel koşu eskisi gibi görünür."""
@@ -560,7 +570,7 @@ class TestSixDofBuyuklukKapisi:
         s = govde('sixdof_normal')['summary']
         assert s['max_speed'] < self.C_LIGHT
         assert renk_geri(e['badges'], e['badges'].find('MAX MACH')) == 'mavi'
-        assert renk_geri(e['badges'], e['badges'].find('max_speed')) == 'mavi'
+        assert renk_geri(e['badges'], e['badges'].find('MAX SPEED')) == 'mavi'
         assert 'launch to apogee' in str(e['title'])
 
 

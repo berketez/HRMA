@@ -135,6 +135,11 @@ PROPELLANT_MASS_SOURCE_LABELS = {
     'propellant_mass': 'propellant_mass reported by the solver',
     'mdot_x_burn_time': ('total_mass_flow x burn_time (the liquid solver '
                          'reports mass flow, not propellant mass)'),
+    # V306/UÇUŞ-KÜTLE (kalem 2): hibritte RASP itici alanı yanma boyunca
+    # HARCANAN kütledir; kalan (yanmayan tane + tankta kalan) yüklü kütlede.
+    'propellant_mass_consumed_kg': (
+        'propellant_mass_consumed_kg - the propellant the motor solution '
+        'burns (RASP propellant weight = the consumables of the motor)'),
     'none': 'propellant mass NOT available',
 }
 
@@ -438,6 +443,11 @@ CASE_DIAMETER_SOURCE_LABELS = {
     'chamber_plus_wall': 'casing outer diameter = chamber inner diameter + 2 x wall thickness',
     'chamber': ('chamber inner diameter (wall thickness not available - '
                 'outer diameter is slightly larger)'),
+    # V306/RAPOR-HATA (SIVI-SOĞUTMA DEVİR d): cidar motor modelince
+    # yayımlanmadı — dış çap bilinmiyor ("biraz büyük" denemez).
+    'chamber_wall_withheld': ('chamber inner diameter (the wall thickness is '
+                              'not published by the motor model - the '
+                              'casing outer diameter is unknown)'),
     'exit': ('nozzle exit diameter used as casing placeholder - chamber '
              'diameter NOT available; check the diameter in OpenRocket'),
     'throat': ('WARNING: casing diameter NOT available; throat diameter '
@@ -664,6 +674,11 @@ class OpenRocketExporter:
         case_d = _finite_positive(geometry.get('case_diameter'))
         chamber_l = _finite_positive(geometry.get('chamber_length'))
         prop_mass, prop_src = self.resolve_propellant_mass(md)
+        # V306/UÇUŞ-KÜTLE (kalem 2, S1): hibritte itici = HARCANAN, kalan
+        # (yanmayan tane şeridi + tankta kalan) motorun kuru kütlesine.
+        ayrim = self.resolve_eng_propellant_split(md)
+        if ayrim is not None:
+            prop_mass, prop_src = ayrim['consumed_kg'], ayrim['source']
         impulse, impulse_src = self.resolve_total_impulse(md)
         thrust_curve, thrust_source = self.resolve_thrust_curve(md)
 
@@ -700,7 +715,7 @@ class OpenRocketExporter:
             missing.append('thrust_curve')
             reasons['thrust_curve'] = (
                 'no time-resolved curve and no (thrust, burn_time) pair; a '
-                'thrust curve cannot be written without inventing one.')
+                'thrust curve cannot be written from these data.')
 
         # ÖH D36 / LU-1 + LU-2: sıvı çözücü yanma süresi verilmediğinde
         # ``burn_time`` / ``propellant_mass_kg`` YAYIMLAMAZ ve bunu
@@ -729,6 +744,8 @@ class OpenRocketExporter:
             'chamber_length': chamber_l,      # m
             'propellant_mass': prop_mass,     # kg
             'propellant_mass_source': prop_src,
+            # V306/UÇUŞ-KÜTLE (kalem 2): yanmadan uçan itici (yalnız hibrit)
+            'propellant_split': ayrim,
             'total_impulse': impulse,         # N·s
             'total_impulse_source': impulse_src,
             'thrust_curve': thrust_curve,
@@ -1195,6 +1212,58 @@ class OpenRocketExporter:
             return mdot * burn_time, 'mdot_x_burn_time'
 
         return None, 'none'
+
+    @staticmethod
+    def resolve_eng_propellant_split(motor_data: Dict) -> Optional[Dict]:
+        """Hibrit .eng: harcanan itici + yanmadan uçan kalan (V306/UÇUŞ-KÜTLE).
+
+        RASP başlığının 5. alanı "the weight of all consumables in the motor"
+        (hibritte tane + oksitleyici), 6. alanı "the weight of the motor
+        loaded and ready for flight" (thrustcurve.org, "RASP Engine File
+        Format", The Header Line; okundu 9 Kas 2026). OpenRocket uçuşta
+        kütleyi itici alanı kadar düşürür; bu yüzden itici = yanma boyunca
+        HARCANAN kütle, yüklü = kuru + YÜKLÜ itici. Eskiden itici alanı
+        ``propellant_mass_total``tı (yüklü ox + YANAN yakıt): boşalma kipinde
+        tankta kalan oksitleyici "yanıyor", regüle kipte yanmayan tane şeridi
+        dosyada hiç yoktu (L4 151,47 kg).
+
+        Kural uçuşun TEK kuralından okunur (``flight_vehicle.
+        motor_flight_thrust``: harcanan + ``propellant_residual_kg``); ikinci
+        bir bütçe yazılmaz. Yalnız hibrit sonuç (``propellant_mass_loaded_kg``
+        + ``propellant_mass_consumed_kg`` yayımlayan tek motor) için; katı ve
+        sıvıda ``None`` (yüklü = harcanan, dosya değişmez).
+        Döner: ``{'consumed_kg', 'residual_kg', 'curve_note', 'source'}`` ya
+        da None.
+        """
+        md = motor_data if isinstance(motor_data, dict) else {}
+        if (_finite_positive(md.get('propellant_mass_loaded_kg')) is None
+                or _finite_positive(md.get('propellant_mass_consumed_kg'))
+                is None):
+            return None
+        from hrma.analysis.flight_vehicle import motor_flight_thrust
+        ucus = motor_flight_thrust('hybrid', md)
+        harcanan = _finite_positive(ucus.get('propellant_consumed_kg'))
+        kalan = ucus.get('propellant_residual_kg')
+        if harcanan is None or not isinstance(kalan, (int, float)) \
+                or not np.isfinite(kalan) or kalan < 0.0:
+            return None
+        not_ = None
+        # Zaman Çözümlü eğrisi (``transient``) dosyaya yazılıyorsa o eğri
+        # kendi harcadığı kütleyi yayımlamaz (yalnız zaman/itki): itici alanı
+        # motorun kendi çözümünün harcadığıdır ve bu ADIYLA yazılır.
+        _t, _f, anahtar = OpenRocketExporter.real_thrust_curve(md)
+        if anahtar == 'transient':
+            not_ = ('the Time-Resolved thrust curve written below does not '
+                    'publish the propellant it consumes; the propellant '
+                    'field is the consumed propellant of the motor solution')
+        # Harcananın alanı uçuş kuralıyla aynı: boşalma eğrisinde çözümün
+        # harcadığı (propellant_mass_consumed_kg), regüle eğride motorun
+        # teslim bütçesinin kütlesi (propellant_mass_total).
+        kaynak = ('propellant_mass_consumed_kg'
+                  if ucus.get('curve_source') == 'motor_blowdown'
+                  else 'propellant_mass_total')
+        return {'consumed_kg': harcanan, 'residual_kg': float(kalan),
+                'curve_note': not_, 'source': kaynak}
 
     @classmethod
     def resolve_average_thrust(cls, motor_data: Dict) -> Tuple[Optional[float], str]:
@@ -1665,9 +1734,50 @@ class OpenRocketExporter:
         _t, source = OpenRocketExporter._drawn_wall(motor_data)
         return source or OpenRocketExporter._WALL_FALLBACK_LADDER_LABEL
 
+    #: V306/RAPOR-HATA (SIVI-SOĞUTMA DEVİR d) — cidar yayımlanmadığında
+    #: .eng yorumuna düşen satır (tek tanım yeri).
+    WALL_WITHHELD_LINE = (
+        '; wall thickness NOT published: the regenerative cooling circuit of '
+        'this design was not solved, so the motor model withholds the outer '
+        '(closeout) shell and every wall and mass sized from it; the casing '
+        'outer diameter is therefore not known and the diameter field is the '
+        'chamber inner diameter')
+
+    @staticmethod
+    def _wall_withheld(motor_data: Dict) -> bool:
+        """Motor modeli cidarı YAYIMLAMADI mı (soğutma devresi çözülmedi)?
+
+        V306/RAPOR-HATA (SIVI-SOĞUTMA DEVİR d, S1). ÖLÇÜLDÜ (F-1, mühendis
+        turu L5 'f1-b', taban 686c34b98, ``rapor/once/sivi_F1_tr.eng``):
+        devre çözülemeyip dış kabuk hükmü geri çekildiğinde (``chamber_
+        structure.cooling_circuit_status = 'not_solved'``, kabuk katmanı
+        ``verdict = 'withheld'``) .eng yorum satırı "wall used in the
+        diameter field = 161.00 mm" ve "it does resolve a case wall
+        thickness of 161.00 mm" diyor, RASP çap alanı 1856,2 + 2 × 161 =
+        2178,2 mm yazıyordu. Yayımlanmayan sayı dışa aktarımda da yoktur:
+        kabuk (ve onu içeren toplam cidar) bilinmiyor sayılır.
+        """
+        cs = _nested(motor_data or {}, 'structural_analysis',
+                     'chamber_structure')
+        if not isinstance(cs, dict):
+            return False
+        if cs.get('cooling_circuit_status') == 'not_solved':
+            return True
+        # Yalnız DIŞ KABUK (closeout) geri çekildiyse: astar katmanının
+        # 'withheld' hükmü (çözülmüş devrede de görülür; ölçüldü:
+        # test_unit_contract sıvı fikstürü, liner withheld + closeout pass)
+        # kalınlığın yayımlanmadığı anlamına GELMEZ.
+        return any(isinstance(k, dict) and k.get('role') == 'closeout'
+                   and k.get('verdict') == 'withheld'
+                   for k in (cs.get('wall_layers') or []))
+
     @staticmethod
     def _wall_thickness_m(motor_data: Dict) -> Optional[float]:
         """Kasa cidar kalınlığını [m] gerçek analizlerden çeker.
+
+        V306/RAPOR-HATA: motor modeli cidarı yayımlamadıysa
+        (:meth:`_wall_withheld`) None — yayımlanmayan kalınlık çapa da
+        yoruma da girmez.
 
         ÖH Z2 (defter P17S1-01, yüksek). Bu aday listesi ÇİZİLEN cidarı
         (``wall_thickness_used_mm``) hiç tanımıyordu; hibritte doğrudan
@@ -1684,6 +1794,8 @@ class OpenRocketExporter:
         ve kütle dökümü aynı sayıyı oradan okur). O sayı yoksa aşağıdaki
         eski merdiven yedek kalır.
         """
+        if OpenRocketExporter._wall_withheld(motor_data):
+            return None
         drawn, _source = OpenRocketExporter._drawn_wall(motor_data)
         if drawn is not None:
             return drawn
@@ -1784,6 +1896,8 @@ class OpenRocketExporter:
             wall = self._wall_thickness_m(md)
             if wall is not None:
                 case_d, case_src = chamber_d + 2.0 * wall, 'chamber_plus_wall'
+            elif self._wall_withheld(md):
+                case_d, case_src = chamber_d, 'chamber_wall_withheld'
             else:
                 case_d, case_src = chamber_d, 'chamber'
         if case_d is None and exit_d is not None:
@@ -2231,6 +2345,8 @@ class OpenRocketExporter:
                 lines.append(f"; wall used in the diameter field = "
                              f"{wall_m * 1000.0:.2f} mm; "
                              f"{self._wall_thickness_source(motor_data)}")
+        elif geometry.get('case_diameter_source') == 'chamber_wall_withheld':
+            lines.append(self.WALL_WITHHELD_LINE)
         if geometry.get('chamber_length') is None:
             lines.append("; length field = exporter placeholder; chamber length "
                          "NOT available in this export - correct it in OpenRocket")
@@ -2294,6 +2410,11 @@ class OpenRocketExporter:
         # sözdizimi bozulmasın diye uyarı ';' yorum satırı olarak motor
         # satırından ÖNCE eklenir (v2.6.26, ZERO-PAT-8).
         loaded_mass = prop_mass + (inert_mass if inert_mass is not None else 0.0)
+        # V306/UÇUŞ-KÜTLE (kalem 2, S1): hibritte yanmadan uçan itici
+        # (yanmayan tane şeridi + tankta kalan) yüklü kütlededir, itici
+        # alanında DEĞİL: OpenRocket yanma sonu kütlesini yüklü − itici
+        # olarak kurar. Yüklü = kuru + yüklü itici = motorun total_mass_kg'ı.
+        _ayrim = (resolved or {}).get('propellant_split')
         lines.append(f"; loaded mass: {MASS_SOURCE_LABELS[mass_source]}")
         if inert_mass is not None:
             lines.append(f"; inert mass used: {inert_mass:.3f} kg")
@@ -2311,6 +2432,15 @@ class OpenRocketExporter:
                          "overestimated until you set the case mass in "
                          "OpenRocket")
             lines.extend(self._structural_presence_lines(motor_data))
+        if _ayrim is not None:
+            loaded_mass = loaded_mass + _ayrim['residual_kg']
+            lines.append(
+                f"; propellant not burnt, flying to burnout as dead weight "
+                f"(unburnt fuel grain + oxidizer left in the tank): "
+                f"{_ayrim['residual_kg']:.3f} kg - included in the loaded "
+                f"mass, not in the propellant weight")
+            if _ayrim.get('curve_note'):
+                lines.append('; ' + _ayrim['curve_note'])
         # H4-7: aynı sonuçta ikinci bir "kuru kütle" varsa fark dosyada yazar;
         # okuyan kişi hangi sayının OpenRocket'a gittiğini ve hangi kalemin
         # yaklaşım olduğunu görmeli (sessiz ayrışma yasak).

@@ -148,7 +148,9 @@ def kati_hukum_gamma_suz(kati_motor):
     """
     from hrma.fea import bridge
     from tests.fea.yuk_modeli_araci import gamma_suz, geri_donus_yukte
-    s = _sessiz(bridge.run_structural_from_motor, gamma_suz(kati_motor))
+    # V306/KATI-MODEL (M-KATI-10): katıda ürün akışı artık kasa silindirini ağa koyar; bu araç yalnız-lüle konturunda ölçülmüştü, o geometri köprünün beyanlı kipiyle (include_chamber=False) korunur. Kasa silindirli ürün yolunun bekçisi: tests/test_v306_kati_model.py::TestMKati10YapisalAg.
+    s = _sessiz(bridge.run_structural_from_motor, gamma_suz(kati_motor),
+                include_chamber=False)
     geri_donus_yukte(s)
     return s
 
@@ -425,13 +427,24 @@ class TestP8B209KisitYeriDuyarliligi:
         # boyutlanan tane 124,134 -> 124,453 mm. Ölçüldü (K-D/capa_olcum.json):
         # köprü 0,21104364784837215 = (b) doğrudan çözüm 0,21104364784837215
         # (bit-aynı); CEA kapalı koşu 0,19946 (eski çapanın payı içinde).
-        assert kapi['bagil_fark'] == pytest.approx(0.21104, abs=5e-3), (
-            f"ölçülen fark {kapi['bagil_fark']} — fea-yuk çapası 0,21104")
+        # V306/KATI-KALAN (d993542f9, S1 tek nozul konturu: yakınsak giriş
+        # kasa iç çapında, STEP ile nokta nokta aynı): 0,21104 -> 0,19446.
+        # İki yönlü kâhin, aynı gövde (D26F1_KATI), V306/ONARIM-ALTYAPI
+        # betik/d26_capa_olcum.py: KATI-KALAN öncesi solid_rocket_engine.py
+        # 0,21104364784837215 (eski çapa bit-aynı) ⟷ bugünkü kod
+        # 0,19446176324237197 (CI Linux 0,19446176324346554). Pay (abs=5e-3)
+        # DEĞİŞMEDİ; hüküm yine geri çekiliyor, fark eşiğin (0,08001) çok
+        # üstünde.
+        assert kapi['bagil_fark'] == pytest.approx(0.19446, abs=5e-3), (
+            f"ölçülen fark {kapi['bagil_fark']} — çapa 0,19446 "
+            "(KATI-KALAN tek nozul konturu sonrası)")
         from hrma.fea import mesh_axisym as MA
         from hrma.fea import structural_axisym as SA
         from hrma.fea.bridge import extract_structural_inputs
         from tests.fea.yuk_modeli_araci import gamma_suz
-        g = _sessiz(extract_structural_inputs, gamma_suz(kati_motor))
+        # V306/KATI-MODEL (M-KATI-10): fikstürle aynı yalnız-lüle kipi.
+        g = _sessiz(extract_structural_inputs, gamma_suz(kati_motor),
+                    include_chamber=False)
         msh = kati_hukum_gamma_suz['mesh']
         m = _sessiz(MA.build_wall_mesh, g['contour'], g['thickness_m'],
                     n_axial=int(msh['n_axial']),

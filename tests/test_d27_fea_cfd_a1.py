@@ -134,10 +134,12 @@ def motorlar():
     for ad, (yol, yuk) in istek.items():
         veri = _sessiz(c.post, yol, json=yuk).get_json() or {}
         md = veri.get('motor', veri)
+        # V306/KATI-MODEL (M-KATI-10): katıda ürün akışı artık kasa silindirini ağa koyar; bu çapa yalnız-lüle konturunda ölçülmüştü, o geometri köprünün beyanlı kipiyle (include_chamber=False) korunur. Kasa silindirli ürün yolunun bekçisi: tests/test_v306_kati_model.py::TestMKati10YapisalAg.
+        _ek = {'include_chamber': False} if ad == 'kati' else {}
         cikti[ad] = {
             'motor': md,
-            'girdi': _sessiz(bridge.extract_structural_inputs, md),
-            'kopru': _sessiz(bridge.run_structural_from_motor, md),
+            'girdi': _sessiz(bridge.extract_structural_inputs, md, **_ek),
+            'kopru': _sessiz(bridge.run_structural_from_motor, md, **_ek),
         }
     return cikti
 
@@ -430,6 +432,19 @@ class TestD27UrunSayilariYenidenCapalandi:
         astar payıyla büyümesinin doğal sonucu. Bağımsız teyit yeni
         geometride: sabit 1024×16 ağ, iki kip kötümseri 2,683561 (ürün
         %0,043 uzakta; a7ee84f3e'de %0,063). Hüküm VERİLİYOR, gerekçe yok.
+
+        V3.0.6 YENİDEN ÇAPA (9 Kas, V306/ONARIM-ALTYAPI) — 2,68470 →
+        **2,61171**. Bilinçli S1 onarımı: d993542f9 (V306/KATI-KALAN, tek
+        nozul konturu — yakınsak giriş kasa iç çapında, STEP ile nokta
+        nokta aynı). Cidar DEĞİŞMEDİ (3,08287 mm); kontur girişte büyüdü
+        (r_max 62,226 → 64,226 mm, kontur toplamı 3,71082 → 3,83655), aynı
+        cidarda çember gerilmesi ∝ r → SF düştü (muhafazakâr yön). İki
+        yönlü kâhin, aynı gövde (betik ONARIM-ALTYAPI/betik/
+        d27_kati_sf_olcum.py, yerel/d27_kati_sf.jsonl): KATI-KALAN öncesi
+        solid_rocket_engine.py 2,6847039505650265 (eski çapa bit-aynı) ⟷
+        bugünkü kod 2,611705854410045. Bağımsız teyit yeni geometride:
+        sabit 1024×16 ağ kötümseri 2,610640 (ürün %0,041 uzakta). Pay
+        (abs=5e-4) DEĞİŞMEDİ; hüküm VERİLİYOR, gerekçe yok.
         """
         k = motorlar['kati']['kopru']
         from tests.fea.yuk_modeli_araci import izantropik_yukte
@@ -437,8 +452,8 @@ class TestD27UrunSayilariYenidenCapalandi:
         akma = self._akma_pa(motorlar['kati']['girdi'])
         turetilmis = akma / k['scl_lineerlestirme']['hukum_paydasi_pa']
         assert k['min_safety_factor'] == pytest.approx(turetilmis, rel=1e-12)
-        assert turetilmis == pytest.approx(2.68470, abs=5e-4), (
-            f'katı min SF {turetilmis} — V3.0.5 A2 çapası 2,68470')
+        assert turetilmis == pytest.approx(2.61171, abs=5e-4), (
+            f'katı min SF {turetilmis} — V3.0.6 KATI-KALAN çapası 2,61171')
         teyit = self._sabit_ag_kotumser(motorlar['kati']['girdi'])
         assert abs(turetilmis - teyit) / teyit < SA.DEFAULT_REFINE_TOL, (
             f'ürün {turetilmis} ⟷ sabit ağ {teyit}: bağımsız teyit tutmuyor')
