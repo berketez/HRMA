@@ -21,6 +21,7 @@
 \usepackage{longtable}
 \usepackage{float}
 \usepackage{amsmath}
+\usepackage{amssymb}
 \usepackage{chngcntr}
 \usepackage{hyperref}
 \usepackage{parskip}
@@ -54,7 +55,7 @@
 % ---- Üst/alt bilgi ----
 \pagestyle{fancy}
 \fancyhf{}
-\fancyhead[L]{\small\color{hrmagray}HRMA 3.0.6}
+\fancyhead[L]{\small\color{hrmagray}HRMA 3.0.7}
 \fancyhead[R]{\small\color{hrmagray}Kullanma Kılavuzu}
 \fancyfoot[C]{\small\color{hrmagray}\thepage}
 \renewcommand{\headrulewidth}{0.4pt}
@@ -102,7 +103,7 @@
 {\Huge\bfseries\color{hrmadark}Kullanma Kılavuzu}\\[10pt]
 {\large\color{hrmagray}Başlangıç, uygulamalı anlatım ve başvuru}\\[3cm]
 
-{\large Sürüm 3.0.6 \quad|\quad Kasım 2026}\\[6pt]
+{\large Sürüm 3.0.7 \quad|\quad Kasım 2026}\\[6pt]
 {\small\color{hrmagray}Geliştiren: Berke Tezgöçen \quad•\quad Fikir ve test: Ayberk Cem Aksoy}\\[1.5cm]
 
 \begin{notkutu}
@@ -201,7 +202,7 @@ Kılavuz iki bölümden oluşur.
 Arayüz adları & Ekranda görünen etiket, düğme ve sekme adları \ui{bu yazı tipiyle} ve ekrandaki biçimiyle yazılır. \\
 Alan kimliği & Proje dosyasında (\kod{.hrma}) ve sunucu iletilerinde geçen ad \kod{bu yazı tipiyle} yazılır (örnek: \kod{chamber\_\allowbreak{}pressure}). Kimlikten sayfaya dönüş: Ek~\ref{sec:ekd}. \\
 Birimler & SI. Basınçlar aksi yazılmadıkça mutlak ve bar cinsindendir. \\
-Sayılar & Türkçe metinde ondalık ayıracı virgüldür (209,7~s). Örnek sayıları, bu kılavuzun hazırlandığı sürümün (3.0.6) ekranından okunmuştur. \\
+Sayılar & Türkçe metinde ondalık ayıracı virgüldür (209,7~s). Örnek sayıları, bu kılavuzun hazırlandığı sürümün (3.0.7) ekranından okunmuştur. \\
 Yordamlar & Numaralı adımlar; her adımda yapılacak iş ve beklenen sonuç. \\
 \bottomrule
 \end{tabular}
@@ -224,11 +225,15 @@ kapatılabilir. Aşağıdaki erişimleri kullanıcı başlatır:
   (NASA GIBS) ve rakım ile yüzey hava verisi (Open-Meteo). İkisi de
   varsayılan olarak kapalıdır; açıldıklarında istek, bakılan bölgenin
   koordinatını sağlayıcıya iletir.
+  \item Fırlatma Sahası'nda bir harita paketinin indirilmesi: yalnız açık onay
+  kutusundaki \ui{Onayla ve indir} düğmesiyle, HRMA'nın kendi GitHub
+  sürümünden. GitHub hangi paketin istendiğini görür; kürede nereye
+  bakıldığı bilgisayardan çıkmaz (Bölüm~\ref{sec:harita-paket}).
 \end{enumerate}
 
 \subsection{Lisans}\label{sec:lisans}
 
-HRMA 3.0.6, GNU Genel Kamu Lisansı'nın 3. sürümü ya da (seçime bağlı olarak)
+HRMA 3.0.7, GNU Genel Kamu Lisansı'nın 3. sürümü ya da (seçime bağlı olarak)
 daha sonraki bir sürümü koşullarıyla dağıtılır (\kod{GPL-3.0-or-later}).
 Lisans metni kaynak deposunun kökündeki \kod{LICENSE} dosyasıdır; aynı metin
 kurulum paketinin uygulama klasöründe de bulunur (\kod{app/\allowbreak{}LICENSE}). Paket,
@@ -248,8 +253,8 @@ klasöründedir.
 \toprule
 \textbf{Platform} & \textbf{Paket} & \textbf{Not} \\
 \midrule
-Windows 10/11 (64 bit) & \kod{HRMA-Setup-3.0.6.exe} & Kullanıcı bazlı kurulum, yönetici hakkı gerekmez. Paket imzasızdır; SmartScreen uyarısı çıkabilir. \\
-macOS 11 ve üzeri, Apple Silicon & \kod{HRMA-Setup-3.0.6-macOS.dmg} & Intel işlemcili Mac bilgisayarlarda çalışmaz. Paket imzasızdır; ilk açılışta Gatekeeper onayı istenir. \\
+Windows 10/11 (64 bit) & \kod{HRMA-Setup-3.0.7.exe} & Kullanıcı bazlı kurulum, yönetici hakkı gerekmez. Paket imzasızdır; SmartScreen uyarısı çıkabilir. \\
+macOS 11 ve üzeri, Apple Silicon & \kod{HRMA-Setup-3.0.7-macOS.dmg} & Intel işlemcili Mac bilgisayarlarda çalışmaz. Paket imzasızdır; ilk açılışta Gatekeeper onayı istenir. \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -261,7 +266,7 @@ grafik kitaplıkları) paketin içindedir; ayrıca kurulum gerekmez.
 
 \textbf{Windows}
 \begin{enumerate}[leftmargin=1.6em]
-  \item \kod{HRMA-Setup-3.0.6.exe} dosyasını çalıştırın. Kurulum sihirbazı
+  \item \kod{HRMA-Setup-3.0.7.exe} dosyasını çalıştırın. Kurulum sihirbazı
   İngilizcedir: karşılama sayfasında \ui{Next}, klasör sayfasında
   \ui{Install}, son sayfada \ui{Finish} düğmesine basın. Son sayfadaki
   \ui{Launch HRMA now} işaretliyse uygulama açılır.
@@ -274,7 +279,7 @@ grafik kitaplıkları) paketin içindedir; ayrıca kurulum gerekmez.
 
 \textbf{macOS}
 \begin{enumerate}[leftmargin=1.6em]
-  \item \kod{HRMA-Setup-3.0.6-macOS.dmg} dosyasını açın.
+  \item \kod{HRMA-Setup-3.0.7-macOS.dmg} dosyasını açın.
   \item \kod{HRMA} simgesini \kod{Applications} klasörüne sürükleyin.
   \item İlk açılışta uygulamaya sağ tıklayın (ya da Control tuşuyla tıklayın),
   \ui{Aç} komutunu seçin ve açılan pencerede yeniden \ui{Aç} düğmesine basın.
@@ -299,7 +304,7 @@ Değiştirilmemiş eski bir örnek kopyası yeni sürümde güncel örnekle yeni
 
 \begin{table}[htbp]
 \centering\small
-\caption{Uygulamayla gelen örnek projeler (3.0.6)}\label{tab:ornekler}
+\caption{Uygulamayla gelen örnek projeler (3.0.7)}\label{tab:ornekler}
 \begin{tabular}{@{}>{\raggedright\arraybackslash}p{4.6cm}>{\raggedright\arraybackslash}p{6.6cm}>{\raggedright\arraybackslash}p{4.4cm}@{}}
 \toprule
 \textbf{Proje adı} & \textbf{Tasarım} & \textbf{Ekrandaki ana sonuç} \\
@@ -333,12 +338,64 @@ Açılışta yeni sürüm bulunursa bir pencere üç seçenek sunar.
 \toprule
 \textbf{Seçenek} & \textbf{Etkisi} \\
 \midrule
-\ui{Şimdi güncelle} & Kurulum dosyası indirilir (yüzde göstergesiyle), uygulama kapanır, kurulur ve yeniden açılır. macOS'ta kurulum birkaç dakika sürer (yayın notu: yaklaşık 4~dk); bu sırada uygulama elle açılmaz. \\
+\ui{Şimdi güncelle} & Kurulum dosyası indirilir (yüzde göstergesiyle), uygulama kapanır, kurulur ve yeniden açılır. Kurulum sürerken ``HRMA güncelleniyor'' penceresi açıktır (aşağıda). \\
 \ui{Daha sonra} & Pencere kapanır; uygulama bir sonraki açılışta yeniden sorar. \\
 \ui{Bu sürümü atla} & Bu sürüm yeniden sorulmaz. Karar \ui{Ayarlar} penceresindeki \ui{Atlanan sürümü sıfırla} ile geri alınır. \\
 \bottomrule
 \end{tabular}
 \end{table}
+
+\subsubsection*{Kurulum sırasındaki pencere}
+
+İndirme bitince uygulama ``HRMA şimdi kapanacak'' iletisini gösterir ve
+kapanır. Kurulumu yürüten yardımcı, uygulama kapanmadan önce küçük bir
+``HRMA güncelleniyor --- lütfen bekleyin'' penceresi açar
+(Şekil~\ref{fig:guncelleme}). Pencere uygulamadan bağımsız bir süreçtir;
+kurulum uygulama dosyalarını değiştirirken de açık kalır. Gösterdikleri:
+
+\begin{itemize}[leftmargin=1.4em]
+  \item kurulu sürüm ve kurulan sürüm (``3.0.6 → 3.0.7'' gibi);
+  \item kurulum aşamaları, durum imleriyle: $\checkmark$ tamamlandı, $\bullet$ sürüyor,
+  $\circ$ bekliyor, $\times$ hata. macOS'ta altı aşama vardır (HRMA'nın kapanması
+  bekleniyor; Kurulum görüntüsü açılıyor; Yeni sürüm kopyalanıyor;
+  Kopyalanan dosyalar denetleniyor; Yeni sürüm yerine konuyor; Yeni sürüm
+  açılıyor), Windows'ta dört (HRMA'nın kapanması bekleniyor; Yeni sürüm
+  kuruluyor; Kurulum denetleniyor; Yeni sürüm açılıyor);
+  \item macOS'ta kopya adımında kopyalanan ve toplam miktar ile oran
+  çubuğu; ikisi de kurulum betiğinin diskte ölçtüğü değerlerdir ve çubuk
+  yalnız iki değer de varken çizilir. Windows kurulum programı ilerleme
+  bildirmediği için Windows'ta oran gösterilmez, yalnız adım ve süre vardır;
+  \item kurulumun başlangıcından beri geçen süre;
+  \item ayrıntıların yazıldığı günlük dosyasının yolu (macOS).
+\end{itemize}
+
+Pencereyi kapatmak güncellemeyi durdurmaz. Kurulum tamamlanınca pencere
+``Güncelleme tamamlandı'' der, HRMA yeni sürümüyle açılırken 3~saniye
+içinde kendiliğinden kapanır. Kurulum tamamlanamazsa pencere açık kalır ve
+nedeni (örneğin ``Kurulum görüntüsü açılamadı.''), ne yapılacağını ve
+kurulum dosyasının yerini yazar; önceki sürüm yerindeyse ya da geri
+yüklendiyse bunu da söyler. Kurulum yardımcısı sonuç bildirmeden kapanırsa
+pencere bunu adıyla yazar ve elle kurulumu tarif eder. Kurulum 20~dakikayı
+geçerse ``Güncelleme olağandan uzun sürüyor'' satırı eklenir. Pencere,
+arayüzün o anki dilindedir.
+
+Windows'ta kurulum konsol penceresi de açık kalır ve adımları
+(\kod{[1/4]} … \kod{[4/4]}) yazar. Kurumsal grup ilkesi betikleri
+engelliyorsa durum penceresi açılmaz ve konsol tek gösterge olarak kalır.
+
+\begin{notkutu}
+\small Kurulumu, \emph{kurulu olan} sürümün yardımcısı yürütür. Bu pencere
+3.0.7'den sonraki sürümlere geçişte görünür. 3.0.6'dan 3.0.7'ye geçişi
+kurulu 3.0.6 yürütür; o geçişte bu pencere görünmez: uygulama kapanır ve
+kurulum bitince 3.0.7 kendiliğinden açılır.
+\end{notkutu}
+
+\ekran{img/v3_0_7/guncelleme_penceresi_tr.png}{``HRMA güncelleniyor''
+penceresi, macOS, kopya adımı. Görüntü, 3.0.6 → 3.0.7 güncellemesinin
+macOS'ta gerçek kurulum betiği ve gerçek pencereyle yapılan bir deneme
+kurulumunun kayıtlı durumundan, ürünün kendi pencere çizicisiyle
+alınmıştır: deneme paketi küçültülmüş bir pakettir (179~MB); tam paketin
+kopyası daha uzun sürer.}{fig:guncelleme}
 
 % =====================================================================
 \section{Başlarken: İlk 15 Dakika}\label{sec:ilk15}
@@ -755,9 +812,12 @@ Dış çap / çekirdek / boy & 75 / 32 / 360~mm & Boy, tane yığınının topla
 
 \ui{PERFORMANS ÖZETİ} on kart gösterir: \ui{DENİZ SEVİYESİ ISP} 125,3~s,
 \ui{VAKUM ISP} 141,5~s, \ui{ORTALAMA İTKİ} 1299~N, \ui{TEPE İTKİ} 1498~N,
-\ui{TEPE ODA BASINCI} 40,0~bar, \ui{YANMA SÜRESİ} 2,28~s, \ui{TOPLAM İMPULS}
-2957~N·s, \ui{C* VERİMİ} \%95,0, \ui{İTKİ KATSAYISI} 1,41, \ui{İTİCİ KÜTLESİ}
-2,41~kg.
+\ui{TEPE ODA BASINCI} 40,0~bar, \ui{YANMA SÜRESİ (ET TÜKENİŞİ)} 2,28~s,
+\ui{TOPLAM İMPULS} 2957~N·s, \ui{C* VERİMİ} \%95,0, \ui{İTKİ KATSAYISI} 1,41,
+\ui{İTİCİ KÜTLESİ} 2,41~kg. Kartların altındaki \ui{Teslim performansının
+dayanağı} notu verimlerin kaynağını yazar: yanma verimi 0,950, nozul verimi
+0,950 ve kinetik verim 0,970 formdan gelir; iki fazlı kayıp bu itici sınıfında
+hesaplanamaz ve dahil değildir (Bölüm~\ref{sec:kati-dayanak}).
 
 KNDX'in Isp'si düşüktür, çünkü yanma sıcaklığı düşük ve ürünlerin mol
 kütlesi yüksektir; $c^*$ yaklaşık $\sqrt{T_c/\mathcal{M}}$ ile ölçeklenir.
@@ -775,7 +835,7 @@ eğri ``artan-azalan'' biçimini alır. İtki eğrisi grafiğinin altındaki sat
 biçimi adıyla yazar. Boğaz iki çapla verilir: işlenen 18,40~mm ve boşaltma
 katsayılı etkin 18,22~mm.
 
-\ekran{img/v3_0_6/kati_sonuc_ozet_tr.png}{Katı örneğin \ui{PERFORMANS ÖZETİ} ve iki faz durum bandı: Isp'nin doğrulanmış bir iki faz düzeltmesi taşımadığı yazılıdır.}{fig:u2-ozet}
+\ekran{img/v3_0_7/kati_performans_dayanak_tr.png}{Katı örneğin \ui{PERFORMANS ÖZETİ}, iki faz durum bandı ve \ui{Teslim performansının dayanağı} notu: verimler formdan; iki fazlı kayıp bu itici sınıfında hesaplanamıyor ve dahil değil.}{fig:u2-ozet}
 
 \ekran{img/v3_0_6/kati_itki_egrisi_tr.png}{Katı örneğin itki eğrisi: artan-azalan biçim ve rejim sınırı notu.}{fig:u2-itki}
 
@@ -1257,7 +1317,7 @@ Hibrit tasarımcı & \kod{/\allowbreak{}hybrid} & Sıvı (ya da gaz) oksitleyici
 Katı tasarımcı & \kod{/\allowbreak{}solid} & Katı yakıtlı motor. & \ref{sec:kati} \\
 Sıvı tasarımcı & \kod{/\allowbreak{}liquid} & Çift iticili sıvı motor. & \ref{sec:sivi} \\
 Analiz Güvertesi ve Analiz Merkezi & tasarımcı sayfalarının içinde & Son hesap üzerinde ayrıntılı analizler. & \ref{sec:guverte} \\
-Fırlatma Sahası & \kod{/\allowbreak{}launch-site} & Saha seçimi ve çözülen uçuş yolu. & \ref{sec:saha} \\
+Fırlatma Sahası & \kod{/\allowbreak{}launch-site} & Saha seçimi, çözülen uçuş yolu ve iniş, görev izleme, harita paketleri. & \ref{sec:saha} \\
 Formüller & \kod{/\allowbreak{}formulas} & Çözücülerin kullandığı bağıntılar ve kaynakları. & \ref{sec:formuller} \\
 \bottomrule
 \end{tabular}
@@ -1326,9 +1386,11 @@ ve düğmeleri gösterir.
 \end{table}
 
 Proje adında Türkçe harf kullanılabilir; reddedilen ad, sorunlu karakteri
-söyler. 3.0.0 ve 3.0.5 projeleri 3.0.6'da açılır; proje dosyasının biçimi
-değişmedi. Dosya başka bir sürümle kaydedilmişse yükleme uyarısı iki sürümü
-adıyla yazar. 3.0.6 proje dosyasına Uçuş Dinamiği (6-DOF), Zaman Çözümlü Analiz ve
+söyler. 3.0.0, 3.0.5 ve 3.0.6 projeleri 3.0.7'de açılır; proje dosyasının
+biçimi değişmedi. Dosya başka bir sürümle kaydedilmişse yükleme uyarısı iki
+sürümü adıyla yazar. 3.0.7'de eklenen sıvı tasarım ortamı alanları proje
+dosyasına kaydedilir; bu alanları taşımayan eski bir sıvı proje deniz
+seviyesi tasarımıyla açılır (3.0.6 ile aynı). 3.0.6'dan beri proje dosyası Uçuş Dinamiği (6-DOF), Zaman Çözümlü Analiz ve
 Yörünge Analizi panellerinin kurulumunu da yazar; bu kurulumu taşımayan eski bir dosyada
 paneller sayfanın varsayılanıyla açılır ve bunu kendi notlarında söyler. Tek
 beyanlı göç katı projeler içindir: 3.0.1'den eski bir katı projede \ui{Oda Çapı (mm)} alanı tane
@@ -1458,11 +1520,11 @@ değerlerini taşır.
 \textbf{Ortam Basıncı (ABD Standart Atmosferi 1976), $P_a$} & \texttt{single\_\allowbreak{}pressure} & bar & 0 -- 1,2 & 1,013250 \\*
 \multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Hesaba etkisi:} İrtifadan ABD Standart Atmosferi 1976 (ISA) modeliyle hesaplanır. Fırlatma sahanızda ölçülen barometrik basıncı doğrudan da yazabilirsiniz; bu durumda alan, irtifa yeniden değiştirilene kadar sahaya özgü moda geçer.} \\ \midrule
 \textbf{Başlangıç İrtifası} & \texttt{alt\_\allowbreak{}start} & m & 0 -- 50000 & 0 \\*
-\multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Hesaba etkisi:} İrtifa profilinin başlangıç irtifası (m). Hesap bu irtifada yapılır: ISA 1976 ortam basıncı, tek irtifa kipinde olduğu gibi nozulun karşı basıncıdır. Form aralığı 0-50000 m. \emph{Boşsa:} 0 m.} \\ \midrule
+\multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Hesaba etkisi:} İrtifa profilinin başlangıç irtifası (m). Motor bu irtifada tasarlanır: ISA 1976 ortam basıncı, tek irtifa kipinde olduğu gibi nozulun karşı basıncıdır. Hesapla'dan sonra gösterilen İrtifa Profili tablosu buradan başlar. Form aralığı 0-50000 m. \emph{Boşsa:} Boş: istek gönderilmez (değer varsayılmaz).} \\ \midrule
 \textbf{Bitiş İrtifası} & \texttt{alt\_\allowbreak{}end} & m & 0 -- 50000 & 10000 \\*
-\multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Hesaba etkisi:} İrtifa profilinin bitiş irtifası (m). Yalnız Profili Önizle grafiği kullanır (başlangıçtan bitiş irtifasına ISA 1976 ortam basıncı); hesap bu alanı okumaz. Form aralığı 0-50000 m.} \\ \midrule
+\multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Hesaba etkisi:} İrtifa profilinin bitiş irtifası (m). Hesapla'dan sonra İrtifa Profili tablosu aynı nozulu (sabit geometri) başlangıçtan bu irtifaya kadar değerlendirir: her noktada ISA 1976 ortam basıncından itki ve Isp. Motor tasarımını değiştirmez. Form aralığı 0-50000 m; başlangıç irtifasından farklı olmalıdır. \emph{Boşsa:} Boş: istek gönderilmez.} \\ \midrule
 \textbf{Nokta Sayısı} & \texttt{alt\_\allowbreak{}points} &  & 3 -- 100 & 10 \\*
-\multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Hesaba etkisi:} Profili Önizle eğrisinin başlangıç ve bitiş irtifası arasındaki nokta sayısı. Hesap bu alanı okumaz. Form aralığı 3-100.} \\ \midrule
+\multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Hesaba etkisi:} İrtifa Profili tablosunun (ve Profili Önizle eğrisinin) başlangıçtan bitiş irtifasına eşit aralıklı nokta sayısı. Form aralığı 3-100, tam sayı. \emph{Boşsa:} Boş: istek gönderilmez.} \\ \midrule
 \end{longtable}}
 
 {\small
@@ -1512,7 +1574,9 @@ değerlerini taşır.
 \textbf{L* Değeri, $L^*$} & \texttt{l\_\allowbreak{}star} & m & \ensuremath{\ge}\,0,1 & (boş) \\*
 \multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Hesaba etkisi:} Karakteristik uzunluk L* = V\_c / A\_t, m. Oda hacmi V\_c = L*\ensuremath{\cdot}A\_t olduğundan oda boyunu (ve onunla oda ve gövde kütlesini) belirler; oda boyunu elle verdiyseniz o geçerlidir. Sıfır ya da negatif değer adıyla reddedilir. \emph{Boşsa:} 1,0 m kullanılır ve sonuçta varsayılan olarak beyan edilir (HRMA yer tutucusu, yakıta özgü bir değer değildir).} \\ \midrule
 \textbf{Başlangıç Port Çapı, $D_{p,0}$} & \texttt{initial\_\allowbreak{}port\_\allowbreak{}diameter} & mm & 0 -- 500 & 0 \\*
-\multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Hesaba etkisi:} Yakıt bloğunun başlangıç port çapı. Başlangıçtaki oksitleyici kütle akısını, regresyon hızını ve tüm itki-zaman eğrisini belirler. Portun tasarım kütle akısından (350 kg/m2.s ya da sonlu yanma altında girdiğiniz oda Gox değeri) otomatik boyutlandırılması için 0 bırakın. \emph{Boşsa:} 0 = otomatik} \\ \midrule
+\multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Hesaba etkisi:} Yakıt bloğunun başlangıç port çapı. Başlangıçtaki oksitleyici kütle akısını, regresyon hızını ve tüm itki-zaman eğrisini belirler. \emph{Boşsa:} Portun tasarım kütle akısından (aşağıdaki Kütle Akısı alanı; orası boş ya da 0 ise 350 kg/m\textsuperscript{2}\ensuremath{\cdot}s, HRMA seçimi) otomatik boyutlandırılması için 0 bırakın.} \\ \midrule
+\textbf{Kütle Akısı, $G$} & \texttt{mass\_\allowbreak{}flux\_\allowbreak{}chamber} & kg/\allowbreak{}m\textsuperscript{2}\ensuremath{\cdot}s & 0 -- 1000 & 0 \\*
+\multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Hesaba etkisi:} Yakıt portundaki başlangıç oksitleyici kütle akısı, G\_ox = \ensuremath{\dot m}\_ox / A\_port, kg/m\textsuperscript{2}\ensuremath{\cdot}s; her yanma tipinde kullanılır. Başlangıç port çapı verilmediyse portu boyutlandırır: A\_port = \ensuremath{\dot m}\_ox / G\_ox (bütün portların toplamı); regresyon yasası ṙ = a\ensuremath{\cdot}G\_ox\textasciicircum{}n üzerinden (çözücü oksitleyici akısını kullanır) yakıt bloğu boyunu da belirler. Başlangıç port çapını verdiyseniz bu alan kullanılmaz, akı porttan türetilir. 600 kg/m\textsuperscript{2}\ensuremath{\cdot}s'nin üstünde port taşması (flooding) uyarısı verilir (HRMA eşiği). Form aralığı 0-1000. \emph{Boşsa:} Boş ya da 0: 350 kg/m\textsuperscript{2}\ensuremath{\cdot}s kullanılır (HRMA seçimi, ölçülmüş bir değer değildir) ve sonuç tasarım akısını bildirir.} \\ \midrule
 \textbf{Port Sayısı boş = 1 port, $N_p$} & \texttt{port\_\allowbreak{}count} &  & \ensuremath{\ge}\,1 & (boş) \\*
 \multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Hesaba etkisi:} Yakıt bloğundaki eşdeğer dairesel yanma portu sayısı. Yanma alanını, port akış alanını ve akustik mod sayısını ölçekler; itkiyi, oda basıncını ve kararlılık hükmünü değiştirir. Birden çok portta çözücü, portlar arası etkileşimin, kanat kalınlığının ve port birleşmesinin MODELLENMEDİĞİNİ beyan eder. \emph{Boşsa:} Tek port için boş bırakın.} \\ \midrule
 \textbf{Ae/At Oranı genişleme oranı, 0=otomatik, $\varepsilon$} & \texttt{expansion\_\allowbreak{}ratio} &  & \ensuremath{\ge}\,0 & (boş) \\*
@@ -1528,9 +1592,7 @@ değerlerini taşır.
 \textbf{Artık Et Kalınlığı, $w_r$} & \texttt{residual\_\allowbreak{}web\_\allowbreak{}thickness} & mm & \ensuremath{\ge}\,0 & (boş) \\*
 \multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Hesaba etkisi:} Yanma sonu port(lar)ı ile yakıt bloğunun dış yüzeyi arasında bırakılan yakıt eti. Blok dış çapına bu değerin 2 katını ekler. \emph{Boşsa:} 0 demektir: nominal artık yakıt sıfır, idealize bir boyutlandırma varsayılanı; ısıl koruma (astar/yalıtım) ve regresyon belirsizliği dahil değildir, port eksen boyunca düzgün modellendiği için arka uçtaki yerel delinme yakalanmaz.} \\ \midrule
 \textbf{Daralma Oranı Ac/At, $\varepsilon_c$} & \texttt{contraction\_\allowbreak{}ratio} &  & 0 -- 10 & (boş) \\*
-\multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Hesaba etkisi:} Daralma oranı A\_c/A\_t (oda kesit alanının boğaz alanına oranı). Nozulun yakınsak koni boyunu ve sonlu alanlı yanma tipinde odadaki Mach sayısını ve enjektör yüzü / nozul durgunluk basıncı oranını belirler (izentropik alan bağıntısı, Sutton ve Biblarz Böl. 3). 2'nin altında uyarı verilir. Form aralığı 0-10; burada 0'dan büyük bir değer kütle akısını temizler ve kapatır. \emph{Boşsa:} 1'den büyük değer olduğu gibi kullanılır; boş ya da 0 (1'e kadar her değer) ise oda geometrisinden türetilir: (D\_ch/d\_t)\textsuperscript{2}.} \\ \midrule
-\textbf{Kütle Akısı, $G$} & \texttt{mass\_\allowbreak{}flux\_\allowbreak{}chamber} & kg/\allowbreak{}m\textsuperscript{2}\ensuremath{\cdot}s & 0 -- 1000 & 0 \\*
-\multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Hesaba etkisi:} Yakıt portundaki başlangıç oksitleyici kütle akısı, G\_ox = \ensuremath{\dot m}\_ox / A\_port, kg/m\textsuperscript{2}\ensuremath{\cdot}s. Başlangıç port çapı verilmediyse portu boyutlandırır: A\_port = \ensuremath{\dot m}\_ox / G\_ox (bütün portların toplamı); regresyon yasası ṙ = a\ensuremath{\cdot}G\_ox\textasciicircum{}n üzerinden (çözücü oksitleyici akısını kullanır) yakıt bloğu boyunu da belirler. Başlangıç port çapını verdiyseniz bu alan kullanılmaz, akı porttan türetilir. 600 kg/m\textsuperscript{2}\ensuremath{\cdot}s'nin üstünde port taşması (flooding) uyarısı verilir (HRMA eşiği). Form aralığı 0-1000; burada 0'dan büyük bir değer daralma oranını temizler ve kapatır. \emph{Boşsa:} Boş ya da 0: 350 kg/m\textsuperscript{2}\ensuremath{\cdot}s kullanılır (HRMA seçimi, ölçülmüş bir değer değildir) ve sonuç tasarım akısını bildirir.} \\ \midrule
+\multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Hesaba etkisi:} Daralma oranı A\_c/A\_t (oda kesit alanının boğaz alanına oranı). Her yanma tipinde nozulun yakınsak koni boyunu, sonlu alanlı yanma tipinde ayrıca odadaki Mach sayısını ve enjektör yüzü / nozul durgunluk basıncı oranını belirler (izentropik alan bağıntısı, Sutton ve Biblarz Böl. 3). 2'nin altında uyarı verilir. Form aralığı 0-10. \emph{Boşsa:} 1'den büyük değer olduğu gibi kullanılır; boş ya da 0 (1'e kadar her değer) ise oda geometrisinden türetilir: (D\_ch/d\_t)\textsuperscript{2}.} \\ \midrule
 \end{longtable}}
 
 {\small
@@ -1735,6 +1797,24 @@ değerlerini taşır.
 \end{longtable}}
 % <<OTO-SON:hibrit-girdiler>>
 
+\paragraph{Kütle Akısı ve Daralma Oranı.} İki alan her yanma tipinde görünür
+ve hesaba girer: \ui{Kütle Akısı} port boyutlandırmasının girdisidir
+(\ui{Başlangıç Port Çapı}'nın yanında), \ui{Daralma Oranı} nozulun yakınsak
+konturunu belirler (yanma tipinin yanında). Boş \ui{Kütle Akısı} gönderilmez;
+motor tasarım akısı 350~kg/m\textsuperscript{2}$\cdot$s kullanılır. Sonlu
+tipte iki alan birlikte boş bırakılabilir; oran geometriden gelir.
+
+\paragraph{İrtifa Profili.} \ui{UÇUŞ ORTAMI} bölümünde \ui{İrtifa Profili} sekmesi seçilince
+motor başlangıç irtifasında tasarlanır; Hesapla'dan sonra sonuç bölümündeki
+\ui{İrtifa Profili} tablosu aynı nozulu (sabit geometri) başlangıçtan bitiş
+irtifasına kadar eşit aralıklı noktalarda değerlendirir: irtifa, ortam
+basıncı, itki, o irtifadaki Isp ve not sütunları; son satır vakumdur.
+Değerler motorun kendi sonucundan aynı nozul bağıntısıyla
+($F(h) = F_{tas} + (p_{tas} - p_a(h))A_e$) kurulur; tasarım irtifası satırı
+motorun itkisiyle aynıdır. Akış ayrılması öngörülen satırda itki ve Isp
+yazılmaz, nedeni notta yer alır. Başlangıç, bitiş ya da nokta sayısı boşsa
+istek gönderilmez ve boş alan adıyla yazılır.
+
 \subsection{Çıktılar}
 
 \begin{longtable}{@{}>{\raggedright\arraybackslash}p{4.4cm}>{\raggedright\arraybackslash}p{1.3cm}>{\raggedright\arraybackslash}p{5.0cm}>{\raggedright\arraybackslash}p{4.9cm}@{}}
@@ -1749,7 +1829,8 @@ değerlerini taşır.
 \ui{ISP (TASARIM NOKTASI, TASARIM İRTİFASI ORTAMINDA)} & s & Tasarım noktasında teslim özgül impuls. & $c^*\,C_F/g_0$; $c^* = \eta_{c^*}\times$ denge $c^*$ (Cantera). \\
 \ui{İTKİ}, \ui{ODA BASINCI} & N, bar & Tasarım noktası; girdi. & Form. \\
 \ui{KÜTLE DEBİSİ} & kg/s & Toplam itici debisi. & $F/(I_{sp}\,g_0)$. \\
-\ui{YAPISAL ASGARİ EK} & -- & Yapısal zincirin hükmü ve kazanılmış asgari emniyet katsayısı. & Cidar denetimi (Bölüm~\ref{sec:hib-cidar}). \\
+\ui{YAPISAL ASGARİ EK} & -- & Yapısal zincirin hükmü ve kazanılmış asgari emniyet katsayısı. Teknik PDF aynı kartı belirleyen istasyonla taşır; HRMA'nın kendi boyutlandırdığı ya da imalat asgari kalınlığının belirlediği istasyon kendi adıyla ayrı satırdadır ve ``doğrulanmış'' sayılmaz. & Cidar denetimi (Bölüm~\ref{sec:hib-cidar}). \\
+\ui{İrtifa Profili} tablosu & m, bar, N, s & Profil kipinde aynı nozulun irtifa boyunca itki ve Isp'si, son satır vakum. & Motorun tasarım noktasından sabit geometri bağıntısı; ayrılan satır sayısız. \\
 Boğaz / çıkış çapı & mm & Nozul ölçüleri. & Boğaz: $\dot m\,c^*/(C_d\,P_c)$; çıkış: $\varepsilon$. \\
 Genişleme oranı & -- & $A_e/A_t$. & Girdi ya da $P_e = P_a$ çözümü. \\
 Oda çapı, uzunluğu, hacmi & mm, cm\textsuperscript{3} & Yanma odası boyutları. & Yakıt bloğu boyutlandırması ve L*. \\
@@ -2246,6 +2327,64 @@ kullanıcı girdisi diye beyan edilir.
 \end{longtable}}
 % <<OTO-SON:kati-girdiler>>
 
+\subsection{Teslim performansının dayanağı}\label{sec:kati-dayanak}
+
+Performans Özeti'nin altındaki \ui{Teslim performansının dayanağı} notu,
+yayımlanan Isp, itki ve toplam impulsun hangi verimlerle kurulduğunu satır
+satır yazar:
+
+\begin{itemize}[leftmargin=1.4em]
+  \item \textbf{Yanma verimi} ($c^*$ verimi): formdaki değer ya da girdiğiniz
+  değer; ikisi de ``doğrulanmadı'' diye yazılır.
+  \item \textbf{Nozul verimi}: formda bir değer varsa o kullanılır ve itici
+  tablosundaki değerin yerine geçer; çözücü bu değerin hangi kayıpları
+  kapsadığını bilmez. Form alanı gönderilmezse itici tablosunun değeri
+  kullanılır (kompozit 0,985, şeker 0,978, çift bazlı 0,981; 15° konik nozul
+  referansı).
+  \item \textbf{Kinetik verim}: formdaki değer.
+  \item \textbf{İki fazlı kayıp} (yoğuşmuş parçacıkların nozul kaybı): uygulanıp
+  uygulanmadığı, uygulandıysa kaybı ve bandı.
+\end{itemize}
+
+\paragraph{İki fazlı kayıp kuralı.} Alüminyumlu kompozit iticide (yoğuşmuş faz
+kesri \%0--40, boğaz çapı en az 25,4~mm) yerleşik tahmin NASA SP-8039'a
+çapalı, boyut düzeltmeli bir mühendislik tahminidir. Tahmin yalnız nozul ya da
+kinetik verimin girilmediği hesapta, itici tablosunun nozul verimiyle birlikte
+uygulanır. Katı sayfası nozul ve kinetik verim alanlarını her hesapta
+gönderdiği için sayfadaki sayılar 3.0.6 ile aynıdır: toplu verim girdisi bu
+kaybı zaten içerir ve kayıp iki kez sayılmaz. Kendi iki fazlı kayıp
+katsayınızı girerseniz o değer geçerlidir ve yerleşik tahmin uygulanmaz.
+Yoğuşmuş fazı olmayan iticide (alüminyumsuz kompozit, çift bazlı) kayıp
+yoktur. Korelasyonun aralığı dışındaki iticide (KN-şeker ailesi; örnek KNDX)
+ve 25,4~mm'den küçük boğazda kayıp hesaplanamaz: not bunu ``dahil DEĞİL ve
+hesaplanamıyor'' diye yazar, uyarı listesine de bir satır düşer. Bu, kaybın
+sıfır olduğu anlamına gelmez; gerçek motor yayımlanan değerlerden azını verir.
+
+Katı örnekteki not için bkz. Şekil~\ref{fig:u2-ozet}.
+
+\paragraph{Yanma süresi.} Yayımlanan süre \ui{Yanma Süresi (et tükenişi)}
+adını taşır: anlık tutuşma ve eş zamanlı tükenişle et (web) tükenme süresidir.
+Test kayıtları genellikle etki süresini verir (\%5 itki eşiğinden, AEDC-TR-74-83
+tanımı); etki süresi tutuşma yükselişini ve tükeniş sonrası inişi içerdiği için
+genellikle birkaç yüzde daha uzundur. İki süre birbirine çevrilmez. Teknik PDF
+aynı adı ve tanımı taşır.
+
+\paragraph{Test irtifası.} \ui{Test İrtifası} (ya da ortam basıncı) deniz
+seviyesinde değilse itki eğrisi o ortamda çözülür ve ortama bağlı dört kart
+\ui{Test ortamında} önekini alır (ortalama itki, tepe itki, toplam impuls, itki
+katsayısı). Yanlarına \ui{Deniz seviyesinde toplam impuls} kartı eklenir.
+Nozul deniz seviyesinde akış ayrılmasıyla çalışıyorsa deniz seviyesi kartları
+\ui{(akış ayrılmış)} der ve kartların altına not düşülür. Deniz seviyesi
+testinde kartlar değişmez.
+
+\paragraph{Emniyet sınırı.} Yanma benzetimi oda basıncı 500~bar'ı ya da süre
+1000~s'yi aşarsa durur. Bu durumda tasarım yayımlanmaz; istek adlı retle
+döner (``Yanma benzetimi yakıt tükenmesiyle değil, bir emniyet sınırında
+durdu'') ve sıfır süreli, sıfır Isp'li bir sonuç gösterilmez. Monte Carlo
+belirsizlik koşusunda sınırda duran örnekler başarısız sayılır, istatistiğe
+girmez ve ayrı bir satırla bildirilir; tepe basınç istatistikleri yalnız
+yakıtı tükenen örnekleri kapsar.
+
 \subsection{Çıktılar}
 
 \begin{longtable}{@{}>{\raggedright\arraybackslash}p{4.4cm}>{\raggedright\arraybackslash}p{1.3cm}>{\raggedright\arraybackslash}p{5.0cm}>{\raggedright\arraybackslash}p{4.9cm}@{}}
@@ -2260,7 +2399,7 @@ kullanıcı girdisi diye beyan edilir.
 \ui{DENİZ SEVİYESİ ISP}, \ui{VAKUM ISP} & s & Teslim özgül impuls. Deniz seviyesi Isp aynı nozulun 101,325~kPa'daki değeridir; test irtifası verilmişse o ortamın Isp'si ayrı kartta (\ui{Test ortamında Isp}, irtifa ve basınçla) yazılır. & İç balistik çözüm ve verim zinciri (\ui{5. VERİM VE DENEYSEL KATSAYILAR}). \\
 \ui{ORTALAMA İTKİ}, \ui{TEPE İTKİ} & N & Ortalama = toplam impuls / yanma süresi. & İtki eğrisi. \\
 \ui{TEPE ODA BASINCI} & bar & Eğrinin en büyük basıncı. & İç balistik denge. \\
-\ui{YANMA SÜRESİ} & s & Ateşlemeden et tükenişine. & İtki eğrisinin tamamı. \\
+\ui{YANMA SÜRESİ (ET TÜKENİŞİ)} & s & Ateşlemeden et tükenişine (anlık tutuşma, eş zamanlı tükeniş); test kayıtlarının etki süresi değildir. & İtki eğrisinin tamamı (Bölüm~\ref{sec:kati-dayanak}). \\
 \ui{TOPLAM İMPULS} & kN·s & İtki eğrisinin integrali. & \\
 \ui{C* VERİMİ}, \ui{İTKİ KATSAYISI}, \ui{İTİCİ KÜTLESİ} & \%, --, kg & & Verim girdileri; nozul; tane hacmi $\times\rho_p$. \\
 Boğaz çapı (işlenen, etkin) & mm & İşlenen çap ve boşaltma katsayılı etkin ses alanı çapı. & Tasarım basıncı. \\
@@ -2416,8 +2555,14 @@ HRMA boyutlandırır). Cidar sıcaklığı alanı bir tasarım hedefidir; sını
 \multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Hesaba etkisi:} Motor çevrimi: iticilerin odaya nasıl ulaştığı. Basınç beslemeli: odayı tank basıncı besler, turbopompa yoktur. Gaz jeneratörlü ve tap-off: pompaları bir türbin dalı sürer ve bu dal ayrı atılır (açık çevrim). Kademeli yanma, tam akışlı kademeli yanma ve genleşmeli: türbin akışı ana odaya devam eder (kapalı çevrim). Besleme sistemi, turbopompa ve güç dengesi çözümünü değiştirir. Seçenekler: Basınç Beslemeli; Gaz Jeneratörlü; Kademeli Yanma; Tam Akışlı Kademeli Yanma; Genleşmeli Çevrim; Tap-Off Çevrimi.} \\ \midrule
 \textbf{Ön Yakıcı Tipi} & \texttt{preburner\_\allowbreak{}type} &  &  & Yakıtça Zengin \\*
 \multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Hesaba etkisi:} Kademeli yanmada ön yakıcı ya yakıtça zengin (RS-25, RD-0120) ya da oksitleyicice zengin (RD-180, NK-33) çalışır. Bu seçim türbini süren gazı ve pompa basınç merdivenini belirler. Tam akışlı kademeli yanmada iki ön yakıcı da bulunduğu için seçim gerekmez. Seçenekler: Yakıtça Zengin; Oksitleyicice Zengin.} \\ \midrule
-\textbf{Hedef Motor İtkisi (deniz seviyesi), $F$} & \texttt{thrust} & N & 100 -- 10000000 & (boş) \\*
-\multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Hesaba etkisi:} Deniz seviyesi tasarım noktasındaki motor itkisi, N: ortam basıncı 1,01325 bar (ISA deniz seviyesi). Açık çevrimde (gaz jeneratörü, tap-off) bu MOTOR itkisidir = ana oda + türbin egzozu; itici debisi, boğaz ve tanklar ondan boyutlanır. Vakum itkisi hedef olarak girilemez: vakum itkisi bu tasarım noktasından hesaplanır ve ayrıca yayımlanır. Kabul aralığı: 100 N - 10 MN. \emph{Boşsa:} Bu alan zorunlu bir tasarım noktasıdır: boş bırakılırsa istek adıyla reddedilir.} \\ \midrule
+\textbf{Tasarım Ortamı} & \texttt{design\_\allowbreak{}ambient\_\allowbreak{}mode} &  &  & Deniz seviyesi (1,01325 bar) \\*
+\multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Hesaba etkisi:} Motorun tasarlandığı ortam basıncı. Girdiğiniz itki bu ortam basıncındaki motor itkisidir; itici debisi ve boğaz orada boyutlanır, nozulun yapışık akışı da orada denetlenir (Summerfield ölçütü). İrtifa: girdiğiniz irtifanın standart atmosfer (ISA) basıncı. Ortam basıncı: girdiğiniz basınç. Vakum: sıfır ortam basıncı, üst kademe ve uzay motorları için. Deniz seviyesinde ayrılan bir nozul irtifa ya da vakum tasarımında geçerlidir; sonuçlar deniz seviyesi durumunu (yer testi) ayrıca yazar. Deniz seviyesi dışındaki her seçim nozul genleşme oranını ister. Değiştirilmezse tasarım ortamı deniz seviyesidir. Seçenekler: Deniz seviyesi (1,01325 bar); İrtifa (standart atmosfer); Ortam basıncı; Vakum.} \\ \midrule
+\textbf{Tasarım İrtifası} & \texttt{design\_\allowbreak{}ambient\_\allowbreak{}altitude\_\allowbreak{}m} & m & 0 -- 84852 & (boş) \\*
+\multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Hesaba etkisi:} Deniz seviyesinden tasarım irtifası, m (geometrik irtifa). Tasarım ortamı basıncı bu irtifadaki standart atmosfer (ISA, US Standard Atmosphere 1976) basıncıdır; irtifa performans tablosu ve yörünge aynı atmosferi kullanır. Kabul aralığı 0-84852. \emph{Boşsa:} Yalnız tasarım ortamı İrtifa iken okunur; orada boş bırakılırsa istek adıyla reddedilir.} \\ \midrule
+\textbf{Tasarım Ortamı Basıncı} & \texttt{design\_\allowbreak{}ambient\_\allowbreak{}pressure\_\allowbreak{}bar} & bar & 0 -- 1,01325 & (boş) \\*
+\multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Hesaba etkisi:} Tasarım ortamı basıncı, bar. Girdiğiniz motor itkisi bu ortam basıncındaki itkidir. 0 vakumdur; 1,01325 deniz seviyesidir. Kabul aralığı 0-1,01325. \emph{Boşsa:} Yalnız tasarım ortamı Ortam basıncı iken okunur; orada boş bırakılırsa istek adıyla reddedilir.} \\ \midrule
+\textbf{Hedef Motor İtkisi (tasarım ortamında), $F$} & \texttt{thrust} & N & 100 -- 10000000 & (boş) \\*
+\multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Hesaba etkisi:} Tasarım noktasındaki motor itkisi, N; Tasarım Ortamı alanında seçilen ortamda: varsayılan deniz seviyesi (1,01325 bar), girilen irtifanın basıncı, girilen ortam basıncı ya da vakum. Açık çevrimde (gaz jeneratörü, tap-off) bu MOTOR itkisidir = ana oda + türbin egzozu; itici debisi, boğaz ve tanklar ondan boyutlanır. Vakum itkisinden tasarlamak için tasarım ortamı olarak vakumu seçin; deniz seviyesi ya da irtifa tasarımının vakum itkisi bu tasarım noktasından hesaplanır ve ayrıca yayımlanır. Kabul aralığı: 100 N - 10 MN. \emph{Boşsa:} Bu alan zorunlu bir tasarım noktasıdır: boş bırakılırsa istek adıyla reddedilir.} \\ \midrule
 \textbf{Oda Basıncı Pc, $P_c$} & \texttt{chamber\_\allowbreak{}pressure} & bar & 10 -- 500 & (boş) \\*
 \multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Hesaba etkisi:} Yanma odasının çalışma basıncı. Yüksek basınç Isp'yi artırır ama karmaşıklığı da artırır. Basınç beslemeli: 10-50 bar, gaz jeneratörlü: 50-150 bar, kademeli yanma: 150-300 bar. Kabul edilen aralık: 10-500 bar. \emph{Boşsa:} Bu alan zorunlu bir tasarım noktasıdır: boş bırakılırsa istek adıyla reddedilir.} \\ \midrule
 \textbf{Besleme Sistemi Basıncı, $P_{feed}$} & \texttt{feed\_\allowbreak{}pressure} & bar & 1 -- 1000 & 130 \\*
@@ -2530,7 +2675,7 @@ HRMA boyutlandırır). Cidar sıcaklığı alanı bir tasarım hedefidir; sını
 \textbf{Soğutma Tipi} & \texttt{cooling\_\allowbreak{}type} &  &  & Rejeneratif (Yakıtla Soğutma) \\*
 \multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Hesaba etkisi:} Yüksek oda sıcaklıklarını (3000 K üzeri) yönetme yöntemi. Rejeneratif: yakıt/soğutucu kanalları, en iyi performans, karmaşık. Ablatif: feda edilen astar, daha basit, sınırlı tekrar kullanım. Film: itici filmiyle soğutma. Işınım: yalnızca uzay motorları. Seçenekler: Rejeneratif (Yakıtla Soğutma); Ablatif Astar; Film Soğutma; Işınımla Soğutma; Atımlı Soğutma.} \\ \midrule
 \textbf{Nozul Genleşme Oranı \ensuremath{\varepsilon}e, $\varepsilon$} & \texttt{nozzle\_\allowbreak{}expansion\_\allowbreak{}ratio} &  & 1,5 -- 300 & (boş) \\*
-\multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Hesaba etkisi:} Çıkış alanının boğaz alanına oranı (Ae/At). Nozul çıkışını ve onunla itki katsayısını belirler: büyük oran vakum özgül itkisini artırır ama nozulu deniz seviyesinde aşırı genleştirir; düşük oda basıncında akış ayrılır ve motorun boyutlandırıldığı deniz seviyesi itkisi çöker (sonuçlar ayrılma uyarısı verir). Kabul aralığı 1,5-300. \emph{Boşsa:} Çözücü çıkış basıncını deniz seviyesi ortam basıncına eşler (ortama eşlenmiş; sonuçlar oranın kaynağını adıyla yazar).} \\ \midrule
+\multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Hesaba etkisi:} Çıkış alanının boğaz alanına oranı (Ae/At). Nozul çıkışını ve onunla itki katsayısını belirler: büyük oran vakum özgül itkisini artırır ama nozulu yüksek ortam basıncında aşırı genleştirir; çıkış basıncı tasarım ortamı basıncının 0,4 katının altına düşerse akış ayrılır ve tasarım, akışın yapışık kaldığı en büyük oranla birlikte adıyla reddedilir. Kabul aralığı 1,5-300. \emph{Boşsa:} Deniz seviyesi tasarımında alan boş bırakılabilir: çözücü çıkış basıncını deniz seviyesi ortam basıncına eşler (ortama eşlenmiş; sonuçlar oranın kaynağını adıyla yazar). İrtifa, ortam basıncı ya da vakum tasarımında oran zorunludur: orada boş bırakılırsa istek adıyla reddedilir.} \\ \midrule
 \textbf{Nozul Tipi} & \texttt{nozzle\_\allowbreak{}type} &  &  & Konik (15\ensuremath{^\circ} yarım açı) \\*
 \multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Hesaba etkisi:} Nozul geometrisi tipi. Konik: basit, 15\ensuremath{^\circ} yarım açı. Çan: iyileştirilmiş kontur, daha kısa. Aerospike: irtifa dengelemesi, karmaşık. Çift çanlı: iki genleşme oranı. Uzatılabilir: uzayda açılan. Seçenekler: Konik (15\ensuremath{^\circ} yarım açı); Çan Nozul (\%80 uzunluk); Çan Nozul (\%60 uzunluk); Aerospike nozul; Çift Çanlı.} \\ \midrule
 \textbf{Nozul Boğaz Çapı, $D_t$} & \texttt{throat\_\allowbreak{}diameter} & mm & 1 -- 3000 & (boş) \\*
@@ -2634,6 +2779,75 @@ HRMA boyutlandırır). Cidar sıcaklığı alanı bir tasarım hedefidir; sını
 \multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Hesaba etkisi:} Yörüngenin uçurduğu yanma süresi, saniye: (başlangıç kütlesi - son kütle) bölü motor hesabının toplam kütle debisi. Girdi değildir: yörünge hesaplanınca buraya yazılır, öncesinde boştur.} \\ \midrule
 \end{longtable}}
 % <<OTO-SON:sivi-girdiler>>
+
+\subsection{Tasarım ortamı}\label{sec:sivi-ortam}
+
+Sıvı motor, \ui{Tasarım Ortamı} alanında seçilen ortam basıncında tasarlanır
+(Tablo~\ref{tab:sivi-3}). \ui{Hedef Motor İtkisi (tasarım ortamında)} o
+ortamdaki motor itkisidir; itici debisi, boğaz ve bunlardan boyutlanan her şey
+(tanklar, besleme, çevrim, kütle) o ortamda kurulur. Nozulun yapışık akış
+denetimi de o ortamda yapılır: çıkış basıncı ortam basıncının 0,4 katının
+altına düşerse akış ayrılır (Summerfield ölçütü).
+
+\begin{table}[htbp]
+\centering\small
+\caption{Sıvı sayfası: tasarım ortamı kipleri}\label{tab:sivi-ortam}
+\begin{tabular}{@{}>{\raggedright\arraybackslash}p{4.0cm}>{\raggedright\arraybackslash}p{4.6cm}>{\raggedright\arraybackslash}p{7.0cm}@{}}
+\toprule
+\textbf{Kip} & \textbf{Ortam basıncı} & \textbf{Genleşme oranı $\varepsilon$} \\
+\midrule
+\ui{Deniz seviyesi (1,01325 bar)} (varsayılan) & 1,01325~bar & Boş bırakılabilir: çözücü nozulu deniz seviyesi ortam basıncına eşler. \\
+\ui{İrtifa (standart atmosfer)} & Girilen \ui{Tasarım İrtifası}'nın ISA basıncı (0--84\,852~m) & Zorunlu. \\
+\ui{Ortam basıncı} & Girilen \ui{Tasarım Ortamı Basıncı} (0--1,01325~bar) & Zorunlu. \\
+\ui{Vakum} & 0 & Zorunlu. \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+İrtifa ve basınç alanları yalnız kendi kipinde görünür ve okunur
+(Şekil~\ref{fig:sivi-ortam-form}); kendi kipinde boş bırakılırsa istek alanın
+adıyla reddedilir. Girilen irtifa geometrik irtifadır
+(Bölüm~\ref{sec:irtifa}). Deniz seviyesi tasarımında forma hiçbir yeni alan
+eklenmez ve sonuçlar 3.0.6 ile aynıdır.
+
+\ekran{img/v3_0_7/sivi_tasarim_ortami_form_tr.png}{\ui{3. BESLEME SİSTEMİ /
+MOTOR ÇEVRİMİ} bölümünde \ui{Tasarım Ortamı}: \ui{İrtifa (standart atmosfer)}
+seçilince \ui{Tasarım İrtifası} alanı görünür.}{fig:sivi-ortam-form}
+
+\paragraph{Deniz seviyesinde ayrılan nozul.} Deniz seviyesi tasarımında,
+girilen genleşme oranı deniz seviyesinde akışı ayırıyorsa tasarım
+hesaplanmaz; ret, akışın yapışık kaldığı en büyük oranı ve nozulu irtifa ya
+da vakum için tasarlama yolunu söyler. Örnek sıvı motorda (50~bar) yalnız
+\ui{Nozul Genleşme Oranı $\varepsilon_e$} 61 yapılırsa çıkış basıncı 0,057~bar olur,
+0,405~bar ayrılma basıncının altındadır; deniz seviyesinde ayrılmayan en büyük
+oran 13,36'dır (Şekil~\ref{fig:sivi-ortam-ret}).
+
+\ekran{img/v3_0_7/sivi_ortam_ret_tr.png}{Deniz seviyesi tasarımında
+$\varepsilon$ 61: adlı ret ve alanın işareti.}{fig:sivi-ortam-ret}
+
+\paragraph{Vakum tasarımı ve yer testi.} Aynı motor, aynı $\varepsilon$ 61 ile
+\ui{Vakum} kipinde tasarlanınca hesap tamamlanır: girilen 25~kN vakum
+itkisidir, motor Isp'si 322,4~s (tasarım ortamı = vakum), ana itki odası Isp'si
+324,8~s olur (Şekil~\ref{fig:sivi-vakum}). Performans Özeti'nin altındaki not
+iki şey söyler: tasarımın hangi ortamda boyutlandığı ve deniz seviyesindeki yer
+testinde bu nozulun durumu. Bu örnekte nozul deniz seviyesinde ayrılır (çıkış
+basıncı 0,0566~bar < 0,4053~bar); bağlı akış bağıntıları orada geçerli
+olmadığından deniz seviyesi itkisi ve Isp'si yayımlanmaz. Not, bu oda
+basıncında deniz seviyesinde yapışık kalan en büyük oranı da (13,36) verir.
+Nozul deniz seviyesinde yapışık kalıyorsa deniz seviyesi itkisi aynı nozulun
+$F_{vak} - p_{0}A_e$ değeridir ve yayımlanır.
+
+\ekran{img/v3_0_7/sivi_vakum_tasarimi_tr.png}{Vakum tasarımı (örnek sıvı motor,
+$\varepsilon$ 61): kart adları ortamı söyler; altında tasarım ortamı ve yer
+testi notu.}{fig:sivi-vakum}
+
+Deniz seviyesi adını taşıyan her alan yalnız deniz seviyesi değerini taşır.
+Deniz seviyesi dışındaki tasarımda kartlar, irtifa tablosu ve grafiği, CEA
+karşılaştırmasının ortam satırı ve proje listesindeki Isp özeti tasarım
+ortamını adıyla yazar; irtifa tablosunda akışın ayrıldığı satırda itki ve Isp
+yayımlanmaz (grafikte boşluk ve not). Fırlatma Sahası ve uçuş panelleri aracı
+yerden kaldırdığı için aynı nozulun deniz seviyesi itkisini kullanır; nozul
+deniz seviyesinde ayrılıyorsa uçuş aracı kurulmaz ve neden adıyla yazılır.
 
 \subsection{Çıktılar}
 
@@ -2798,7 +3012,11 @@ değişti} bloğu bulunur.
 \end{table}
 
 Zorunlu bir alan boşsa istek gönderilmez ve ekran \ui{Şu zorunlu alanlar boş:
-\ldots{} İstek gönderilmedi} der. Panelin malzeme listesinde çözücünün
+\ldots{} İstek gönderilmedi} der. Motordan gelen büyüklüklerin alanları
+(oda basıncı ve sıcaklığı, oda ve boğaz çapı, debi, cidar, MEOP gibi) motor
+hesabından dolar; motor hesaplanmadan ya da son hesap başarısız olduktan sonra
+bu alanlar boştur ve zorunludur, panel kendi tanım değerleriyle başka bir
+motoru çözmez. Değerleri kendiniz girerseniz panel koşar. Panelin malzeme listesinde çözücünün
 kullandığı malzeme yoksa istek yine gönderilmez: emniyet hükmü, motorun
 hesaplandığı malzemeden başkası üzerinde verilmez.
 
@@ -2816,7 +3034,7 @@ Bir panel sonucu şu sırayla okunur:
 
 \ekran{img/v3_0_6/hibrit_guverte_basincli_kap_tr.png}{Güverte, \ui{BASINÇLI KAP} sekmesi.}{fig:g-kap}
 
-\ekran{img/v3_0_6/hibrit_guverte_besleme_tr.png}{Güverte, \ui{BESLEME SİSTEMİ} paneli, koşu öncesi: \ui{Çalkalanma} sekmesinin alanları motorun kendi sonucundan doldurulmuştur.}{fig:g-besleme}
+\ekran{img/v3_0_7/hibrit_guverte_besleme_tr.png}{Güverte, \ui{BESLEME SİSTEMİ} paneli, koşu öncesi: \ui{Çalkantı} sekmesinin alanları motorun kendi sonucundan doldurulmuştur; altında tank çalkantı modeli bölümü başlar.}{fig:g-besleme}
 
 \ekran{img/v3_0_6/hibrit_guverte_dogrulama_tr.png}{Güverte, \ui{DOĞRULAMA} sekmesi: statik ateşleme CSV girişi.}{fig:g-dogrulama}
 
@@ -2839,20 +3057,20 @@ Bir panel sonucu şu sırayla okunur:
 \textbf{Kategori} & \textbf{Panel} & \textbf{Çıktılar} & \textbf{Hüküm ve sınırlar} \\
 \midrule\endhead
 \bottomrule\endlastfoot
-\ui{TERMAL} & Termal Güvenlik (Bartz ısı transferi ve cidar sıcaklıkları) & Gaz tarafı ısı taşınım katsayısı, boğaz ve oda ısı akısı, cidar sıcaklıkları, malzeme sınırları grafiği. & Cidar sıcaklığı malzemenin izin sıcaklığıyla karşılaştırılır. $\gamma$ girdisi 1,05--1,67 bandında kabul edilir; dışı reddedilir, kırpılmaz. Boşsa depo varsayılanı 1,20 kullanılır ve sonuçta \kod{gamma\_\allowbreak{}source: repo\_\allowbreak{}default} yazılır. Ortam sıcaklığı 180--340~K dışındaysa istek reddedilir. \\
+\ui{TERMAL} & Termal Güvenlik (Bartz ısı transferi ve cidar sıcaklıkları) & Gaz tarafı ısı taşınım katsayısı, boğaz ve oda ısı akısı, cidar sıcaklıkları, malzeme sınırları grafiği. & Cidar sıcaklığı malzemenin izin sıcaklığıyla karşılaştırılır. Soğutma tipi motorun sonucundan gelir (örneğin ablatif astarlı motor ablatif astarla değerlendirilir). Korunan cidarda (ablatif ya da ısıl koruma) çıplak cidarın soğutma bütçesi (gereken soğutma alanı, sınıf verimi) yayımlanmaz ve nedeni yazılır. Sıvıda motorun kendi ısı yükü (motor alt sistemleri) panelin toplam ısı gücünün altında ayrı satırdır; iki sayı farklı tanımlıdır (motor: azami cidar sıcaklığında, boğaz Bartz katsayısının odaya ölçeklenmesi, yalnız taşınım; panel: referans soğutulmuş cidar sıcaklığında, kontur boyunca yerel Bartz katsayısı ve gaz ışınımı) ve fark nedeniyle yazılır. $\gamma$ girdisi 1,05--1,67 bandında kabul edilir; dışı reddedilir, kırpılmaz. Boşsa depo varsayılanı 1,20 kullanılır ve sonuçta \kod{gamma\_\allowbreak{}source: repo\_\allowbreak{}default} yazılır. Ortam sıcaklığı 180--340~K dışındaysa istek reddedilir. \\
 \ui{TERMAL} & Termal Koruma (ablatif, ısı emici, radyasyonla soğutulan) & Üç kip: ablatif astar (Q*), ısı emici cidar (1B), ışınımsal uzantı. Ablatif kipte gerileme hızı, toplam gerileme, gereken astar kalınlığı, kullanılan Q*, ortalama ısı akısı ve toplam ısı yükü. & Kararlı Q* modelidir (\ui{BASİTLEŞTİRİLMİŞ MODEL}). Kalınlık iki durumda yayımlanmaz ve gerekçesi yazılır: net ısıtma yoksa (geri kazanım sıcaklığı ablasyon sıcaklığının altında; katı örnek) ve gerileme hızı modelin geçerlilik tavanı 0,35~mm/s'yi aşarsa (\ui{MODEL GEÇERLİ DEĞİL}; hibrit örnekte 1,200~mm/s). Sıvı örnekte panel motorun gaz tarafı ısı taşınım katsayısı ve geri kazanım sıcaklığı çiftini okur; gerileme hızı 0,160~mm/s, gereken astar kalınlığı 7,18~mm yayımlanır. Sıfır gerileme sıfır kalınlık değildir. \\
 \ui{TERMAL} & Rejeneratif Soğutma (1B istasyon yürüyüşü, Bartz ve Dittus--Boelter), yalnız sıvı & İstasyon istasyon gaz ve soğutucu tarafı sıcaklıkları, ısı akısı, basınç düşüşü. & Soğutucu tarafı film katsayısı literatür bandından alınır. Ceket basınç düşümü tek sayıdır: istasyon marşının çözdüğü düşüm besleme bütçesine de girer; basınca duyarlı soğutucuda (metan, LH\textsubscript{2}) giriş basıncı sabit nokta yinelemesiyle bulunur. Panel motorun kendi marş girdileriyle koşar; ceket basınç düşümü motorunkiyle aynıdır (örnek 6,13~bar). Kademeli ve genleşmeli çevrimde ceket girişi çevrimin yakıt pompası çıkışıdır. Model bu motor için tutarlı bir devre kuramazsa (F-1 sınıfı) ceket \ui{model sınırı} etiketi alır; soğutmaya bağlı besleme, çevrim, motor itkisi, motor Isp'si ve kütle sayıları nedenleriyle bekletilir. Atımlı soğutmada ceket sayıları yayımlanmaz. \\
-\ui{YAPISAL} & Yapısal Güvenlik (basınçlı kap, burkulma, yorulma) & Gerilme bileşenleri ve emniyet katsayıları, burkulma, yorulma, ısıl gerilme. & Cidarı HRMA boyutlandırdıysa hüküm geri çekilir. Kullanıcının girdiği cidar hedefi tutmazsa hüküm verilir (\ui{UNSAFE}); tutarsa yanıtın bütünü onaylanmaz, çünkü kapak ve nozul istasyonları bu panelde doğrulanmaz (Bölüm~\ref{sec:uyg-kati}). Dış basınç yük durumu beyan edilmediyse burkulma \ui{NOT\_EVALUATED}. Gaz sıcaklığı yalnız motor çözülmüş bir cidar sıcaklığı çifti yayımlamışsa doldurulur; yoksa ısıl yol koşmaz, dayanım 293,15~K'de okunur ve panel bunu yazar. Panel, motor sonucundaki aynı cidarın denetimini (katıda kasa, sıvıda kamara ya da iki katmanlı yığın emniyet katsayısı) kendi çember emniyet katsayısının yanında verir; fark varsa nedeni adıyla yazılır (yük: oda basıncı $\leftrightarrow$ 1,5 × tasarım basıncı; iki katmanda soğutucu basıncını hangi katmanın taşıdığı; dayanım sıcaklığı; cidar kalınlığı). Yanma süresi bu modelde kullanılmaz ve bu beyan edilir. \\
+\ui{YAPISAL} & Yapısal Güvenlik (basınçlı kap, burkulma, yorulma) & Gerilme bileşenleri ve emniyet katsayıları, burkulma, yorulma, ısıl gerilme. & Tablonun başında yük tabanı yazılır: emniyet katsayıları ve gereken cidar 1,5 × oda basıncında (HRMA'nın tasarım payı) alınır; motor sonucu aynı hedefi oda basıncında (MEOP) uygular. Gereken cidar iki tanımla yan yana verilir (bu sekme ve motor sonucu), her biri kendi tasarım basıncı tabanıyla. Cidar kaynağı motorun boyutlandırdığı cidarsa ``motor sonucunda HRMA boyutlandırdı'' yazılır. Cidarı HRMA boyutlandırdıysa hüküm geri çekilir. Kullanıcının girdiği cidar hedefi tutmazsa hüküm verilir (\ui{UNSAFE}); tutarsa yanıtın bütünü onaylanmaz, çünkü kapak ve nozul istasyonları bu panelde doğrulanmaz (Bölüm~\ref{sec:uyg-kati}). Dış basınç yük durumu beyan edilmediyse burkulma \ui{NOT\_EVALUATED}. Gaz sıcaklığı yalnız motor çözülmüş bir cidar sıcaklığı çifti yayımlamışsa doldurulur; yoksa ısıl yol koşmaz, dayanım 293,15~K'de okunur ve panel bunu yazar. Panel, motor sonucundaki aynı cidarın denetimini (katıda kasa, sıvıda kamara ya da iki katmanlı yığın emniyet katsayısı) kendi çember emniyet katsayısının yanında verir; fark varsa nedeni adıyla yazılır (yük: oda basıncı $\leftrightarrow$ 1,5 × tasarım basıncı; iki katmanda soğutucu basıncını hangi katmanın taşıdığı; dayanım sıcaklığı; cidar kalınlığı). Yanma süresi bu modelde kullanılmaz ve bu beyan edilir. \\
 \ui{YAPISAL} & Cıvatalı Bağlantı (Shigley) & Önerilen sıkma torku, ön yük ve \%$\pm$25 saçılımı, proof emniyet katsayısı, aşırı yük katsayısı $n_L$, ayrılma katsayısı $n_0$, yük paylaşımı. & Proof ve akma emniyeti ön yük saçılımının üst ucunda, ayrılma alt ucunda değerlendirilir (ekrandaki varsayımlar: Shigley Böl.~8, NASA-STD-5020A). Cıvata başı altında üye ezilmesi denetlenir; hibrit örnekte uyarı verir (alüminyum üye). Cıvata sayısı, boyutu ve sınıfı panelin varsayılanıdır (\ui{VARSAYIM} rozeti, 8 × M8, 8.8): sonuç motorun gerçek bağlantısı girilene kadar bir örnek bağlantıdır. \\
 \ui{GÜVENLİK} & Kapsamlı Güvenlik (risk değerlendirmesi ve basınçlı kap) & İki ayrı hüküm: \ui{MOTOR TASARIM RİSKİ} ve \ui{TESİS / YERLEŞİM TEHLİKESİ}. Altı eksende risk puanı (1--5: yapısal, basınç, termal, patlayıcı, zehirli, yangın), 5×5 risk matrisi, basınçlı kap özeti, TNT eşdeğeri ve tesis mesafeleri. & Değerlendirilemeyen eksen \ui{MODELLENMEDİ} yazılır ve puana katılmaz. Motor sepeti kısmiyse ve değerlendirilen eksenler düşük ya da orta çıkarsa motor hükmü \ui{DEĞERLENDİRİLMEDİ} olur, kaç eksenin değerlendirildiği yazılır ve skor \ui{DEĞERLENDİRİLEN EKSENLERİN SKORU} adıyla yalnız alt sınır olarak verilir (eksik değerlendirme düşük risk değildir); yüksek ya da kritik çıkan eksen hükmü yine belirler. Örnekler: üç örnekte de cidarı HRMA boyutlandırdığı için yapısal eksen değerlendirilmez (hibritte termal eksen de) ve motor tasarım riski \ui{DEĞERLENDİRİLMEDİ}'dir (değerlendirilen eksenlerin skoru 2,00 / 5); tesis tehlikesi hibrit ve katıda \ui{DEĞERLENDİRİLMEDİ}, sıvıda \ui{YÜKSEK}. Sıvı çiftlerde TNT eşdeğeri 14 CFR Part 420, Ek E, Tablo E-5'ten alınır (sıvı örnekte test standı için itici kütlesinin \%10'u, 29,745~kg); tabloda olmayan sıvı çiftte 0,35 kullanılır ve HRMA seçimi diye beyan edilir. Hibrit ve KNDX katı örneklerinde patlayıcı sınıfı \ui{Modellenmedi (kaynaklı TNT eşdeğeri yok)}'tur. Gerekli ölçü yoksa güvenlik hükmü üretilmez. Mevzuat uygunluğu değerlendirilmez. \\
-\ui{PERFORMANS} & Gelişmiş Performans (hibrit ve sıvıda 3B yüzey; katıda Mach konturu ve ısı akısı) & Isp--$P_c$--O/F yüzeyi, Mach konturu, ısı akısı. & Katıda 3B performans yüzeyi çizilmez: O/F bir tasarım değişkeni değildir. \\
-\ui{BASINÇLI KAP} & Basınçlı Kap (boyutlandırma, MAWP, patlama basıncı) & Durum, standart (AIAA S-080, ASME VIII Div~1 ya da NASA-STD-5012C), gereken ve kullanılan cidar, MAWP, öngörülen patlama basıncı ve marjı, basınç merdiveni (MEOP ya da MDP, deneme testi = hidrostatik test, NASA-STD-5012C'de ayrıca kalifikasyon testi, gereken patlama), kapak kalınlıkları (ASME UG-32), sıcaklık düşürmesi. & Cidar boşsa yönetmelik alt sınırını ve gereken patlama basıncına karşı 1,2 marjı sağlayan kalınlık boyutlandırılır ve uyarıda yazılır. Patlama basıncı Faupel kalın cidar ve ince cidar plastik sınırı bağıntılarının küçüğüdür; model kestirimidir, deney değildir. Malzeme katıda kasa, hibritte kamara malzemesidir (\ui{HESAPLANDI}); sonuç malzeme yayımlamazsa panelin varsayılanı (Aluminum 6061-T6) kullanılır ve adıyla beyan edilir. Sıvıda kamara motor donanımıdır: standart NASA-STD-5012C seçilir; basınç, iç çap, cidar, sıcaklık ve malzeme motorun dış kabuk katmanından (MDP) gelir; kabuk yayımlanmadıysa oda değerleri gösterilir ve nedeni yazılır. AIAA S-080 itici tankları ve hatları için kalır. \\
+\ui{PERFORMANS} & Gelişmiş Performans (hibrit ve sıvıda 3B yüzey; katıda Mach konturu ve ısı akısı) & Isp--$P_c$--O/F yüzeyi, Mach konturu, ısı akısı. & Katıda 3B performans yüzeyi çizilmez: O/F bir tasarım değişkeni değildir. Isı akısı referans düzlemleri (temel ve kritik ısı akısı) yalnız kullanıcı değer girerse çizilir. \\
+\ui{BASINÇLI KAP} & Basınçlı Kap (boyutlandırma, MAWP, patlama basıncı) & Durum, standart (AIAA S-080, ASME VIII Div~1 ya da NASA-STD-5012C), gereken ve kullanılan cidar, MAWP, öngörülen patlama basıncı ve marjı, basınç merdiveni (MEOP ya da MDP, deneme testi = hidrostatik test, NASA-STD-5012C'de ayrıca kalifikasyon testi, gereken patlama), kapak kalınlıkları (ASME UG-32), sıcaklık düşürmesi. & Değerlendirilen cidar motorun cidarıdır ve başlık bunu söyler (\ui{DEĞERLENDİRİLEN CİDAR --- motorun cidarı}; örnekler: hibrit 5,47~mm, katı 2,00~mm, sıvı dış kabuk 2,50~mm); bu yüzden öngörülen patlama basıncı \ui{GÜVENLİK} sekmesininkiyle aynı cidardan gelir. Motor bir cidar yayımlamıyorsa ve alan boşsa yönetmelik alt sınırını ve gereken patlama basıncına karşı 1,2 marjı sağlayan kalınlık önerilir; başlık o zaman \ui{ÖNERİLEN CİDAR} der. Patlama basıncı Faupel kalın cidar ve ince cidar plastik sınırı bağıntılarının küçüğüdür; model kestirimidir, deney değildir. Malzeme katıda kasa, hibritte kamara malzemesidir (\ui{HESAPLANDI}); sonuç malzeme yayımlamazsa panelin varsayılanı (Aluminum 6061-T6) kullanılır ve adıyla beyan edilir. Sıvıda kamara motor donanımıdır: standart NASA-STD-5012C seçilir; basınç, iç çap, cidar, sıcaklık ve malzeme motorun dış kabuk katmanından (MDP) gelir; kabuk yayımlanmadıysa oda değerleri gösterilir ve nedeni yazılır. AIAA S-080 itici tankları ve hatları için kalır. \\
 \ui{AKIŞ} & Nozul Akışı (yarı 1B sıkıştırılabilir) & Rejim, eksen boyunca basınç ve Mach; \ui{İDEAL} kartlar ($c^*$ verimi ve akış katsayısı 1: $C_F$, itki, kütle debisi, $c^*$); etkin $C_F$ ve 1B itki; motorun teslim ettiği itki, kütle debisi, $c^*$ ve $C_F$ ayrı blokta. & Zorunlu altı alan boşsa istek reddedilir. Etkin $C_F$ ana sonucun $C_F$'siyle karşılaştırılır; itki çapraz doğrulaması ayrıca yazılır (Bölüm~\ref{sec:uyg-hibrit}). \\
 \ui{DOĞRULAMA} & Kullanıcı Verisi Doğrulama (statik ateşleme CSV) & Toplam impuls, tepe ve ortalama itki, yanma süresi farkları, NRMSE. & Bağıl fark (tahmin $-$ ölçüm)/ölçüm. Puan impuls farkı ile NRMSE'nin büyüğüdür; sunucu bant göndermezse kart renklenmez. \\
-\ui{BESLEME SİSTEMİ} & Besleme Sistemi (çalkalanma, basınçlandırıcı, su koçu) & Çalkalanma frekansı, basınçlandırıcı kütlesi, su koçu tepe basıncı. & Alanlar yalnız motorun kendi sonucundan doldurulur (katıda boş kalır); boş bırakılan isteğe bağlı alan için kullanılan değer \kod{defaults\_\allowbreak{}applied} altında beyan edilir, zorunlu alan boşsa istek adıyla reddedilir. Su koçu haritası LOX, LH2, metan, MMH, UDMH, N\textsubscript{2}O\textsubscript{4} ve N\textsubscript{2}O içindir; H\textsubscript{2}O\textsubscript{2} için blok üretilmez. \\
+\ui{BESLEME SİSTEMİ} & Besleme Sistemi (çalkantı, basınçlandırıcı, su koçu) & Çalkantı frekansı, basınçlandırıcı kütlesi, su koçu tepe basıncı; \ui{Çalkantı} sekmesinde tank başına çalkantı modeli (Bölüm~\ref{sec:calkanti}). & Katıda \ui{Katı motorda sıvı itici yoktur; çalkantı uygulanmaz.} yazılır. Alanlar yalnız motorun kendi sonucundan doldurulur (katıda boş kalır); boş bırakılan isteğe bağlı alan için kullanılan değer \kod{defaults\_\allowbreak{}applied} altında beyan edilir, zorunlu alan boşsa istek adıyla reddedilir. Su koçu haritası LOX, LH2, metan, MMH, UDMH, N\textsubscript{2}O\textsubscript{4} ve N\textsubscript{2}O içindir; H\textsubscript{2}O\textsubscript{2} için blok üretilmez. \\
 \ui{KARŞILAŞTIRMA} & Karşılaştırmalı Analiz & Kaydedilen yapılandırmaların yan yana karşılaştırması, iki tasarımın üst üste konması. & Yalnız eşiği aşan bağıl değişimler işaretlenir. \\
 \ui{BELİRSİZLİK} & Belirsizlik Ölçümü (Monte Carlo) & Analiz seviyesi (seviye adı örnek sayısını yazar: \ui{Hızlı Tarama (200 örnek)}, \ui{Mühendislik (1000 örnek)}, \ui{Kapsamlı (3000 örnek)}) ve tohum; koşu sırasında gerçek ilerleme sayacı (tamamlanan örnek, ölçülen örnek süresi, kalan süre kestirimi) ve \ui{Analizi İptal Et}; koşu özeti (örnek sayısı, başarısız örnek, süre, örnekleyici); örneklenen girdi dağılımları; her çıktı için P50, [P5, P95] bandı, nominal değer ve $\sigma$; dağılım grafiği ve duyarlılık tornadosu (Spearman sıra korelasyonu). & Bant yalnız örneklenen girdilerin yayılımıdır: model biçimi belirsizliği dâhil değildir ve gerçek motor için bir güven aralığı değildir; ekran bunu \ui{Bant nasıl okunur} satırında yazar. Nominal değer ana sonucun sayısıdır. Koşu sırasında form değişirse ya da motor yeniden hesaplanırsa sonuç atılır ve nedeni yazılır. Örneklenen girdilere duyarlı olmayan çıktıda dağılım yayımlanmaz: hibritte itki bir tasarım hedefidir, toplam impuls bu seviyelerde örneklenmez ve nominal değeri ana sonucunkidir. Gürültü tabanının içindeki korelasyonlar etki olarak sıralanmaz. \\
-\ui{KORELASYON} & Deneysel Korelasyon & Modelin paketle gelen statik ateşleme veri tabanına karşı sapması. & Kullanıcının motorunu değil, modeli denetler. \\
+\ui{KORELASYON} & Deneysel Korelasyon & Modelin paketle gelen statik ateşleme veri tabanına karşı sapması. Katı satırları itici ailesiyle etiketlenir (ör. \ui{[KN-şeker]}, \ui{[AN/AP/Al/HTPB]}); modelin kapsamı dışındaki kayıtlar ayrı bir katmanda, ölçütüyle birlikte gösterilir. & Kullanıcının motorunu değil, modeli denetler. \\
 \end{longtable}
 
 \ekran{img/v3_0_6/hibrit_guverte_yapisal_tr.png}{\ui{Yapısal Güvenlik} paneli, hibrit örnekte koşu sonrası: girdiler, değer kaynağı rozetleri ve hüküm satırı. Cidarı HRMA boyutlandırdığı için hüküm \ui{HÜKÜM GERİ ÇEKİLDİ}'dir.}{fig:g-yapisal}
@@ -2875,24 +3093,24 @@ Bir panel sonucu şu sırayla okunur:
 \endfoot
 \bottomrule
 \endlastfoot
-\textbf{Oda Basıncı} & \texttt{ad\_\allowbreak{}f\_\allowbreak{}thermal\_\allowbreak{}chamber\_\allowbreak{}pressure} & bar &  & 40 \\*
+\textbf{Oda Basıncı} & \texttt{ad\_\allowbreak{}f\_\allowbreak{}thermal\_\allowbreak{}chamber\_\allowbreak{}pressure} & bar &  & (boş) \\*
 \multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Hesaba etkisi:} Oda basıncı, bar. Isıl emniyet denetimi onu Bartz gaz tarafı ısı geçişinde (kütle akısı) kullanır. Hesaptan sonra, motor sonucu bu değeri veriyorsa ve siz değiştirmediyseniz oradan doldurulur. \emph{Boşsa:} Istek gönderilmez ve alan adıyla bildirilir.} \\ \midrule
-\textbf{Oda Sıcaklığı} & \texttt{ad\_\allowbreak{}f\_\allowbreak{}thermal\_\allowbreak{}chamber\_\allowbreak{}temperature} & K &  & 3000 \\*
+\textbf{Oda Sıcaklığı} & \texttt{ad\_\allowbreak{}f\_\allowbreak{}thermal\_\allowbreak{}chamber\_\allowbreak{}temperature} & K &  & (boş) \\*
 \multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Hesaba etkisi:} Hazne (yanma) sıcaklığı, K. Cidar ısı akısını süren geri kazanım sıcaklığını belirler. Hesaptan sonra, motor sonucu bu değeri veriyorsa ve siz değiştirmediyseniz oradan doldurulur. \emph{Boşsa:} Istek gönderilmez ve alan adıyla bildirilir.} \\ \midrule
-\textbf{Oda Çapı} & \texttt{ad\_\allowbreak{}f\_\allowbreak{}thermal\_\allowbreak{}chamber\_\allowbreak{}diameter} & m &  & 0,1 \\*
+\textbf{Oda Çapı} & \texttt{ad\_\allowbreak{}f\_\allowbreak{}thermal\_\allowbreak{}chamber\_\allowbreak{}diameter} & m &  & (boş) \\*
 \multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Hesaba etkisi:} Hazne iç çapı, m. Isıl denetimin ıslak alanını ve kütle akısını belirler. Hesaptan sonra, motor sonucu bu değeri veriyorsa ve siz değiştirmediyseniz oradan doldurulur. \emph{Boşsa:} Istek gönderilmez ve alan adıyla bildirilir.} \\ \midrule
-\textbf{Oda Uzunluğu} & \texttt{ad\_\allowbreak{}f\_\allowbreak{}thermal\_\allowbreak{}chamber\_\allowbreak{}length} & m &  & 0,5 \\*
+\textbf{Oda Uzunluğu} & \texttt{ad\_\allowbreak{}f\_\allowbreak{}thermal\_\allowbreak{}chamber\_\allowbreak{}length} & m &  & (boş) \\*
 \multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Hesaba etkisi:} Hazne boyu, m. Isıl denetimin ısınan (ıslak) alanını belirler. Hesaptan sonra, motor sonucu bu değeri veriyorsa ve siz değiştirmediyseniz oradan doldurulur. \emph{Boşsa:} Istek gönderilmez ve alan adıyla bildirilir.} \\ \midrule
 \textbf{Yanma Süresi} & \texttt{ad\_\allowbreak{}f\_\allowbreak{}thermal\_\allowbreak{}burn\_\allowbreak{}time} & s &  & (boş) \\*
 \multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Hesaba etkisi:} Yanma süresi, s (\textgreater{} 0). Isıl denetimin toplam ısı enerjisini, ısı kuyusu kütlesini ve astar boyutlandırmasını belirler; kararlı çıplak cidar denge sıcaklığı ona bağlı değildir. Hesaptan sonra, siz değiştirmedikçe motor sonucundan doldurulur (katı: çözülen yanma; hibrit: yanma süresi girdisi; sıvı: sıvı formundaki Azami Yanma Süresi). \emph{Boşsa:} Istek gönderilmez ve bu alan adıyla bildirilir; yanma süresini buraya girin ya da motorun yanma süresini girip yeniden hesaplayın (süre varsayılmaz).} \\ \midrule
-\textbf{Toplam Kütle Debisi} & \texttt{ad\_\allowbreak{}f\_\allowbreak{}thermal\_\allowbreak{}mdot\_\allowbreak{}total} & kg/s &  & 1 \\*
+\textbf{Toplam Kütle Debisi} & \texttt{ad\_\allowbreak{}f\_\allowbreak{}thermal\_\allowbreak{}mdot\_\allowbreak{}total} & kg/s &  & (boş) \\*
 \multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Hesaba etkisi:} Toplam itici debisi, kg/s. Bartz bağıntısındaki gaz kütle akısını belirler. Hesaptan sonra, motor sonucu bu değeri veriyorsa ve siz değiştirmediyseniz oradan doldurulur. \emph{Boşsa:} Istek gönderilmez ve alan adıyla bildirilir.} \\ \midrule
-\textbf{Cidar Kalınlığı} & \texttt{ad\_\allowbreak{}f\_\allowbreak{}thermal\_\allowbreak{}wall\_\allowbreak{}thickness} & m &  & 0,005 \\*
+\textbf{Cidar Kalınlığı} & \texttt{ad\_\allowbreak{}f\_\allowbreak{}thermal\_\allowbreak{}wall\_\allowbreak{}thickness} & m &  & (boş) \\*
 \multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Hesaba etkisi:} Sıcak gaz cidarının kalınlığı, m: ısı akısının geçtiği cidar. Cidar boyunca iletimi ve ısı kuyusu kütlesini belirler (sonucu değiştirir). Hesaptan sonra, siz değiştirmediyseniz motor sonucundan doldurulur; iki katmanlı rejeneratif sıvı cidarda bu astarın kalınlığıdır, astar + kanal + dış kabuk yığını değil. Kabul: hazne yarıçapından küçük pozitif bir değer. \emph{Boşsa:} Istek gönderilmez ve alan adıyla bildirilir.} \\ \midrule
 \textbf{Cidar Malzemesi} & \texttt{ad\_\allowbreak{}f\_\allowbreak{}thermal\_\allowbreak{}material} &  &  & Çelik (genel) \\*
 \multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Hesaba etkisi:} Sıcak gaz cidarının malzemesi. Isıl denetime iletkenliğini, izin verilen sıcaklığını ve erime noktasını sağlar (sonucu ve gösterilen sınırları değiştirir). Hesaptan sonra, siz değiştirmediyseniz motor sonucundan doldurulur; iki katmanlı rejeneratif sıvı cidarda bu astar malzemesidir, dış kabuk ise motorun katman hükümlerinde değerlendirilir. Motor sonucu malzeme vermiyorsa alan varsayılanında kalır (Çelik, genel). Kabul: listedeki bir malzeme. Seçenekler: Çelik (genel); Çelik AISI 4130; Çelik AISI 4340; Paslanmaz 304; Paslanmaz 316; 17-4PH (H900); Alüminyum; Alüminyum 6061-T6; Alüminyum 7075-T6; Alüminyum 2024-T3; Bakır; CuCrZr (C18150); BeCu C17200; Inconel; Inconel 718; Inconel 625; Titanyum Ti-6Al-4V; Titanyum CP Grade 2; \textbackslash{}ldots.} \\ \midrule
 \textbf{Soğutma Tipi} & \texttt{ad\_\allowbreak{}f\_\allowbreak{}thermal\_\allowbreak{}cooling\_\allowbreak{}type} &  &  & Doğal (ısı emici) \\*
-\multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Hesaba etkisi:} Soğutma tipi: doğal (ısı kuyusu), zorlanmış taşınım ya da rejeneratif. Çıplak cidar denetiminin soğutucu tarafı katsayısını seçer. Hesaptan sonra, siz değiştirmedikçe motor sonucundan doldurulur (motorun soğutma tipi bu üçünden biriyse). Seçenekler: Doğal (ısı emici); Zorlanmış taşınım; Rejeneratif.} \\ \midrule
+\multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Hesaba etkisi:} Soğutma tipi: doğal (ısı kuyusu), zorlanmış taşınım, rejeneratif ya da ablatif astar. Doğal, zorlanmış ve rejeneratif çıplak cidar denetiminin soğutucu tarafı katsayısını seçer; ablatif astar astarla değerlendirilir (cidar koruması: ablatif astar), çıplak cidar sınırı dışta doğal taşınımla çözülür ve soğutma alanı bütçesi yayımlanmaz. Hesaptan sonra, siz değiştirmedikçe motor sonucundan doldurulur (motorun soğutma tipi bu dördünden biriyse). Seçenekler: Doğal (ısı emici); Zorlanmış taşınım; Rejeneratif; Ablatif Astar.} \\ \midrule
 \textbf{Boğaz Çapı} & \texttt{ad\_\allowbreak{}f\_\allowbreak{}thermal\_\allowbreak{}throat\_\allowbreak{}diameter} & m &  & (boş) \\*
 \multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Hesaba etkisi:} Boğaz çapı, m (\textgreater{} 0, en çok 2 m: girdi denetiminin bandı). Bartz tasarım istasyonunun boğaz alanını belirler. Hesaptan sonra, siz değiştirmedikçe motor sonucundan doldurulur. \emph{Boşsa:} Gönderilmez; ısıl denetim boğaz alanını debiden ve c*'tan türetir.} \\ \midrule
 \textbf{Karakteristik hız c*} & \texttt{ad\_\allowbreak{}f\_\allowbreak{}thermal\_\allowbreak{}c\_\allowbreak{}star} & m/s &  & (boş) \\*
@@ -2967,21 +3185,21 @@ Bir panel sonucu şu sırayla okunur:
 \endfoot
 \bottomrule
 \endlastfoot
-\textbf{Oda Basıncı} & \texttt{ad\_\allowbreak{}f\_\allowbreak{}cooling\_\allowbreak{}chamber\_\allowbreak{}pressure} & bar &  & 50 \\*
+\textbf{Oda Basıncı} & \texttt{ad\_\allowbreak{}f\_\allowbreak{}cooling\_\allowbreak{}chamber\_\allowbreak{}pressure} & bar &  & (boş) \\*
 \multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Hesaba etkisi:} Oda basıncı, bar. Kanal boyunca ilerleyen hesapta gaz tarafı ısı akısında kullanılır. Hesaptan sonra, motor sonucu bu değeri veriyorsa ve siz değiştirmediyseniz oradan doldurulur. \emph{Boşsa:} Istek gönderilmez ve alan adıyla bildirilir.} \\ \midrule
-\textbf{Oda Sıcaklığı} & \texttt{ad\_\allowbreak{}f\_\allowbreak{}cooling\_\allowbreak{}chamber\_\allowbreak{}temperature} & K &  & 3400 \\*
+\textbf{Oda Sıcaklığı} & \texttt{ad\_\allowbreak{}f\_\allowbreak{}cooling\_\allowbreak{}chamber\_\allowbreak{}temperature} & K &  & (boş) \\*
 \multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Hesaba etkisi:} Hazne sıcaklığı, K. Gaz tarafı ısı akısını belirler. Hesaptan sonra, motor sonucu bu değeri veriyorsa ve siz değiştirmediyseniz oradan doldurulur. \emph{Boşsa:} Istek gönderilmez ve alan adıyla bildirilir.} \\ \midrule
-\textbf{Boğaz Çapı} & \texttt{ad\_\allowbreak{}f\_\allowbreak{}cooling\_\allowbreak{}throat\_\allowbreak{}diameter} & m &  & 0,05 \\*
+\textbf{Boğaz Çapı} & \texttt{ad\_\allowbreak{}f\_\allowbreak{}cooling\_\allowbreak{}throat\_\allowbreak{}diameter} & m &  & (boş) \\*
 \multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Hesaba etkisi:} Boğaz çapı, m. Profili ve boğazdaki ısı akısı tepesini belirler. Hesaptan sonra, motor sonucu bu değeri veriyorsa ve siz değiştirmediyseniz oradan doldurulur. \emph{Boşsa:} Istek gönderilmez ve alan adıyla bildirilir.} \\ \midrule
-\textbf{Genişleme Oranı} & \texttt{ad\_\allowbreak{}f\_\allowbreak{}cooling\_\allowbreak{}expansion\_\allowbreak{}ratio} &  &  & 8 \\*
+\textbf{Genişleme Oranı} & \texttt{ad\_\allowbreak{}f\_\allowbreak{}cooling\_\allowbreak{}expansion\_\allowbreak{}ratio} &  &  & (boş) \\*
 \multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Hesaba etkisi:} Nozul alan oranı Ae/At. Soğutulan nozul boyunu ve profilini belirler. Hesaptan sonra, motor sonucu bu değeri veriyorsa ve siz değiştirmediyseniz oradan doldurulur. \emph{Boşsa:} Istek gönderilmez ve alan adıyla bildirilir.} \\ \midrule
-\textbf{Gamma (donmuş)} & \texttt{ad\_\allowbreak{}f\_\allowbreak{}cooling\_\allowbreak{}gamma} &  &  & 1,2 \\*
+\textbf{Gamma (donmuş)} & \texttt{ad\_\allowbreak{}f\_\allowbreak{}cooling\_\allowbreak{}gamma} &  &  & (boş) \\*
 \multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Hesaba etkisi:} Donmuş özgül ısılar oranı \ensuremath{\gamma}. Gaz tarafı ısı geçişine girer. Hesaptan sonra, motor sonucu bu değeri veriyorsa ve siz değiştirmediyseniz oradan doldurulur. \emph{Boşsa:} Istek gönderilmez ve alan adıyla bildirilir.} \\ \midrule
-\textbf{Molekül Ağırlığı} & \texttt{ad\_\allowbreak{}f\_\allowbreak{}cooling\_\allowbreak{}molecular\_\allowbreak{}weight} & g/mol &  & 22 \\*
+\textbf{Molekül Ağırlığı} & \texttt{ad\_\allowbreak{}f\_\allowbreak{}cooling\_\allowbreak{}molecular\_\allowbreak{}weight} & g/mol &  & (boş) \\*
 \multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Hesaba etkisi:} Gaz molekül ağırlığı, g/mol. Isı geçişinin gaz özelliklerine girer. Hesaptan sonra, motor sonucu bu değeri veriyorsa ve siz değiştirmediyseniz oradan doldurulur. \emph{Boşsa:} Istek gönderilmez ve alan adıyla bildirilir.} \\ \midrule
 \textbf{Soğutucu} & \texttt{ad\_\allowbreak{}f\_\allowbreak{}cooling\_\allowbreak{}coolant} &  &  & -- seçin -- \\*
 \multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Hesaba etkisi:} Soğutucu akışkan. Soğutucu özellik modelini seçer. Hesaptan sonra, motor sonucu bu değeri veriyorsa ve siz değiştirmediyseniz oradan doldurulur. Seçenekler: -- seçin --; Su; RP-1 (gazyağı); Metan (LCH4); Hidrojen (LH2). \emph{Boşsa:} Zorunlu alan -- istek gönderilmez ve alan adıyla bildirilir.} \\ \midrule
-\textbf{Soğutucu Kütle Debisi} & \texttt{ad\_\allowbreak{}f\_\allowbreak{}cooling\_\allowbreak{}coolant\_\allowbreak{}mdot} & kg/s &  & 2 \\*
+\textbf{Soğutucu Kütle Debisi} & \texttt{ad\_\allowbreak{}f\_\allowbreak{}cooling\_\allowbreak{}coolant\_\allowbreak{}mdot} & kg/s &  & (boş) \\*
 \multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Hesaba etkisi:} Soğutucu debisi, kg/s. Soğutucu hızını, ısı alımını ve basınç düşümünü belirler. Hesaptan sonra, siz değiştirmedikçe motorun yakıt debisiyle doldurulur. \emph{Boşsa:} Istek gönderilmez ve alan adıyla bildirilir.} \\ \midrule
 \textbf{Soğutucu Giriş T} & \texttt{ad\_\allowbreak{}f\_\allowbreak{}cooling\_\allowbreak{}coolant\_\allowbreak{}inlet\_\allowbreak{}temp} & K &  & (boş) \\*
 \multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Hesaba etkisi:} Soğutucu giriş sıcaklığı, K. Soğutucu hesabının başlangıç sıcaklığıdır. Hesaptan sonra, motor sonucu bu değeri veriyorsa ve siz değiştirmediyseniz oradan doldurulur. \emph{Boşsa:} Zorunlu alan -- istek gönderilmez ve alan adıyla bildirilir.} \\ \midrule
@@ -3014,13 +3232,13 @@ Bir panel sonucu şu sırayla okunur:
 \endfoot
 \bottomrule
 \endlastfoot
-\textbf{Oda Basıncı} & \texttt{ad\_\allowbreak{}f\_\allowbreak{}structural\_\allowbreak{}chamber\_\allowbreak{}pressure} & bar &  & 40 \\*
+\textbf{Oda Basıncı} & \texttt{ad\_\allowbreak{}f\_\allowbreak{}structural\_\allowbreak{}chamber\_\allowbreak{}pressure} & bar &  & (boş) \\*
 \multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Hesaba etkisi:} Hazne tasarım basıncı, bar. Cidar gerilmeleri ve emniyet katsayıları (basınçlı kap, burkulma, yorulma) bu basınçta hesaplanır. Hesaptan sonra, motor sonucu bu değeri veriyorsa ve siz değiştirmediyseniz oradan doldurulur. \emph{Boşsa:} Istek gönderilmez ve alan adıyla bildirilir.} \\ \midrule
-\textbf{Oda Çapı} & \texttt{ad\_\allowbreak{}f\_\allowbreak{}structural\_\allowbreak{}chamber\_\allowbreak{}diameter} & m &  & 0,1 \\*
+\textbf{Oda Çapı} & \texttt{ad\_\allowbreak{}f\_\allowbreak{}structural\_\allowbreak{}chamber\_\allowbreak{}diameter} & m &  & (boş) \\*
 \multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Hesaba etkisi:} Hazne iç çapı, m. Gerilme ve burkulma denetimlerinde kap yarıçapını belirler. Hesaptan sonra, motor sonucu bu değeri veriyorsa ve siz değiştirmediyseniz oradan doldurulur. \emph{Boşsa:} Istek gönderilmez ve alan adıyla bildirilir.} \\ \midrule
-\textbf{Oda Uzunluğu} & \texttt{ad\_\allowbreak{}f\_\allowbreak{}structural\_\allowbreak{}chamber\_\allowbreak{}length} & m &  & 0,5 \\*
+\textbf{Oda Uzunluğu} & \texttt{ad\_\allowbreak{}f\_\allowbreak{}structural\_\allowbreak{}chamber\_\allowbreak{}length} & m &  & (boş) \\*
 \multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Hesaba etkisi:} Hazne silindir boyu, m. Hazne geometrisiyle birlikte yapısal modele girer; değiştirmek yapısal sonucu değiştirir. Hesaptan sonra, motor sonucu bu değeri veriyorsa ve siz değiştirmediyseniz oradan doldurulur. \emph{Boşsa:} Istek gönderilmez ve alan adıyla bildirilir.} \\ \midrule
-\textbf{Boğaz Çapı} & \texttt{ad\_\allowbreak{}f\_\allowbreak{}structural\_\allowbreak{}throat\_\allowbreak{}diameter} & m &  & 0,02 \\*
+\textbf{Boğaz Çapı} & \texttt{ad\_\allowbreak{}f\_\allowbreak{}structural\_\allowbreak{}throat\_\allowbreak{}diameter} & m &  & (boş) \\*
 \multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Hesaba etkisi:} Nozul boğaz çapı, m. Hazne geometrisiyle birlikte yapısal modele girer; değiştirmek yapısal sonucu değiştirir. Hesaptan sonra, motor sonucu bu değeri veriyorsa ve siz değiştirmediyseniz oradan doldurulur. \emph{Boşsa:} Istek gönderilmez ve alan adıyla bildirilir.} \\ \midrule
 \textbf{Yanma Süresi} & \texttt{ad\_\allowbreak{}f\_\allowbreak{}structural\_\allowbreak{}burn\_\allowbreak{}time} & s &  & (boş) \\*
 \multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Hesaba etkisi:} Yanma süresi, s. Burada bilgi amaçlıdır: analiz değeri denetler ama hesaba KATMAZ (gerilmeler kararlı hâl, yorulma basınçlanma çevrimi sayar) ve bunu sonucun altında yazar. Hesaptan sonra, motor sonucu bu değeri veriyorsa ve siz değiştirmediyseniz oradan doldurulur. \emph{Boşsa:} Gönderilmez.} \\ \midrule
@@ -3053,9 +3271,9 @@ Bir panel sonucu şu sırayla okunur:
 \endfoot
 \bottomrule
 \endlastfoot
-\textbf{Oda Basıncı} & \texttt{ad\_\allowbreak{}f\_\allowbreak{}joint\_\allowbreak{}pressure\_\allowbreak{}bar} & bar &  & 40 \\*
+\textbf{Oda Basıncı} & \texttt{ad\_\allowbreak{}f\_\allowbreak{}joint\_\allowbreak{}pressure\_\allowbreak{}bar} & bar &  & (boş) \\*
 \multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Hesaba etkisi:} Kapağa etkiyen oda basıncı, bar (\ensuremath{\ge} 0). Analiz bunu sızdırmazlık alanı üzerinde ayırıcı kuvvete çevirir. Hesaptan sonra, siz değiştirmedikçe motorun oda basıncıyla doldurulur. \emph{Boşsa:} Istek gönderilmez ve alan adıyla bildirilir.} \\ \midrule
-\textbf{Sızdırmazlık / Etkin Çap} & \texttt{ad\_\allowbreak{}f\_\allowbreak{}joint\_\allowbreak{}seal\_\allowbreak{}diameter\_\allowbreak{}mm} & mm &  & 100 \\*
+\textbf{Sızdırmazlık / Etkin Çap} & \texttt{ad\_\allowbreak{}f\_\allowbreak{}joint\_\allowbreak{}seal\_\allowbreak{}diameter\_\allowbreak{}mm} & mm &  & (boş) \\*
 \multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Hesaba etkisi:} Sızdırmazlık / etkin basınç çapı, mm. Basıncın etkidiği alandır; pozitif ve deponun hazne çapı bandı içinde olmalı. Hesaptan sonra, siz değiştirmedikçe motorun hazne iç çapıyla doldurulur. \emph{Boşsa:} Istek gönderilmez ve alan adıyla bildirilir.} \\ \midrule
 \textbf{Cıvata Sayısı} & \texttt{ad\_\allowbreak{}f\_\allowbreak{}joint\_\allowbreak{}bolt\_\allowbreak{}count} &  &  & 8 \\*
 \multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Hesaba etkisi:} Cıvata sayısı (\ensuremath{\ge} 1). Ayırıcı yük bunlar arasında paylaşılır. Motor sonucundan doldurulmaz. \emph{Boşsa:} Istek gönderilmez ve alan adıyla bildirilir.} \\ \midrule
@@ -3090,11 +3308,11 @@ Bir panel sonucu şu sırayla okunur:
 \endlastfoot
 \textbf{Motor Tipi} & \texttt{ad\_\allowbreak{}f\_\allowbreak{}safety\_\allowbreak{}motor\_\allowbreak{}type} &  &  & Hibrit \\*
 \multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Hesaba etkisi:} Motor tipi: hibrit, sıvı ya da katı. Tehlike modeli (patlayıcı eşdeğeri, depolanan itici) motor tipine göre seçilir. Hesaptan sonra sayfanın motorundan ayarlanır. Seçenekler: Hibrit; Sıvı; Katı.} \\ \midrule
-\textbf{Oda Basıncı} & \texttt{ad\_\allowbreak{}f\_\allowbreak{}safety\_\allowbreak{}chamber\_\allowbreak{}pressure} & bar &  & 40 \\*
+\textbf{Oda Basıncı} & \texttt{ad\_\allowbreak{}f\_\allowbreak{}safety\_\allowbreak{}chamber\_\allowbreak{}pressure} & bar &  & (boş) \\*
 \multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Hesaba etkisi:} Oda basıncı, bar. Emniyet hükmünün basınçlı kap ve depolanan enerji terimlerine girer. Hesaptan sonra, motor sonucu bu değeri veriyorsa ve siz değiştirmediyseniz oradan doldurulur. \emph{Boşsa:} Istek gönderilmez ve alan adıyla bildirilir.} \\ \midrule
-\textbf{Oda Sıcaklığı} & \texttt{ad\_\allowbreak{}f\_\allowbreak{}safety\_\allowbreak{}chamber\_\allowbreak{}temperature} & K &  & 3000 \\*
+\textbf{Oda Sıcaklığı} & \texttt{ad\_\allowbreak{}f\_\allowbreak{}safety\_\allowbreak{}chamber\_\allowbreak{}temperature} & K &  & (boş) \\*
 \multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Hesaba etkisi:} Hazne sıcaklığı, K. Emniyet hükmünün ısıl kısmına girer. Hesaptan sonra, motor sonucu bu değeri veriyorsa ve siz değiştirmediyseniz oradan doldurulur. \emph{Boşsa:} Istek gönderilmez ve alan adıyla bildirilir.} \\ \midrule
-\textbf{İtki} & \texttt{ad\_\allowbreak{}f\_\allowbreak{}safety\_\allowbreak{}thrust} & N &  & 1000 \\*
+\textbf{İtki} & \texttt{ad\_\allowbreak{}f\_\allowbreak{}safety\_\allowbreak{}thrust} & N &  & (boş) \\*
 \multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Hesaba etkisi:} İtki, N. Emniyet hükmüne girer (sonucu değiştirir). Hesaptan sonra, motor sonucu bu değeri veriyorsa ve siz değiştirmediyseniz oradan doldurulur. \emph{Boşsa:} Istek gönderilmez ve alan adıyla bildirilir.} \\ \midrule
 \textbf{Yanma Süresi} & \texttt{ad\_\allowbreak{}f\_\allowbreak{}safety\_\allowbreak{}burn\_\allowbreak{}time} & s &  & (boş) \\*
 \multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Hesaba etkisi:} Yanma süresi, s. Emniyet hükmünün süreye bağlı kısımlarını besler. Hesaptan sonra, motor sonucu bu değeri veriyorsa ve siz değiştirmediyseniz oradan doldurulur. \emph{Boşsa:} Gönderilmez; uç süreye bağlı kısımları adıyla geri çeker (süre varsayılmaz).} \\ \midrule
@@ -3104,9 +3322,9 @@ Bir panel sonucu şu sırayla okunur:
 \multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Hesaba etkisi:} İtici sınıfı. Patlayıcı eşdeğeri için kullanılan tehlike sınıfını seçer. Hesaptan sonra motorun kendi iticisinden ayarlanır. Seçenekler: Kompozit (APCP/HTPB); Çift bazlı (NC/NG); Kompozit çift bazlı; Sıvı çift iticili; Sıvı tek iticili; Katı tek iticili (AP); Modellenmedi (kaynaklı TNT eşdeğeri yok).} \\ \midrule
 \textbf{Tesis Tipi} & \texttt{ad\_\allowbreak{}f\_\allowbreak{}safety\_\allowbreak{}facility\_\allowbreak{}type} &  &  & Test standı \\*
 \multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Hesaba etkisi:} Tesis: test standı, üretim, taşıma ya da fırlatma alanı. Emniyet hükmünün tesis kurallarını seçer. Motor sonucundan doldurulmaz. Seçenekler: Test standı; Üretim; Nakliye; Fırlatma sahası.} \\ \midrule
-\textbf{Oda Çapı} & \texttt{ad\_\allowbreak{}f\_\allowbreak{}safety\_\allowbreak{}chamber\_\allowbreak{}diameter} & m &  & 0,1 \\*
+\textbf{Oda Çapı} & \texttt{ad\_\allowbreak{}f\_\allowbreak{}safety\_\allowbreak{}chamber\_\allowbreak{}diameter} & m &  & (boş) \\*
 \multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Hesaba etkisi:} Hazne iç çapı, m. Emniyet hükmünün basınçlı kap kısmına girer. Hesaptan sonra, motor sonucu bu değeri veriyorsa ve siz değiştirmediyseniz oradan doldurulur. \emph{Boşsa:} Istek gönderilmez ve alan adıyla bildirilir.} \\ \midrule
-\textbf{Cidar Kalınlığı} & \texttt{ad\_\allowbreak{}f\_\allowbreak{}safety\_\allowbreak{}wall\_\allowbreak{}thickness} & m &  & 0,005 \\*
+\textbf{Cidar Kalınlığı} & \texttt{ad\_\allowbreak{}f\_\allowbreak{}safety\_\allowbreak{}wall\_\allowbreak{}thickness} & m &  & (boş) \\*
 \multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Hesaba etkisi:} Cidar kalınlığı, m. Emniyet hükmünün basınçlı kap kısmına girer. Hesaptan sonra, motor sonucu bu değeri veriyorsa ve siz değiştirmediyseniz oradan doldurulur. \emph{Boşsa:} Istek gönderilmez ve alan adıyla bildirilir.} \\ \midrule
 \textbf{Malzeme} & \texttt{ad\_\allowbreak{}f\_\allowbreak{}safety\_\allowbreak{}material} &  &  & Çelik AISI 4130 \\*
 \multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Hesaba etkisi:} Cidar malzemesi. Hükmün basınçlı kap kısmının kullandığı dayanımı sağlar. Hesaptan sonra, motor sonucu bu değeri veriyorsa ve siz değiştirmediyseniz oradan doldurulur. Seçenekler: Çelik AISI 4130; Çelik AISI 4340; Karbon çeliği (A36); Paslanmaz 304; Paslanmaz 316; 17-4PH (H900); Alüminyum 6061-T6; Alüminyum 7075-T6; Alüminyum 2024-T3; Titanyum Ti-6Al-4V; Titanyum CP Grade 2; Inconel 718; Inconel 625; CuCrZr (C18150); BeCu C17200; Magnezyum AZ31B.} \\ \midrule
@@ -3133,33 +3351,33 @@ Bir panel sonucu şu sırayla okunur:
 \endfoot
 \bottomrule
 \endlastfoot
-\textbf{Oda Basıncı} & \texttt{ad\_\allowbreak{}f\_\allowbreak{}performance\_\allowbreak{}chamber\_\allowbreak{}pressure} & bar &  & 50 \\*
+\textbf{Oda Basıncı} & \texttt{ad\_\allowbreak{}f\_\allowbreak{}performance\_\allowbreak{}chamber\_\allowbreak{}pressure} & bar &  & (boş) \\*
 \multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Hesaba etkisi:} Oda basıncı, bar. Üç grafikte de kullanılır (Isp yüzeyi tasarım noktası, Mach konturu, ısı akısı). Hesaptan sonra, motor sonucu bu değeri veriyorsa ve siz değiştirmediyseniz oradan doldurulur. \emph{Boşsa:} Istek gönderilmez ve alan adıyla bildirilir.} \\ \midrule
-\textbf{Tasarım O/F Oranı} & \texttt{ad\_\allowbreak{}f\_\allowbreak{}performance\_\allowbreak{}optimal\_\allowbreak{}of\_\allowbreak{}ratio} &  &  & 3,5 \\*
+\textbf{Tasarım O/F Oranı} & \texttt{ad\_\allowbreak{}f\_\allowbreak{}performance\_\allowbreak{}optimal\_\allowbreak{}of\_\allowbreak{}ratio} &  &  & (boş) \\*
 \multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Hesaba etkisi:} Tasarım noktasının oksitleyici/yakıt kütle oranı. Yalnız 3B Isp yüzeyinde kullanılır (hibrit/sıvı). Hesaptan sonra, motor sonucu bu değeri veriyorsa ve siz değiştirmediyseniz oradan doldurulur. \emph{Boşsa:} Istek gönderilmez ve alan adıyla bildirilir.} \\ \midrule
-\textbf{Temel Isp} & \texttt{ad\_\allowbreak{}f\_\allowbreak{}performance\_\allowbreak{}base\_\allowbreak{}isp} & s &  & 300 \\*
+\textbf{Temel Isp} & \texttt{ad\_\allowbreak{}f\_\allowbreak{}performance\_\allowbreak{}base\_\allowbreak{}isp} & s &  & (boş) \\*
 \multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Hesaba etkisi:} Tasarım noktası özgül itkisi, s. Yalnız 3B Isp yüzeyinde kullanılır (hibrit/sıvı). Hesaptan sonra, motor sonucu bu değeri veriyorsa ve siz değiştirmediyseniz oradan doldurulur. \emph{Boşsa:} Istek gönderilmez ve alan adıyla bildirilir.} \\ \midrule
-\textbf{Genişleme Oranı} & \texttt{ad\_\allowbreak{}f\_\allowbreak{}performance\_\allowbreak{}expansion\_\allowbreak{}ratio} &  &  & 16 \\*
+\textbf{Genişleme Oranı} & \texttt{ad\_\allowbreak{}f\_\allowbreak{}performance\_\allowbreak{}expansion\_\allowbreak{}ratio} &  &  & (boş) \\*
 \multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Hesaba etkisi:} Nozul alan oranı Ae/At. Nozul Mach konturu ve cidar ısı akısı grafiklerinde kullanılır. Hesaptan sonra, motor sonucu bu değeri veriyorsa ve siz değiştirmediyseniz oradan doldurulur. \emph{Boşsa:} Istek gönderilmez ve alan adıyla bildirilir.} \\ \midrule
-\textbf{Boğaz Alanı} & \texttt{ad\_\allowbreak{}f\_\allowbreak{}performance\_\allowbreak{}throat\_\allowbreak{}area} & m\textsuperscript{2} &  & 0,001 \\*
+\textbf{Boğaz Alanı} & \texttt{ad\_\allowbreak{}f\_\allowbreak{}performance\_\allowbreak{}throat\_\allowbreak{}area} & m\textsuperscript{2} &  & (boş) \\*
 \multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Hesaba etkisi:} Boğaz alanı, m\textsuperscript{2}. Nozul Mach konturu ve cidar ısı akısı grafiklerinde kullanılır. Hesaptan sonra, motor sonucu bu değeri veriyorsa ve siz değiştirmediyseniz oradan doldurulur. \emph{Boşsa:} Istek gönderilmez ve alan adıyla bildirilir.} \\ \midrule
-\textbf{Nozul Uzunluğu} & \texttt{ad\_\allowbreak{}f\_\allowbreak{}performance\_\allowbreak{}nozzle\_\allowbreak{}length} & m &  & 0,1 \\*
-\multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Hesaba etkisi:} Iraksak nozul boyu, m. Nozul Mach konturu ve cidar ısı akısı grafiklerinde kullanılır. Hesaptan sonra, siz değiştirmediyseniz motor sonucundan (çözücünün yayımladığı ıraksak boy, tasarım özeti) doldurulur. \emph{Boşsa:} Istek gönderilmez ve alan adıyla bildirilir.} \\ \midrule
-\textbf{Oda Uzunluğu} & \texttt{ad\_\allowbreak{}f\_\allowbreak{}performance\_\allowbreak{}chamber\_\allowbreak{}length} & m &  & 0,5 \\*
+\textbf{Nozul Uzunluğu} & \texttt{ad\_\allowbreak{}f\_\allowbreak{}performance\_\allowbreak{}nozzle\_\allowbreak{}length} & m &  & (boş) \\*
+\multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Hesaba etkisi:} Iraksak nozul boyu, m. Nozul Mach konturu ve cidar ısı akısı grafiklerinde kullanılır. Hesaptan sonra, siz değiştirmediyseniz motor sonucundan (çözücünün yayımladığı ıraksak boy, tasarım özeti) doldurulur. \emph{Boşsa:} Gönderilmez.} \\ \midrule
+\textbf{Oda Uzunluğu} & \texttt{ad\_\allowbreak{}f\_\allowbreak{}performance\_\allowbreak{}chamber\_\allowbreak{}length} & m &  & (boş) \\*
 \multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Hesaba etkisi:} Hazne boyu, m. Yalnız cidar ısı akısı grafiğinde kullanılır. Hesaptan sonra, motor sonucu bu değeri veriyorsa ve siz değiştirmediyseniz oradan doldurulur. \emph{Boşsa:} Istek gönderilmez ve alan adıyla bildirilir.} \\ \midrule
 \textbf{Yanma Süresi} & \texttt{ad\_\allowbreak{}f\_\allowbreak{}performance\_\allowbreak{}burn\_\allowbreak{}time} & s &  & (boş) \\*
 \multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Hesaba etkisi:} Yanma süresi, s. Yalnız cidar ısı akısı grafiğinde kullanılır. Hesaptan sonra, motor sonucu bu değeri veriyorsa ve siz değiştirmediyseniz oradan doldurulur. \emph{Boşsa:} Gönderilmez.} \\ \midrule
-\textbf{Temel Isı Akısı} & \texttt{ad\_\allowbreak{}f\_\allowbreak{}performance\_\allowbreak{}base\_\allowbreak{}heat\_\allowbreak{}flux} & W/m\textsuperscript{2} &  & 2000000 \\*
-\multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Hesaba etkisi:} Referans cidar ısı akısı, W/m\textsuperscript{2}. Yalnız cidar ısı akısı grafiğinde kullanılır. Motor sonucundan doldurulmaz. \emph{Boşsa:} Istek gönderilmez ve alan adıyla bildirilir.} \\ \midrule
-\textbf{Kritik Isı Akısı} & \texttt{ad\_\allowbreak{}f\_\allowbreak{}performance\_\allowbreak{}critical\_\allowbreak{}heat\_\allowbreak{}flux} & MW/m\textsuperscript{2} &  & 4 \\*
-\multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Hesaba etkisi:} Kritik ısı akısı çizgisi, MW/m\textsuperscript{2}. Yalnız cidar ısı akısı grafiğinde kullanılır. Motor sonucundan doldurulmaz. \emph{Boşsa:} Istek gönderilmez ve alan adıyla bildirilir.} \\ \midrule
-\textbf{Oda Sıcaklığı} & \texttt{ad\_\allowbreak{}f\_\allowbreak{}performance\_\allowbreak{}chamber\_\allowbreak{}temperature} & K &  & 3000 \\*
+\textbf{Temel Isı Akısı} & \texttt{ad\_\allowbreak{}f\_\allowbreak{}performance\_\allowbreak{}base\_\allowbreak{}heat\_\allowbreak{}flux} & W/m\textsuperscript{2} &  & (boş) \\*
+\multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Hesaba etkisi:} Referans cidar ısı akısı, W/m\textsuperscript{2} -- sizin referans düzeyiniz; cidar ısı akısı grafiğinde düzlem olarak çizilir, hesaplanmaz ve hesaplanan akıyı değiştirmez. Motor sonucundan doldurulmaz, hazır değeri yoktur. \emph{Boşsa:} Gönderilmez ve referans düzlemi çizilmez.} \\ \midrule
+\textbf{Kritik Isı Akısı} & \texttt{ad\_\allowbreak{}f\_\allowbreak{}performance\_\allowbreak{}critical\_\allowbreak{}heat\_\allowbreak{}flux} & MW/m\textsuperscript{2} &  & (boş) \\*
+\multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Hesaba etkisi:} Kritik ısı akısı çizgisi, MW/m\textsuperscript{2} -- sizin sınırınız; cidar ısı akısı grafiğinde düzlem olarak çizilir, hesaplanmaz. Motor sonucundan doldurulmaz, hazır değeri yoktur. \emph{Boşsa:} Gönderilmez ve kritik akı düzlemi çizilmez.} \\ \midrule
+\textbf{Oda Sıcaklığı} & \texttt{ad\_\allowbreak{}f\_\allowbreak{}performance\_\allowbreak{}chamber\_\allowbreak{}temperature} & K &  & (boş) \\*
 \multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Hesaba etkisi:} Hazne sıcaklığı, K. Yalnız cidar ısı akısı grafiğinde kullanılır. Hesaptan sonra, motor sonucu bu değeri veriyorsa ve siz değiştirmediyseniz oradan doldurulur. \emph{Boşsa:} Istek gönderilmez ve alan adıyla bildirilir.} \\ \midrule
-\textbf{Gamma (donmuş)} & \texttt{ad\_\allowbreak{}f\_\allowbreak{}performance\_\allowbreak{}gamma} &  &  & 1,2 \\*
+\textbf{Gamma (donmuş)} & \texttt{ad\_\allowbreak{}f\_\allowbreak{}performance\_\allowbreak{}gamma} &  &  & (boş) \\*
 \multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Hesaba etkisi:} Donmuş özgül ısılar oranı \ensuremath{\gamma}. Nozul Mach konturu ve cidar ısı akısı grafiklerinde kullanılır. Hesaptan sonra, motor sonucu bu değeri veriyorsa ve siz değiştirmediyseniz oradan doldurulur. \emph{Boşsa:} Istek gönderilmez ve alan adıyla bildirilir.} \\ \midrule
-\textbf{Toplam Kütle Debisi} & \texttt{ad\_\allowbreak{}f\_\allowbreak{}performance\_\allowbreak{}mdot\_\allowbreak{}total} & kg/s &  & 1 \\*
-\multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Hesaba etkisi:} Toplam debi, kg/s. Bilgi amaçlıdır: istekle gönderilir ama üç grafiğin hiçbiri bununla değişmez (ölçüldü). Hesaptan sonra, motor sonucu bu değeri veriyorsa ve siz değiştirmediyseniz oradan doldurulur. \emph{Boşsa:} Istek gönderilmez ve alan adıyla bildirilir.} \\ \midrule
-\textbf{Oda Çapı} & \texttt{ad\_\allowbreak{}f\_\allowbreak{}performance\_\allowbreak{}chamber\_\allowbreak{}diameter} & m &  & 0,1 \\*
+\textbf{Toplam Kütle Debisi} & \texttt{ad\_\allowbreak{}f\_\allowbreak{}performance\_\allowbreak{}mdot\_\allowbreak{}total} & kg/s &  & (boş) \\*
+\multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Hesaba etkisi:} Toplam debi, kg/s. Bilgi amaçlıdır: istekle gönderilir ama üç grafiğin hiçbiri bununla değişmez (ölçüldü). Hesaptan sonra, motor sonucu bu değeri veriyorsa ve siz değiştirmediyseniz oradan doldurulur. \emph{Boşsa:} Gönderilmez.} \\ \midrule
+\textbf{Oda Çapı} & \texttt{ad\_\allowbreak{}f\_\allowbreak{}performance\_\allowbreak{}chamber\_\allowbreak{}diameter} & m &  & (boş) \\*
 \multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Hesaba etkisi:} Hazne iç çapı, m. Nozul Mach konturu ve cidar ısı akısı grafiklerinde kullanılır. Hesaptan sonra, motor sonucu bu değeri veriyorsa ve siz değiştirmediyseniz oradan doldurulur. \emph{Boşsa:} Istek gönderilmez ve alan adıyla bildirilir.} \\ \midrule
 \end{longtable}}
 
@@ -3178,14 +3396,14 @@ Bir panel sonucu şu sırayla okunur:
 \endlastfoot
 \textbf{Tasarım Standardı} & \texttt{ad\_\allowbreak{}f\_\allowbreak{}vessel\_\allowbreak{}code\_\allowbreak{}mode} &  &  & AIAA S-080 (uçuş donanımı) \\*
 \multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Hesaba etkisi:} Tasarım kodu: AIAA S-080 (metalik basınçlı kaplar: deneme 1,5 × MEOP, patlama 2,0 × MEOP), ASME VIII Div 1 ya da NASA-STD-5012C (sıvı motor donanımı: kabul testi 1,20 × MDP, kalifikasyon testi 1,50 × MDP, patlama 1,50 × MDP). Seçilen kodun katsayıları gerekli kalınlığı, test basınçlarını ve patlama payını belirler. Motor sonucundan yalnız sıvı sayfasında doldurulur (NASA-STD-5012C, güvenlik sekmesiyle aynı standart); diğerlerinde AIAA S-080. Seçenekler: AIAA S-080 (uçuş donanımı); ASME VIII Div 1 (yer/test); NASA-STD-5012C (sıvı motor donanımı).} \\ \midrule
-\textbf{MEOP azami işletme basıncı} & \texttt{ad\_\allowbreak{}f\_\allowbreak{}vessel\_\allowbreak{}meop\_\allowbreak{}bar} & bar &  & 60 \\*
+\textbf{MEOP azami işletme basıncı} & \texttt{ad\_\allowbreak{}f\_\allowbreak{}vessel\_\allowbreak{}meop\_\allowbreak{}bar} & bar &  & (boş) \\*
 \multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Hesaba etkisi:} Beklenen en yüksek çalışma basıncı (MEOP), bar. Kabın tasarım basıncıdır: gerekli kalınlığı ve patlama paylarını belirler. Pozitif ve sonlu olmalı. Hesaptan sonra, siz değiştirmedikçe doldurulur: motorun hazne basıncıyla; iki katmanlı rejeneratif sıvı cidarda dış kabuğun en büyük tasarım basıncıyla (MDP: ceketteki en yüksek soğutucu basıncı). \emph{Boşsa:} Istek gönderilmez ve alan adıyla bildirilir.} \\ \midrule
-\textbf{İç Çap} & \texttt{ad\_\allowbreak{}f\_\allowbreak{}vessel\_\allowbreak{}inner\_\allowbreak{}diameter\_\allowbreak{}mm} & mm &  & 150 \\*
+\textbf{İç Çap} & \texttt{ad\_\allowbreak{}f\_\allowbreak{}vessel\_\allowbreak{}inner\_\allowbreak{}diameter\_\allowbreak{}mm} & mm &  & (boş) \\*
 \multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Hesaba etkisi:} Kap iç çapı, mm. Gerekli cidar ve kapak kalınlıklarını belirler. Pozitif ve sonlu olmalı. Hesaptan sonra, siz değiştirmedikçe doldurulur: motorun hazne çapıyla; iki katmanlı rejeneratif sıvı cidarda soğutucu basıncını taşıyan dış kabuğun iç çapıyla (motorun kabuk denetimi gibi ceketin en büyük yarıçapında). \emph{Boşsa:} Istek gönderilmez ve alan adıyla bildirilir.} \\ \midrule
 \textbf{Cidar Kalınlığı (mm, boş = otomatik boyutlandır)} & \texttt{ad\_\allowbreak{}f\_\allowbreak{}vessel\_\allowbreak{}wall\_\allowbreak{}thickness\_\allowbreak{}mm} &  &  & (boş) \\*
-\multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Hesaba etkisi:} Gerçek cidar kalınlığı, mm. Verilirse patlama basıncı ve paylar bu cidar için hesaplanır (pozitif olmalı). İki katmanlı rejeneratif sıvı cidarda, siz değiştirmedikçe motorun dış kabuk kalınlığıyla doldurulur; aksi hâlde motor sonucundan doldurulmaz. \emph{Boşsa:} Gönderilmez ve cidar otomatik boyutlandırılır (sonuç bunu söyler).} \\ \midrule
+\multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Hesaba etkisi:} Gerçek cidar kalınlığı, mm. Verilirse patlama basıncı ve paylar bu cidar için hesaplanır (pozitif olmalı). Hesaptan sonra, siz değiştirmedikçe motorun cidarıyla doldurulur (güvenlik sekmesindeki cidarın aynısı; iki katmanlı rejeneratif sıvı cidarda soğutucu basıncını taşıyan dış kabuk). \emph{Boşsa:} Gönderilmez ve bu sekme standardın asgarisine ve patlama payına göre kendi önerdiği cidarı boyutlandırır; sonuç bunun motorun cidarı değil, önerilen cidar olduğunu söyler.} \\ \midrule
 \textbf{Malzeme} & \texttt{ad\_\allowbreak{}f\_\allowbreak{}vessel\_\allowbreak{}material} &  &  & Aluminum 6061-T6 \\*
-\multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Hesaba etkisi:} Kap malzemesi. İzin verilen gerilmeyi sağlar (kalınlığı, patlama basıncını ve payları değiştirir). Hesaptan sonra, siz değiştirmedikçe doldurulur: katı sayfada kasa malzemesiyle, hibrit sayfada kamara malzemesiyle, iki katmanlı rejeneratif sıvı cidarda dış kabuk malzemesiyle; aksi hâlde panelin varsayılanı kalır. Seçenekler: Aluminum 6061-T6; Steel AISI 4130; Steel (generic); Stainless 304; Stainless 316; Titanium Ti-6Al-4V; Inconel 718.} \\ \midrule
+\multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Hesaba etkisi:} Kap malzemesi. İzin verilen gerilmeyi sağlar (kalınlığı, patlama basıncını ve payları değiştirir). Hesaptan sonra, siz değiştirmedikçe doldurulur: katı sayfada kasa malzemesiyle, hibrit sayfada kamara malzemesiyle, sıvı sayfada kamara malzemesiyle (tek cidar) ya da dış kabuk malzemesiyle (iki katmanlı rejeneratif cidar). Motor sonucu malzeme yayımlamıyorsa panelin varsayılanı kalır ve alan bunu söyler. Seçenekler: Aluminum 6061-T6; Steel AISI 4130; Steel (generic); Stainless 304; Stainless 316; Titanium Ti-6Al-4V; Inconel 718.} \\ \midrule
 \textbf{Tasarım Sıcaklığı} & \texttt{ad\_\allowbreak{}f\_\allowbreak{}vessel\_\allowbreak{}temperature\_\allowbreak{}K} & K &  & 293,15 \\*
 \multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Hesaba etkisi:} Tasarım sıcaklığı, K. Malzemenin izin verilen gerilmesini sıcaklığa göre düşürür. Pozitif ve deponun fiziksel sıcaklık bandı içinde olmalı. İki katmanlı rejeneratif sıvı cidarda, siz değiştirmedikçe motorun dış kabuk sıcaklığıyla (en sıcak soğutucu) doldurulur; aksi hâlde motor sonucundan doldurulmaz. \emph{Boşsa:} Istek gönderilmez ve alan adıyla bildirilir.} \\ \midrule
 \textbf{Kaynak Bağlantı Verimi (UW-12)} & \texttt{ad\_\allowbreak{}f\_\allowbreak{}vessel\_\allowbreak{}weld\_\allowbreak{}efficiency} &  &  & 1.00 -- tam radyografi \\*
@@ -3237,7 +3455,7 @@ Bir panel sonucu şu sırayla okunur:
 
 {\small
 \begin{longtable}{@{}>{\raggedright\arraybackslash}p{4.7cm}>{\raggedright\arraybackslash}p{3.5cm}>{\raggedright\arraybackslash}p{1.6cm}>{\raggedright\arraybackslash}p{2.2cm}>{\raggedright\arraybackslash}p{3.3cm}@{}}
-\caption{Güverte: Besleme Sistemi paneli girdileri (çalkalanma, basınçlandırıcı, su koçu)}\label{tab:p-besleme}\\
+\caption{Güverte: Besleme Sistemi paneli girdileri (çalkantı, basınçlandırıcı, su koçu)}\label{tab:p-besleme}\\
 \toprule
 \textbf{Girdi} & \textbf{Kimlik} & \textbf{Birim} & \textbf{Form sınırı} & \textbf{Form varsayılanı} \\ \midrule
 \endfirsthead
@@ -3249,17 +3467,29 @@ Bir panel sonucu şu sırayla okunur:
 \bottomrule
 \endlastfoot
 \textbf{Tank Yarıçapı} & \texttt{feed\_\allowbreak{}slosh\_\allowbreak{}radius} & m &  & (boş) \\*
-\multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Hesaba etkisi:} Tank yarıçapı, m (\textgreater{} 0). Çalkalanma modlarında kullanılır. Hesaptan sonra, siz değiştirmedikçe motor sonucundan doldurulur (hibrit: koşumun oksitleyici tankı çalkalanma bloğundaki tank çapının yarısı; sıvı: koşumun oksitleyici tankı çalkalanma bloğundaki yarıçap). \emph{Boşsa:} Gönderilmez; analiz isteği bu alanı adlandırarak reddeder (zorunlu).} \\ \midrule
+\multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Hesaba etkisi:} Tank yarıçapı, m (\textgreater{} 0). Çalkantı modlarında kullanılır. Hesaptan sonra, siz değiştirmedikçe motor sonucundan doldurulur (hibrit: koşumun oksitleyici tankı çalkantı bloğundaki tank çapının yarısı; sıvı: koşumun oksitleyici tankı çalkantı bloğundaki yarıçap). \emph{Boşsa:} Gönderilmez; analiz isteği bu alanı adlandırarak reddeder (zorunlu).} \\ \midrule
 \textbf{Doluluk Yüksekliği} & \texttt{feed\_\allowbreak{}slosh\_\allowbreak{}fill\_\allowbreak{}height} & m &  & (boş) \\*
-\multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Hesaba etkisi:} Sıvı dolum yüksekliği, m (\textgreater{} 0). Çalkalanma frekansına ve kütlesine girer. Hesaptan sonra, siz değiştirmedikçe motor sonucundan doldurulur (hibrit: koşumun oksitleyici tankı çalkalanma bloğundaki dolum yüksekliği; sıvı: koşumun oksitleyici tankı çalkalanma bloğundaki dolum yüksekliği). \emph{Boşsa:} Gönderilmez; analiz isteği bu alanı adlandırarak reddeder (zorunlu).} \\ \midrule
+\multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Hesaba etkisi:} Sıvı dolum yüksekliği, m (\textgreater{} 0). Çalkantı frekansına ve kütlesine girer. Hesaptan sonra, siz değiştirmedikçe motor sonucundan doldurulur (hibrit: koşumun oksitleyici tankı çalkantı bloğundaki dolum yüksekliği; sıvı: koşumun oksitleyici tankı çalkantı bloğundaki dolum yüksekliği). \emph{Boşsa:} Gönderilmez; analiz isteği bu alanı adlandırarak reddeder (zorunlu).} \\ \midrule
 \textbf{Eksenel İvme} & \texttt{feed\_\allowbreak{}slosh\_\allowbreak{}g\_\allowbreak{}eff} & m/s\textsuperscript{2} &  & (boş) \\*
-\multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Hesaba etkisi:} Eksenel ivme, m/s\textsuperscript{2} (\textgreater{} 0). Çalkalanma modlarının geri getirici ivmesidir. Koşumun kendi çalkalanma bloğundan doldurulur (hibrit ve sıvı: orada beyanlı sabit standart 1 g). \emph{Boşsa:} Gönderilmez; uç standart yerçekimini kullanır: g0 = 9,80665 m/s\textsuperscript{2}, bunu sonucun altında varsayılandan doldurulmuş alan olarak gösterir.} \\ \midrule
+\multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Hesaba etkisi:} Eksenel ivme, m/s\textsuperscript{2} (\textgreater{} 0). Çalkantı modlarının geri getirici ivmesidir. Koşumun kendi çalkantı bloğundan doldurulur (hibrit ve sıvı: orada beyanlı sabit standart 1 g). \emph{Boşsa:} Gönderilmez; uç standart yerçekimini kullanır: g0 = 9,80665 m/s\textsuperscript{2}, bunu sonucun altında varsayılandan doldurulmuş alan olarak gösterir.} \\ \midrule
 \textbf{İtici Yoğunluğu} & \texttt{feed\_\allowbreak{}slosh\_\allowbreak{}fluid\_\allowbreak{}density} & kg/m\textsuperscript{3} &  & (boş) \\*
-\multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Hesaba etkisi:} İtici yoğunluğu, kg/m\textsuperscript{3} (\textgreater{} 0). Çalkalanan kütleyi ve kuvvetleri belirler. Hesaptan sonra, siz değiştirmedikçe motor sonucundan doldurulur (hibrit: koşumun oksitleyici tankı çalkalanma bloğundaki sıvı yoğunluğu; sıvı: koşumun oksitleyici yoğunluğu, çalkalanma bloğunun kullandığı yoğunluk). \emph{Boşsa:} Gönderilmez; analiz modları sıvı kütlesi olmadan hesaplar.} \\ \midrule
+\multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Hesaba etkisi:} İtici yoğunluğu, kg/m\textsuperscript{3} (\textgreater{} 0). Çalkantı kütlesini ve kuvvetleri belirler. Hesaptan sonra, siz değiştirmedikçe motor sonucundan doldurulur (hibrit: koşumun oksitleyici tankı çalkantı bloğundaki sıvı yoğunluğu; sıvı: koşumun oksitleyici yoğunluğu, çalkantı bloğunun kullandığı yoğunluk). \emph{Boşsa:} Gönderilmez; analiz modları sıvı kütlesi olmadan hesaplar.} \\ \midrule
 \textbf{Perde Genişliği w/R} & \texttt{feed\_\allowbreak{}slosh\_\allowbreak{}baffle\_\allowbreak{}width\_\allowbreak{}ratio} &  &  & (boş) \\*
-\multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Hesaba etkisi:} Halka perde genişliğinin tank yarıçapına oranı, w/R (0 \textless{} w/R \ensuremath{\le} 1). Halka perde sönümünü belirler (Miles 1958). Sıvı: tankın kendi halka perdesinin genişlik oranıyla doldurulur (oksitleyici tankı çalkalanma bloğu). Hibrit: doldurulmaz. \emph{Boşsa:} Gönderilmez; uç hedef sönüm için gereken perde genişliğini önerir (hibrit motorun kendi çalkalanma bloğu da böyle koşar).} \\ \midrule
+\multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Hesaba etkisi:} Halka perde genişliğinin tank yarıçapına oranı, w/R (0 \textless{} w/R \ensuremath{\le} 1). Halka perde sönümünü belirler (Miles 1958). Sıvı: tankın kendi halka perdesinin genişlik oranıyla doldurulur (oksitleyici tankı çalkantı bloğu). Hibrit: doldurulmaz. \emph{Boşsa:} Gönderilmez; uç hedef sönüm için gereken perde genişliğini önerir (hibrit motorun kendi çalkantı bloğu da böyle koşar).} \\ \midrule
 \textbf{Perde Derinliği d/R} & \texttt{feed\_\allowbreak{}slosh\_\allowbreak{}baffle\_\allowbreak{}depth\_\allowbreak{}ratio} &  &  & (boş) \\*
-\multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Hesaba etkisi:} Perdenin serbest yüzeyden derinliğinin yarıçapa oranı, d/R (\ensuremath{\ge} 0). Halka perde sönümünü belirler (Miles 1958). Koşumun çalkalanma bloğunun kullandığı derinlik oranıyla doldurulur (hibrit: oksitleyici tankı çalkalanma bloğu; sıvı: tankın kendi halka perdesi). \emph{Boşsa:} Gönderilmez; analiz d/R = 0,10 kullanır ve bunu sonucun altında varsayılandan doldurulmuş alan olarak gösterir.} \\ \midrule
+\multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Hesaba etkisi:} Perdenin serbest yüzeyden derinliğinin yarıçapa oranı, d/R (\ensuremath{\ge} 0). Halka perde sönümünü belirler (Miles 1958). Koşumun çalkantı bloğunun kullandığı derinlik oranıyla doldurulur (hibrit: oksitleyici tankı çalkantı bloğu; sıvı: tankın kendi halka perdesi). \emph{Boşsa:} Gönderilmez; analiz d/R = 0,10 kullanır ve bunu sonucun altında varsayılandan doldurulmuş alan olarak gösterir.} \\ \midrule
+\textbf{Etkin eksenel ivme, alt} & \texttt{clk\_\allowbreak{}geff\_\allowbreak{}min} & m/s\textsuperscript{2} & \ensuremath{\ge}\,0 & (boş) \\*
+\multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Hesaba etkisi:} Sıvı yüzeyini geri getiren etkin eksenel ivme, m/s\textsuperscript{2} (sonlu, \textgreater{} 0). Çalkantı frekansı \ensuremath{\surd}g\_eff ile ölçeklenir; çalkantı kütle oranı, sarkaç boyu ve konumlar ona bağlı değildir. Üst değer de verilirse aralık eşit aralıklı 11 değerle haritalanır. \emph{Boşsa:} Standart yerçekimi g0 = 9,80665 m/s\textsuperscript{2} (1 g) kullanılır ve sonuçta yazılır.} \\ \midrule
+\textbf{Etkin eksenel ivme, üst} & \texttt{clk\_\allowbreak{}geff\_\allowbreak{}max} & m/s\textsuperscript{2} & \ensuremath{\ge}\,0 & (boş) \\*
+\multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Hesaba etkisi:} g\_eff aralığının üst ucu, m/s\textsuperscript{2} (sonlu, alt değerden büyük). Aralıkta frekans haritası eşit aralıklı 11 g\_eff değeri taşır, yükler üst değerde verilir (g\_eff ile doğrusal ölçeklenir) ve zaman tablosunda \ensuremath{\omega}1 yerine \ensuremath{\kappa}1 yazılır (araç ekibi \ensuremath{\omega}1 = \ensuremath{\surd}(\ensuremath{\kappa}1\ensuremath{\cdot}g\_eff) bağıntısını kendi ivmesinde hesaplar). \emph{Boşsa:} Tek g\_eff değeri kullanılır.} \\ \midrule
+\textbf{Model yöntemi} & \texttt{clk\_\allowbreak{}yontem} &  &  & Otomatik \\*
+\multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Hesaba etkisi:} Eşdeğer model tablosunun nasıl kurulacağı. Otomatik: düz tabanlı dik silindirde kapalı biçim (Dodge 2000 Denk. (1.40), Tablo 3.2); başka her eksenel simetrik tankta eksenel simetrik sonlu eleman çözümü. Başlı tankta kapalı biçim, silindir formülünü eşdeğer derinlik h\_eş = V/(\ensuremath{\pi}R\textsuperscript{2}) ile uygular ve bunu beyan eder; serbest yüzeyi tank başında olan satırlar reddedilir. Sayısal her zaman sonlu eleman çözümünü kullanır. Seçenekler: Otomatik; Kapalı biçim (silindir formülü); Sayısal (sonlu eleman). \emph{Boşsa:} Otomatik.} \\ \midrule
+\textbf{Geometrisi değişecek tank} & \texttt{clk\_\allowbreak{}geo\_\allowbreak{}tank} &  &  & N\textsubscript{2}O tankı \\*
+\multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Hesaba etkisi:} Yüklenen iç geometrinin bu motorun hangi tankının yerine geçeceği. Yükleme yoksa motorun kendi düz kapaklı dik silindiri (çap ve boy motor tasarımından) kullanılır. Seçenekler: N\textsubscript{2}O tankı.} \\ \midrule
+\textbf{Dosyanın uzunluk birimi} & \texttt{clk\_\allowbreak{}geo\_\allowbreak{}unit} &  &  & Seçin\ldots{} \\*
+\multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Hesaba etkisi:} Dosyadaki koordinatların uzunluk birimi: m, mm ya da in. Zorunludur; tahmin edilmez. CSV'nin birim satırı ya da STEP başlığı farklı bir birim bildiriyorsa dosya adıyla reddedilir. Seçenekler: Seçin\ldots{}; m; mm; in.} \\ \midrule
+\textbf{Burun yönü (x,y,z)} & \texttt{clk\_\allowbreak{}geo\_\allowbreak{}up} &  &  & (boş) \\*
+\multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Hesaba etkisi:} Dosyanın koordinatlarında aracın burnunu gösteren yön: üç sayı "x,y,z", hepsi sıfır olamaz. 3B dosyada (nokta bulutu, ağ, STEP) zorunludur: tankın hangi ucunun buruna baktığını belirler ve tank ekseniyle en çok 60\ensuremath{^\circ} açı yapmalıdır. (r,z) profilde kullanılmaz. \emph{Boşsa:} 3B dosyada boşsa dosya adıyla reddedilir.} \\ \midrule
 \textbf{Mimari} & \texttt{feed\_\allowbreak{}pressurant\_\allowbreak{}mode} &  &  & Regüleli \\*
 \multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Hesaba etkisi:} Basınçlandırma mimarisi: regüleli ya da blowdown. Analiz basınçlandırıcıyı bu mimari için boyutlandırır; öbür kipin alanları yok sayılır. Motor sonucundan doldurulmaz. Seçenekler: Regüleli; Blowdown (basınç düşümlü).} \\ \midrule
 \textbf{Basınçlandırma Gazı} & \texttt{feed\_\allowbreak{}pressurant\_\allowbreak{}gas} &  &  & Helyum \\*
@@ -3360,6 +3590,152 @@ Bir panel sonucu şu sırayla okunur:
 \end{longtable}}
 % <<OTO-SON:panel-girdiler>>
 
+\subsection{Tank çalkantı modeli (Besleme Sistemi → Çalkantı)}\label{sec:calkanti}
+
+\paragraph{Ne işe yarar.} Sıvı motorun iki tankında ve hibrit motorun
+N\textsubscript{2}O tankında sıvının serbest yüzey salınımını (çalkantı)
+eşdeğer mekanik modelle verir: doluluk boyunca sarkaç ve sabit kütle
+eşdeğeri, motorun itici tüketiminden doluluk geçmişi, çalkantı yükleri, halka
+perde önerisi ve araç ekibine aktarım dosyaları. Tablo motorun kendi tank
+ölçülerinden ve yüklenen sıvıdan kurulur (Dodge 2000; NASA SP-8009). Konumlar
+tank çerçevesindedir: $z$ tank tabanından yukarı ölçülür; tankın araçtaki yeri
+6-DOF panelinde girilir (Bölüm~\ref{sec:calkanti-6dof}). Katı motorda sıvı
+itici yoktur; bölüm yerine tek satır görünür.
+
+Bölüm, motor hesaplandıktan sonra \ui{BESLEME SİSTEMİ} panelinin
+\ui{Çalkantı} sekmesinin altında açılır (Şekil~\ref{fig:calkanti-form}). Motor
+yeniden hesaplanınca önceki tank modeli sonucu silinir ve nedeni yazılır.
+
+\ekran{img/v3_0_7/calkanti_form_tr.png}{Tank çalkantı modeli formu (sıvı örnek):
+etkin eksenel ivme aralığı, model yöntemi, \ui{Tank modelini hesapla} ve kapalı
+\ui{Dosyadan tank geometrisi (isteğe bağlı)} bölümü.}{fig:calkanti-form}
+
+\paragraph{Girdiler.} Alanlar için bkz. Tablo~\ref{tab:p-besleme}.
+\begin{itemize}[leftmargin=1.4em]
+  \item \ui{Etkin eksenel ivme, alt} ve \ui{üst} (m/s\textsuperscript{2}):
+  sıvı yüzeyini geri getiren eksenel ivme. Çalkantı frekansı $\sqrt{g_{eff}}$
+  ile ölçeklenir; kütle oranı, sarkaç boyu ve konumlar ona bağlı değildir.
+  İkisi boşsa standart yerçekimi $g_0 = 9{,}80665$~m/s\textsuperscript{2}
+  kullanılır ve sonucun başında yazılır. Yalnız alt değer girilirse tek
+  $g_{eff}$, iki değer girilirse aralık 11 eşit aralıklı değerle taranır;
+  yükler aralığın üst ucunda verilir.
+  \item \ui{Model yöntemi}: \ui{Otomatik} düz tabanlı dik silindirde kapalı
+  biçimi (Dodge 2000 Denk. (1.40), Tablo 3.2), başka her eksenel simetrik
+  tankta eksenel simetrik sonlu eleman çözümünü kullanır. Kapalı biçim başlıklı
+  bir tanka eşdeğer derinlikle uygulanırsa bu beyan edilir; yüzeyin başlıkta
+  kaldığı satırlar reddedilir. \ui{Sayısal (sonlu eleman)} her zaman sonlu eleman çözümünü
+  kullanır.
+\end{itemize}
+
+\paragraph{Sonuç nasıl okunur.} Her tank için (Şekil~\ref{fig:calkanti-sonuc}):
+\begin{itemize}[leftmargin=1.4em]
+  \item Yöntem cümlesi ve kartlar: yüklenen sıvı, sıvı yoğunluğu, yüklü
+  doluluk, yüklü dolulukta 1~g'de $f_1$, çalkantı kütlesi $m_1$ ve sarkaç boyu
+  $L_1$. Örnek sıvı motorda oksitleyici tankı: 225,825~kg LOX,
+  1141,16~kg/m\textsuperscript{3}, doluluk 0,9500, $f_1$ 1,3901~Hz,
+  $m_1$ 21,608~kg, $L_1$ 0,1286~m; yakıt tankı: 119,369~kg RP-1, $f_1$
+  1,4616~Hz, $m_1$ 11,422~kg. 1~g frekansı motor kartındaki çalkantı
+  frekansıyla aynı sayıdır; yüklenen bir geometride farklıysa ikisi yan yana,
+  farkın nedeniyle yazılır.
+  \item \ui{Bu sayıların dayandığı beyanlar}: yoğunluğun yanma boyunca sabit
+  alınması, tankın boşalma biçimi (sıvıda sabit debi; kendinden basınçlı
+  N\textsubscript{2}O'da motorun boşalma çözümü), yoğunluğun, viskozitenin ve
+  tank geometrisinin kaynağı.
+  \item Grafikler: doluluk ve $g_{eff}$'e göre $f_1$ (tek $g_{eff}$'te çizgi,
+  aralıkta ısı haritası); dolulukla eşdeğer model ($L_1$, $z_1$, askı noktası
+  $z_1 + L_1$, ikinci eksende $m_1/m$); motorun itici tüketiminden doluluk
+  geçmişi (tek $g_{eff}$'te $f_1$ ile).
+  \item \ui{Eşdeğer model tablosu}: 29 doluluk satırı (0,005--0,995);
+  sütunlar doluluk, yükseklik, sıvı kütlesi, $m_1/m$, $L_1$, $z_1$, askı
+  noktası, $m_0/m$, $z_0$, sıvı kütle merkezi, kütle merkezine göre donmuş
+  atalet, $\Gamma_1$ ve satır durumu (Şekil~\ref{fig:calkanti-tablo}).
+  \item \ui{SP-8009 çalkantı yükleri, iki genlik düzeyi}: doğrusal sınır
+  (çeper dalgası $\eta = 0{,}2R$) ve kırılma üst sınırı ($\eta = L_1$, doğrusal
+  kuramın dışında); doluluk başına yanal kuvvet $F_1$, sıvı kütle merkezine
+  göre moment $M_1$, yüzeyde dinamik çeper basıncı ve taban basıncı. Yük
+  bağıntıları dik silindir içindir; başka bir geometride yük tablosu
+  ``hesaplanmadı'' der.
+  \item \ui{Halka perde önerisi (Miles, yaklaşık)}: yüklü dolulukta hedef sönüm
+  oranı için perdenin yüzeyden derinliği, önerilen genişlik ve bu genişlikte
+  sönüm (×2 bant). Sönüm derinlikle azaldığı için seviye düştükçe tankın
+  aşağısında başka perdeler gerekir; pencereyi kapatan halka dizisi 6-DOF
+  bölümündedir (Bölüm~\ref{sec:calkanti-6dof}).
+  \item \ui{Araç ekibine aktarım tablosu}: üç dosya. \ui{Aktarım tablosu
+  (JSON)} eşdeğer model tablosunu, motorun tüketiminden zaman eksenini ve künye
+  satırlarını taşır; \ui{Doluluk tablosu (CSV)} aynı tablodur; \ui{Zaman tablosu
+  (CSV)} zaman eksenidir ($m_0$, $m_1$, $L_1$, askı, sönüm, sıvının kütle merkezi
+  ve ataleti). Konumlar tank çerçevesindedir; tankın araçtaki istasyonu motor
+  görünümünde bilinmediği için dosyada yoktur. Dosyalar araç ekibinin kendi
+  kararlılık ve kontrol aracında kullanılmak içindir.
+\end{itemize}
+
+\ekran{img/v3_0_7/calkanti_sonuc_liquid_tr.png}{Tank modeli sonucu, örnek sıvı
+motorun oksitleyici tankı: kartlar, beyanlar, kaynaklar ve doluluk--$g_{eff}$
+frekans grafiği.}{fig:calkanti-sonuc}
+
+\ekran{img/v3_0_7/calkanti_tablo_liquid_tr.png}{Eşdeğer model tablosu (29 doluluk
+satırı; konumlar tank tabanından yukarı).}{fig:calkanti-tablo}
+
+\paragraph{Tank geometrisi girdisi.} Motorun tankı düz kapaklı dik silindirdir
+(çap ve boy motor tasarımından). Gerçek tank iç geometrisi \ui{Dosyadan tank
+geometrisi (isteğe bağlı)} bölümünden yüklenebilir
+(Şekil~\ref{fig:calkanti-geo}):
+\begin{itemize}[leftmargin=1.4em]
+  \item \ui{Geometrisi değişecek tank}: sıvıda oksitleyici ya da yakıt tankı,
+  hibritte N\textsubscript{2}O tankı.
+  \item \ui{Tank iç geometrisi dosyası}: nokta bulutu CSV (başlık
+  \kod{x,y,z}), XYZ, PLY ya da STL ağı, STEP katısı (tankın iç hacmi tek katı
+  olarak) ya da alt kutuptan üst kutba bir $(r,z)$ profil CSV'si. Boyut sınırı
+  yükleme başına 32~MB, STEP'te 16~MB.
+  \item \ui{Dosyanın uzunluk birimi}: m, mm ya da in; zorunludur, tahmin
+  edilmez. CSV'nin birim satırı ya da STEP başlığı başka bir birim
+  bildiriyorsa dosya adıyla reddedilir.
+  \item \ui{Burun yönü (x,y,z)}: dosyanın koordinatlarında araç burnunu
+  gösteren yön, sıfır olmayan üç sayı. 3B dosyalarda zorunludur ve tank
+  ekseniyle en çok 60° açı yapmalıdır; profil dosyasında kullanılmaz.
+\end{itemize}
+Dosya okunur, eksenel simetri ve kapalılık denetlenir. Eksenel simetrik
+olmayan tank bu sürümde çözülmez: dosya, ölçülen sapma ve sınırıyla adıyla
+reddedilir, yaklaşık bir sonuç verilmez (Şekil~\ref{fig:calkanti-geo-ret}).
+Kabul edilen dosya listede adıyla görünür; \ui{Tank modelini hesapla}
+düğmesine basılınca o tankın tablosu sonlu eleman çözümüyle kurulur; tank geometrisi
+satırı dosya adını ve SHA-256 özetini yazar. Yük ve perde bağıntıları dik
+silindir için olduğundan yüklenen geometride bu iki blok ``hesaplanmadı''
+der. Motor kartındaki 1~g frekansı motorun kendi silindirine aittir;
+yüklenen geometrinin frekansı yanında ve farkın nedeniyle yazılır
+(Şekil~\ref{fig:calkanti-geo-sonuc}). Yüklenen geometri 6-DOF bağlamasında da
+kullanılır.
+
+\ekran{img/v3_0_7/calkanti_geometri_yukleme_tr.png}{Tank geometrisi yükleme
+(hibrit örnek, N\textsubscript{2}O tankı): kubbeli silindir nokta bulutu, birim
+mm, burun yönü 0,0,1; kabul edilen dosya ve ölçüleri.}{fig:calkanti-geo}
+
+\ekran{img/v3_0_7/calkanti_geometri_ret_tr.png}{Eksenel simetrik olmayan tank
+dosyasının adlı reddi: ölçülen en büyük ve ortalama sapma sınırlarıyla
+birlikte.}{fig:calkanti-geo-ret}
+
+\ekran{img/v3_0_7/calkanti_sonuc_hybrid_geo_tr.png}{Yüklenen geometriyle hibrit
+tank modeli: yöntem eksenel simetrik sonlu eleman çözümü; motor kartının 1~g
+frekansı ile yüklenen geometrinin frekansı yan yana ve
+nedeniyle.}{fig:calkanti-geo-sonuc}
+
+\paragraph{Sınırlar ve beyanlar.}
+\begin{itemize}[leftmargin=1.4em]
+  \item Model doğrusal, küçük genlikli çalkantıdır; dalga genliği tank
+  yarıçapının 0,2 katını aşınca doğrusal kuramın dışına çıkılır (Dodge 2000,
+  s.~33). Bu sınırın üstündeki yük düzeyi ``doğrusal kuram dışında'' diye
+  etiketlenir.
+  \item Sıvı yoğunluğu yanma boyunca ateşleme anındaki değerinde sabit
+  alınır; hibritte 6-DOF bağlamasında yoğunluk motorun boşalma çözümünden
+  zamanla değişir.
+  \item Motor N\textsubscript{2}O için viskozite ve iki itici için yüzey
+  gerilimi yayımlamaz: hibritte çeper sönümü hesaplanmaz (6-DOF'ta sıfır
+  alınır, tutucu yön), Bond sayısı denetimi ``hesaplanamadı'' der.
+  \item Kontrol döngüsü (TVC, otopilot) modellenmez. Güdümlü bir araçta asıl
+  risk bu bağlaşımdır; aktarım tablosu araç ekibinin GNC aracında
+  kullanılır.
+\end{itemize}
+
 \subsection{Sonuç bölümündeki paneller}
 
 Bazı analizler güvertede değil, sonuç bölümünde kendi panelinde çalışır.
@@ -3376,7 +3752,7 @@ Tank Boşalması & Hibrit & Kendinden basınçlı tankta basınç, debi ve itki 
 Yapısal FEA & Hibrit, sıvı & Eksenel simetrik cidar kesitinde gerilme alanı, ağ kalitesi ve yakınsama geçmişi. \\
 Termal FEA & Hibrit & Geçici iletimle cidar sıcaklık alanı; sonlu yanma sonundaki tepe cidar sıcaklığı. Ana zincirin denge sıcaklığı ile farklı soruyu yanıtlar. \\
 Tane Kesiti FEA & Katı & Düzlem şekil değiştirme gerilmesi ve port gerinimi; kabul ölçütü port yüzeyi gerinimidir. Gövdeye yapıştırılmış tanede kürleme ve soğuma büzülmesinin ısıl yükü de uygulanır; kasa basınç altında genişler. Pay rozeti 1 ve üstünde yeşil (kabul ölçütü oturmuşsa), 1'in altında kırmızıdır. Gerinim küçük gerinim aralığının dışına çıkarsa pay yazılmaz ve kapasitenin aşıldığı yazılır. \\
-Uçuş Dinamiği --- 6-DOF & Üçü & Rijit gövde uçuşu, Barrowman $C_{N\alpha}$/CP, statik marj, ray ve rüzgâr. Doğrusal küçük $\alpha$ aerodinamiği ($\alpha < 15°$). İtki irtifaya göre düzeltilir: $F(h) = F_{ref} + (p_{ref} - p_a)A_e$. Kararlılık rozeti tek hükümdür; uçuş başarısızsa bitiş nedenini yazar. İtki rozeti seçilen itki kaynağının adını ve uçan impulsu verir. Varsayılan gövde motor zarfından dar olmaz. \\
+Uçuş Dinamiği --- 6-DOF & Üçü & Rijit gövde uçuşu, Barrowman $C_{N\alpha}$/CP, statik marj, ray ve rüzgâr. Doğrusal küçük $\alpha$ aerodinamiği ($\alpha < 15°$). İtki irtifaya göre düzeltilir: $F(h) = F_{ref} + (p_{ref} - p_a)A_e$. Kararlılık rozeti tek hükümdür; uçuş başarısızsa bitiş nedenini yazar. İtki rozeti seçilen itki kaynağının adını ve uçan impulsu verir. Varsayılan gövde motor zarfından dar olmaz. Sıvı ve hibritte tank yeri girilirse uçuş tank çalkantısıyla bağlaşık çözülür (Bölüm~\ref{sec:calkanti-6dof}). \\
 Enjektör Tasarımı & Hibrit, sıvı & Bağımsız ``ya şöyle olsaydı'' hesaplayıcısı; her ana hesaptan sonra o tasarımın devresiyle doldurulur, ana tasarımı değiştirmez. \\
 Yörünge Analizi & Üçü & Nokta kütle balistik uçuş; 6-DOF değildir. Yük çarpanı algılanan ivmedir (yerçekimi hariç); kinematik ivme ayrıca verilir. Hibritte motorun uçuş eğrisi uçurulur. Kalkamayan araçta grafik çizilmez, \ui{KALKIŞ YOK} yazılır. Varsayımlar (düzlemsel model, atış açısı ve kaynağı) künyede. \\
 \bottomrule
@@ -3410,11 +3786,11 @@ Yörünge Analizi & Üçü & Nokta kütle balistik uçuş; 6-DOF değildir. Yük
 \bottomrule
 \endlastfoot
 \textbf{Besleme Modu} & \texttt{tp\_\allowbreak{}feed\_\allowbreak{}mode} &  &  & N2O blowdown (kendinden basınçlı) \\*
-\multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Hesaba etkisi:} How the oxidizer reaches the injector in this time march. Regulated: the oxidizer mass flow is held at its design value for the whole burn; no tank is modelled, so the fill fraction changes nothing and the tank temperature only enters as the N2O inlet temperature. N2O blowdown: a self-pressurising N2O tank holding the design oxidizer mass drives the flow; as it empties, tank pressure, thrust and Pc fall and the run can end before the design burn time (the end event is marked on the chart). Blowdown is disabled when the main design uses a user-set tank pressure. Choices: Regulated (default) or N2O blowdown. Seçenekler: Regüleli (sabit kütle debisi); N2O blowdown (kendinden basınçlı).} \\ \midrule
+\multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Hesaba etkisi:} Bu zaman yürüyüşünde oksitleyicinin enjektöre nasıl geldiği. Regüleli: oksitleyici kütle debisi yanma boyunca tasarım değerinde tutulur; tank modellenmez; doluluk oranı hiçbir şeyi değiştirmez, tank sıcaklığı yalnız N2O giriş sıcaklığı olarak girer. N2O blowdown: tasarımın oksitleyici kütlesini taşıyan kendinden basınçlı N2O tankı debiyi sürer; tank boşaldıkça tank basıncı, itki ve Pc düşer ve koşu tasarım yanma süresinden önce bitebilir (bitiş olayı grafikte işaretlenir). Ana tasarım kullanıcının verdiği tank basıncını kullanıyorsa blowdown kapalıdır. Seçenekler: Regüleli (varsayılan) ya da N2O blowdown. Seçenekler: Regüleli (sabit kütle debisi); N2O blowdown (kendinden basınçlı).} \\ \midrule
 \textbf{Tank Sıcaklığı} & \texttt{tp\_\allowbreak{}tank\_\allowbreak{}temp} & K & 240 -- 309 & 293,15 \\*
-\multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Hesaba etkisi:} Initial N2O tank temperature, in K. In N2O blowdown mode it sets the starting vapour pressure and liquid density from the N2O saturation table, so it drives the flow. In Regulated mode the oxidizer flow is prescribed, so it does not drive the feed; it is still passed to the engine as the N2O inlet temperature, which shifts the curves only slightly. After each engine calculation it is filled with the engine Oxidizer Temperature (the tank temperature the engine was designed with); a value you type is kept and, if it differs from the engine value, the difference is shown below the field. Empty: the engine oxidizer temperature is sent, or 293,15 K (the solver's default tank temperature) if the engine has none. Accepted (blowdown): 240--309 K (saturation table band); a temperature outside the N2O liquid range is rejected in both modes with the reason.} \\ \midrule
+\multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Hesaba etkisi:} N2O tankının başlangıç sıcaklığı, K. N2O blowdown kipinde başlangıç buhar basıncını ve sıvı yoğunluğunu N2O doyma tablosundan belirler, yani debiyi sürer. Regüleli kipte oksitleyici debisi verili olduğundan beslemeyi sürmez; yine de motora N2O giriş sıcaklığı olarak gider ve eğrileri yalnız çok az kaydırır. Her motor hesabından sonra motorun Oksitleyici Sıcaklığıyla (motorun tasarlandığı tank sıcaklığı) doldurulur; burada yazdığınız değer korunur ve motorunkinden farklıysa fark alanın altında yazılır. Kabul aralığı (blowdown): 240--309 K (doyma tablosu bandı); N2O sıvı aralığının dışındaki sıcaklık iki kipte de nedeni yazılarak reddedilir. \emph{Boşsa:} Motorun oksitleyici sıcaklığı, motorda yoksa 293,15 K gönderilir (çözücünün varsayılan tank sıcaklığı).} \\ \midrule
 \textbf{Sıvı Doluluk Oranı} & \texttt{tp\_\allowbreak{}fill} &  & 0,05 -- 0,98 & 0,85 \\*
-\multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Hesaba etkisi:} Fraction of the tank volume filled with liquid N2O at the start (dimensionless, 0--1); the rest is vapour ullage. Read only in N2O blowdown mode: with the design oxidizer mass fixed it sets the tank volume, and so how fast the tank pressure falls. In Regulated mode it changes no number. Empty: 0,85 is sent (the solver's default). Accepted: 0,05--0,98; outside it the blowdown run is rejected with the reason.} \\ \midrule
+\multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Hesaba etkisi:} Başlangıçta tank hacminin sıvı N2O ile dolu kesri (boyutsuz, 0--1); kalanı buhar boşluğudur (ullage). Yalnız N2O blowdown kipinde okunur: tasarımın oksitleyici kütlesi sabitken tank hacmini, dolayısıyla tank basıncının ne hızla düştüğünü belirler. Regüleli kipte hiçbir sayıyı değiştirmez. Kabul aralığı: 0,05--0,98; dışında blowdown koşusu nedeni yazılarak reddedilir. \emph{Boşsa:} 0,85 gönderilir (çözücünün varsayılanı).} \\ \midrule
 \end{longtable}}
 
 {\small
@@ -3610,6 +3986,12 @@ Yörünge Analizi & Üçü & Nokta kütle balistik uçuş; 6-DOF değildir. Yük
 \multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Hesaba etkisi:} İtkinin kaynağı. Varsayılan: sayfa hesabı (ya da form değerleri). İçe aktarılan: RASP .eng / RockSim .rse dosyası okunur ve itki eğrisi uçurulur; dosyada birden çok motor varsa yandaki liste birini seçer. Dosya itici kütlesi veriyorsa gözden geçirmeniz için İtici Kütlesi alanına yazılır. Seçenekler: Sayfadaki hesap / form değerleri (varsayılan); Zaman Çözümlü panelinin eğrisi (bu hesap); İçe aktarılan motor dosyası (.eng/.rse).} \\ \midrule
 \textbf{İtki kaynağı} & \texttt{sd\_\allowbreak{}motor\_\allowbreak{}select} &  &  &  \\*
 \multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Hesaba etkisi:} İtkinin kaynağı. Varsayılan: sayfa hesabı (ya da form değerleri). İçe aktarılan: RASP .eng / RockSim .rse dosyası okunur ve itki eğrisi uçurulur; dosyada birden çok motor varsa yandaki liste birini seçer. Dosya itici kütlesi veriyorsa gözden geçirmeniz için İtici Kütlesi alanına yazılır.} \\ \midrule
+\textbf{Tank yerinin kaynağı} & \texttt{sd\_\allowbreak{}clk\_\allowbreak{}yer} &  &  & Ardışık dizilim (beyanlı) \\*
+\multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Hesaba etkisi:} Tank konumlarının nereden geldiği. Ardışık dizilim (varsayılan, beyanlı): tanklar bu aracın gövdesinde motorun hemen önünde, boşluksuz, seçtiğiniz sırayla durur (uçuş modelinin gövde kuralı; tank boyu iç boydur, cidar ve kapak kalınlığı yok sayılır). Tank tabanı istasyonları: her tankın taban istasyonunu burundan metre olarak verirsiniz. Araç ağırlık merkezine göre çalkantı kolu \ensuremath{\xi}'yi belirler. Seçenekler: Ardışık dizilim (beyanlı); Tank tabanı istasyonları (burundan, m). \emph{Boşsa:} Sıra ya da istasyon girilmezse tank bağlanmaz.} \\ \midrule
+\textbf{Burundan kıça sıra} & \texttt{sd\_\allowbreak{}clk\_\allowbreak{}sira} &  &  & Girilmedi (çalkantı bağlanmaz) \\*
+\multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Hesaba etkisi:} Ardışık dizilimde tankların burundan kıça sırası. Hangi tankın ağırlık merkezinden daha uzakta olduğunu, dolayısıyla çalkantı moment kolunu belirler. Motorun her tankı bir kez yer alır. Seçenekler: Girilmedi (çalkantı bağlanmaz); N\textsubscript{2}O tankı motorun hemen önünde. \emph{Boşsa:} Girilmezse tanklar bağlanmaz ve 6-DOF sonucu rijit olandır.} \\ \midrule
+\textbf{N\textsubscript{2}O tankı -- taban istasyonu x} & \texttt{sd\_\allowbreak{}clk\_\allowbreak{}x\_\allowbreak{}n2o} & m & \ensuremath{\ge}\,0 & (boş) \\*
+\multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Hesaba etkisi:} Tank tabanının (kıça bakan ucunun) burundan metre cinsinden istasyonu, kıça doğru pozitif. Araç ağırlık merkezine göre çalkantı moment kolu \ensuremath{\xi}'yi belirler. Kabul: tankın tepesi burun konisinde ya da gerisinde, tabanı gövde boyunda ya da önünde, tank gövdeden geniş değil, başka tankla çakışmıyor; aksi hâlde tank bağlanmaz ve sebep adıyla yazılır. \emph{Boşsa:} Bu tank bağlanmaz.} \\ \midrule
 \end{longtable}}
 
 {\small
@@ -3650,6 +4032,75 @@ Yörünge Analizi & Üçü & Nokta kütle balistik uçuş; 6-DOF değildir. Yük
 \multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Hesaba etkisi:} Yalnız görünüm: eleman kenarlarını (tel kafes) sıcaklık haritalarının üstüne çizer. Analiz yeniden koşmaz, hiçbir sayı değişmez.} \\ \midrule
 \end{longtable}}
 % <<OTO-SON:yan-panel-girdiler>>
+
+\subsection{6-DOF kararlılığına çalkantı bağlaması}\label{sec:calkanti-6dof}
+
+Uçuş Dinamiği (6-DOF) panelinin \ui{Kütle ve Denge} bölümündeki
+\ui{Çalkantı --- tankların araçtaki yeri (isteğe bağlı)} formu, tank çalkantı
+modelini 6-DOF uçuşuna bağlar (Tablo~\ref{tab:y-6dof}). Motor ve uçuş modeli
+tankların araçtaki yerini yayımlamadığı için yer kullanıcıdan istenir:
+
+\begin{itemize}[leftmargin=1.4em]
+  \item \ui{Tank yerinin kaynağı}: \ui{Ardışık dizilim (beyanlı)} tankları
+  uçuş modelinin gövde kuralıyla art arda dizer; \ui{Tank tabanı istasyonları
+  (burundan, m)} her tank için taban istasyonu ister.
+  \item \ui{Burundan kıça sıra}: ardışık dizilimde hangi tankın önde olduğu
+  (sıvıda \ui{Oksitleyici önde, yakıt arkada} ya da \ui{Yakıt önde, oksitleyici
+  arkada}; hibritte \ui{N\textsubscript{2}O tankı motorun hemen önünde}). Varsayılan
+  \ui{Girilmedi (çalkantı bağlanmaz)}.
+\end{itemize}
+
+Yer girilmezse tanklar bağlanmaz, uçuş rijit kalır ve panel ``Tank yeri
+girilmedi; çalkantı 6-DOF'a bağlanmadı (konum varsayılmaz)'' der. Besleme
+Sistemi'nde yüklenen tank geometrisi burada da kullanılır. Form yalnız sayfanın
+kendi motoru uçarken gönderilir; içe aktarılan bir motor dosyasının ya da elle
+girilen itkinin tankı yoktur. Katı motorda form yerine ``çalkantı uygulanmaz''
+satırı görünür.
+
+\paragraph{Kararlılık --- çalkantı alt bölümü.} Uçuştan sonra bölümün en
+üstünde kapsam künyesi durur: araç pasiftir, TVC ve otopilot kontrol döngüsü
+modellenmez. Ardından bağlanma durumu (tank başına bağlandı ya da adlı
+sebeple bağlanmadı, taban istasyonu, yüklenen sıvı), tank kütlelerinin uçuş
+kütlesi bütçesiyle kapanıp kapanmadığı, beyanlar ve şu bloklar gelir:
+
+\begin{itemize}[leftmargin=1.4em]
+  \item \textbf{Genel hüküm} (\ui{ÇALKANTI KARARLILIĞI}): \ui{KARARLI},
+  \ui{ÇALKANTI KAYNAKLI KARARSIZLIK}, \ui{RİJİT GÖVDE KARARSIZ}, \ui{HÜKÜM YOK}
+  ya da \ui{UYGULANMAZ}, gerekçe cümlesiyle. Hüküm, donmuş katsayılı doğrusal
+  modelin yanma boyunca, çözümün her örneğinde taranmasından gelir; çalkantı
+  penceresi, bağlaşık sistemin kararsız ve rijit gövdenin o aralıkta kararlı
+  olduğu aralıktır. Hüküm doğrusal taramanın bulgusudur; uçuşun neden sona
+  erdiğini söylemez.
+  \item \textbf{Pencere tablosu}: her pencerenin başlangıç ve bitişi (kenarın
+  türüyle), en büyük büyüme hızı Re($\lambda$) ve anı, kararsız mod ve tank,
+  mod frekansı ve gövde frekansına yakınlığı, pencereyi kapatmak için gereken
+  en küçük sönüm $\zeta_{min}$, tankın gerçek sönümü ve büyüme üssü
+  $\int \mathrm{Re}(\lambda)\,dt$ (genlik en çok $e^{\text{üs}}$ katı büyür;
+  donmuş katsayılı yaklaşık bir değerdir).
+  \item \textbf{Dört an} tablosu (kalkış, ray çıkışı, en büyük dinamik basınç,
+  yanma sonu) yalnız raporlamadır; hükmü belirlemez.
+  \item \textbf{Tarama kapsamı} ve yanma boyunca büyüme hızı grafiği
+  (bağlaşık ve rijit; pencereler gölgeli). Hüküm verilemeyen aralıklar (rayda,
+  donmuş katsayının geçersiz olduğu ilk saniyeler, tank boşken) sebepleriyle
+  yazılır; o örnekler grafikte çizilmez.
+  \item \textbf{Doğrusal sınır}: çeper dalga genliği $\eta/R = 0{,}2$ sınırını
+  aşarsa bildirim ilk aşım anını ve tankı yazar; o andan sonraki genlik,
+  kuvvet ve moment izleri ile bağlaşık koşunun tüm uçuş sayıları doğrusal
+  modelin geçerliliği dışındadır ve öyle işaretlenir. Çalkantısız rijit koşu
+  ayrı etiketle yanında durur; çalkantılı aracın performans tahmini değildir.
+  \item \textbf{Halka perde önerisi}: pencereyi kapatmak için gereken sönümü
+  sağlayan halka dizisi; iki düzey (nominal ve tutucu), tank başına halka
+  genişliği, aralığı, sayısı ve tabandan yükseklikleri, önerilen sönümle
+  yeniden taramanın sonucu (pencere kapanıyor mu, kalan pencere ve büyüme
+  üssü). Miles bağıntısı yaklaşıktır; tasarım genliği, bant ve halka aralığı
+  HRMA seçimidir ve künyede yazılır.
+  \item Zaman alanı grafikleri: çalkantı açısı, çeper dalga genliği (doğrusal
+  sınır çizgisiyle), gövdeye yanal kuvvet ve moment, tutum ve hücum açısının
+  rijit koşudan farkı.
+\end{itemize}
+
+Fırlatma Sahası'ndaki uçuş için bkz. Bölüm~\ref{sec:saha}.
+
 
 \subsection{Analiz Merkezi}
 
@@ -3716,18 +4167,24 @@ SAHA}, \ui{UÇURULAN ARAÇ} ve \ui{UÇUŞ YOLU} panelleri.}{fig:saha}
   \item Küreye tıklayarak ya da \ui{ENLEM} ve \ui{BOYLAM} yazıp \ui{Uygula}
   düğmesiyle saha seçin.
   \item \ui{KAYNAK} seçin: \ui{Son hesaplanan motor}, \ui{Kayıtlı proje
-  (.hrma)} ya da \ui{Örnek araç}. Kayıtlı proje seçildiğinde araç, projenin
-  sayfasındaki hesabın aynısıyla kurulur. Gövde çapı ve boyu seçilen kaynaktan
+  (.hrma)}, \ui{Bu bilgisayardaki proje dosyası (.hrma)} ya da \ui{Örnek araç}.
+  Kayıtlı proje ya da proje dosyası seçildiğinde araç, projenin sayfasındaki
+  hesabın aynısıyla kurulur (Bölüm~\ref{sec:saha-dosya}). Gövde çapı ve boyu seçilen kaynaktan
   gelir: proje gövde tanımı taşıyorsa ondan, taşımıyorsa motorun dış zarfından
   ve itici tanklarından türetilir (HRMA seçimi); örnek aracın kendi gövdesi
   vardır. Gövde kuru kütlesi türetilmez: alan boşsa \ui{Bu sahadan uçur}
   uçuşu başlatmaz ve gövdenin kuru kütlesini (motor hariç, kg) ister. Kullanıcının yazdığı gövde alanı araç değişince korunur ve
   gözden geçirilmesi için işaretlenir. İtici tankları gövdeye sığmıyorsa sayfa
   gereken ve gövdenin alabildiği hacmi adıyla yazar.
-  \item \ui{Sahayı çöz}, ardından \ui{Bu sahadan uçur} düğmesine basın.
+  \item Kanatçık ve paraşüt alanlarını gözden geçirin. Boş kanatçık ölçüleri
+  kanat kuralıyla boyutlanır (Bölüm~\ref{sec:saha-kanat}); paraşüt alanı
+  boşsa iniş balistiktir (Bölüm~\ref{sec:saha-inis}).
+  \item \ui{Sahayı çöz}, ardından \ui{Bu sahadan uçur} düğmesine basın. Uçuş
+  6-DOF yükselişi ve inişiyle çözülür; yükseliş ve iniş izi küreye çizilir.
   \item Zaman çubuğu ile uçuşu oynatın; \ui{CANLI OKUMA} seçili andaki
-  irtifa, hız ve yatay mesafeyi, \ui{UÇUŞ ÖZETİ} apoje ve çözüm sonundaki
-  yatay mesafeyi verir.
+  irtifa, hız ve yatay mesafeyi, \ui{UÇUŞ ÖZETİ} apoje ve yere iniş
+  bilgisini verir. \ui{Görev izleme} düğmesi uçuşu ayrıntılı izleme
+  ekranında oynatır (Bölüm~\ref{sec:saha-izleme}).
 \end{enumerate}
 
 \subsection{Girdiler}
@@ -3770,7 +4227,7 @@ Eksik bir araç girdisi adıyla reddedilir ya da kullanılan varsayılan
 \bottomrule
 \endlastfoot
 \textbf{KAYNAK} & \texttt{ls-vehicle-source} &  &  & Son hesaplanan motor \\*
-\multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Hesaba etkisi:} Hangi aracın uçurulacağı: bir motor sayfasında son hesaplanan motor (bu tarayıcının deposu üzerinden aktarılır), kayıtlı bir .hrma projesi (proje yalnız girdi sakladığı için sunucuda yeniden hesaplanır) ya da yerleşik örnek araç. Değiştirince önceki uçuş, yeniden uçurana kadar kapanır. Seçenekler: Son hesaplanan motor; Kayıtlı proje (.hrma); Örnek araç.} \\ \midrule
+\multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Hesaba etkisi:} Hangi aracın uçurulacağı: bir motor sayfasında son hesaplanan motor (bu tarayıcının deposu üzerinden aktarılır), kayıtlı bir .hrma projesi (proje yalnız girdi sakladığı için sunucuda yeniden hesaplanır), bu bilgisayardan seçilen bir .hrma proje dosyası (sunucuda okunur, denetlenir ve yeniden hesaplanır; kaydedilmez) ya da yerleşik örnek araç. Değiştirince önceki uçuş, yeniden uçurana kadar kapanır. Seçenekler: Son hesaplanan motor; Kayıtlı proje (.hrma); Bu bilgisayardaki proje dosyası (.hrma); Örnek araç.} \\ \midrule
 \textbf{Proje} & \texttt{ls-project} &  &  &  \\*
 \multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Hesaba etkisi:} Motoru uçurulacak kayıtlı proje; saklanan girdilerinden sunucuda yeniden hesaplanır. Yalnız Kaynak kayıtlı proje olduğunda görünür.} \\ \midrule
 \textbf{İTKİ} & \texttt{ls-v-thrust} & N &  & (boş) \\*
@@ -3789,10 +4246,16 @@ Eksik bir araç girdisi adıyla reddedilir ya da kullanılan varsayılan
 \multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Hesaba etkisi:} Gövde kuru kütlesi (kg), yukarıdaki uçan atıl kütle HARİÇ; sayfa ikisini uçuşun araç kuru kütlesi olarak toplar. Aviyonik, kablaj ve kurtarma sistemi bu kütleye dahildir: motorun kuru (uçan atıl) kütlesinde yoktur. Yazdığınız değer korunur, araç değişince işaretlenir. 0 ya da büyük olmalıdır. \emph{Boşsa:} Örnek araç ve gövdesi kayıtlı proje bu alanı doldurur; gövdesi olmayan motor için boş kalır (motordan gövde kütlesi türetilemez) ve girilmelidir. Boş ya da sayı değilse uçuş adıyla reddedilir (kütle varsayılmaz).} \\ \midrule
 \textbf{CD0 (SUBSONİK)} & \texttt{ls-a-cd0} &  &  & 0,45 \\*
 \multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Hesaba etkisi:} Sıfır taşımada sürükleme katsayısı (boyutsuz); kabul aralığı 0--5. \emph{Boşsa:} Boş ya da sayı değilse gönderilmez -- çözücü kendi beyanlı varsayılanını uygular ve sonucun altında adıyla yazar.} \\ \midrule
-\textbf{KANATÇIK SAYISI} & \texttt{ls-a-fincount} &  &  & 4 \\*
-\multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Hesaba etkisi:} Kanat sayısı; 0 ya da büyük tam sayı olmalı (0 = kanatsız), değilse uçuş reddedilir. Kanat kök veteri 0,20 m, uç veteri 0,10 m ve süpürme 0,08 m bu sayfada sabittir. \emph{Boşsa:} Gönderilmez -- çözücü kendi beyanlı varsayılanını uygular ve sonucun altında adıyla yazar.} \\ \midrule
-\textbf{KANATÇIK AÇIKLIĞI} & \texttt{ls-a-finspan} & m &  & 0,11 \\*
-\multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Hesaba etkisi:} Kanat açıklığı (m); 0 ya da büyük olmalı. \emph{Boşsa:} Boş ya da sayı değilse gönderilmez -- çözücü kendi beyanlı varsayılanını uygular ve sonucun altında adıyla yazar.} \\ \midrule
+\textbf{KANATÇIK SAYISI} & \texttt{ls-a-fincount} &  & \ensuremath{\ge}\,0 & 4 \\*
+\multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Hesaba etkisi:} Kanatçık sayısı; 0 ya da büyük tam sayı (0 = kanatsız: hiçbir şey boyutlandırılmaz ve gövde kanatsız uçar), değilse uçuş adıyla reddedilir. Kanatçık büyüklüğüyle birlikte Barrowman statik marjındaki kanatçık normal kuvvetini, dolayısıyla kararlılık hükmünü belirler. \emph{Boşsa:} Gönderilmez -- çözücü kendi beyanlı varsayılanını uygular, sonucun altında adıyla yazar ve kararlılık hükmünü yayımlamaz.} \\ \midrule
+\textbf{KANATÇIK AÇIKLIĞI} & \texttt{ls-a-finspan} & m & \ensuremath{\ge}\,0 & (boş) \\*
+\multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Hesaba etkisi:} Kanatçık açıklığı (m): bir kanatçığın gövde yüzeyinden ucuna yüksekliği. Kanatçıkların basınç merkezini ne kadar geriye çektiğini belirler; statik marjı ve kararlılık hükmünü yönetir. Girdiğiniz değer olduğu gibi uçurulur; araç o zaman kararlı değilse kararlı olacağı en küçük açıklık önerilir. Kabul: 0 ya da büyük. \emph{Boşsa:} Kanat kuralı boyutlandırır -- statik marjı dolu ve boş hâlde, Mach 0'dan uçuşun en yüksek Mach'ına kadar kararlılık eşiğinin üstünde tutan en küçük açıklık; araç onunla uçurulur, değer ve kaynağı kanatçıkların altında yazılır.} \\ \midrule
+\textbf{KANATÇIK KÖK VETERİ} & \texttt{ls-a-finroot} & m & \ensuremath{\ge}\,0 & (boş) \\*
+\multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Hesaba etkisi:} Kanatçık kök veteri (m): kanatçığın gövdeye bağlandığı yerdeki boyu; kanatçıklar kuyruktadır. Açıklıkla birlikte Barrowman statik marjındaki kanatçık normal kuvvetini ve basınç merkezini belirler. Kabul: 0 ya da büyük. \emph{Boşsa:} Kanat kuralı verir -- örnek aracın kanatçığı bu gövde çapıyla ölçeklenir (HRMA seçimi, kanatçıkların altında yazılır); bu kök veteri gövdenin burun arkasındaki boyundan uzunsa uçuş adıyla reddedilir.} \\ \midrule
+\textbf{KANATÇIK UÇ VETERİ} & \texttt{ls-a-fintip} & m & \ensuremath{\ge}\,0 & (boş) \\*
+\multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Hesaba etkisi:} Kanatçık uç veteri (m): kanatçığın dış kenarındaki boyu. Kanatçık alanını ve Barrowman statik marjındaki kanatçık basınç merkezini değiştirir. Kabul: 0 ya da büyük. \emph{Boşsa:} Kanat kuralı kök veterinden örnek aracın kanatçık oranlarıyla verir (HRMA seçimi, kanatçıkların altında yazılır).} \\ \midrule
+\textbf{KANATÇIK OKU} & \texttt{ls-a-finsweep} & m & \ensuremath{\ge}\,0 & (boş) \\*
+\multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Hesaba etkisi:} Kanatçık oku (m): gövde boyunca kökün hücum kenarından ucun hücum kenarına uzaklık. Kanatçık basınç merkezini geriye kaydırır, böylece statik marjı değiştirir. Kabul: 0 ya da büyük. \emph{Boşsa:} Kanat kuralı kök veterinden örnek aracın kanatçık oranlarıyla verir (HRMA seçimi, kanatçıkların altında yazılır).} \\ \midrule
 \textbf{RÜZGÂR HIZI} & \texttt{ls-a-windspeed} & m/s & \ensuremath{\ge}\,0 & 0 \\*
 \multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Hesaba etkisi:} Rüzgâr hızı (m/s); 0 ya da büyük ve ISA deniz seviyesi ses hızının altında olmalı. Varsayılan 0 (rüzgârsız). \emph{Boşsa:} Boş ya da sayı değilse gönderilmez -- çözücü kendi beyanlı varsayılanını uygular ve sonucun altında adıyla yazar.} \\ \midrule
 \textbf{RÜZGÂR YÖNÜ} & \texttt{ls-a-winddir} & derece & 0 -- 360 & 270 \\*
@@ -3801,6 +4264,12 @@ Eksik bir araç girdisi adıyla reddedilir ya da kullanılan varsayılan
 \multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Hesaba etkisi:} Atışın ufuktan yükselme açısı (derece); kabul aralığı 0--90 (90 = dik). Atış rayı bu sayfada 5 m sabittir. \emph{Boşsa:} Boş ya da sayı değilse gönderilmez -- çözücü kendi beyanlı varsayılanını uygular ve sonucun altında adıyla yazar.} \\ \midrule
 \textbf{AZİMUT} & \texttt{ls-a-azim} & derece &  & 90 \\*
 \multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Hesaba etkisi:} Atış yönü (kuzeyden derece); her sonlu sayı. \emph{Boşsa:} Boş ya da sayı değilse gönderilmez -- çözücü kendi beyanlı varsayılanını uygular ve sonucun altında adıyla yazar.} \\ \midrule
+\textbf{PARAŞÜT ALANI} & \texttt{ls-a-chutearea} & m\textsuperscript{2} & \ensuremath{\ge}\,0 & (boş) \\*
+\multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Hesaba etkisi:} Kurtarma paraşütünün izdüşüm (kubbe) alanı (m\textsuperscript{2}); motor sayfalarının yörünge panelindeki girdinin aynısı. Girilirse iniş paraşüt altında, 2B yörünge çözücüsünün kurtarma modeliyle çözülür (apojeden sonra açılma gecikmesine kadar gövde sürüklemesi, sonra paraşüt sürüklemesi) ve yere iniş hızı yazılır. Kabul: sıfırdan büyük; değilse uçuş adıyla reddedilir. \emph{Boşsa:} Paraşüt yoktur -- iniş burun önde balistik düşüştür (HRMA seçimi).} \\ \midrule
+\textbf{PARAŞÜT CD KATSAYISI} & \texttt{ls-a-chutecd} &  & \ensuremath{\ge}\,0 & (boş) \\*
+\multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Hesaba etkisi:} İzdüşüm alanına göre paraşüt sürükleme katsayısı (boyutsuz); paraşüt sürüklemesini, dolayısıyla iniş ve yere iniş hızını ölçekler. Yalnız paraşüt alanı girildiğinde okunur. Kabul: sıfırdan büyük. \emph{Boşsa:} 2B çözücünün varsayılanı (Hoerner, içi boş yarımküre, izdüşüm alanı) kullanılır ve sonucun altında varsayım olarak yazılır.} \\ \midrule
+\textbf{APOJEDEN SONRA AÇILMA BEKLEME SÜRESİ} & \texttt{ls-a-chutedelay} & s & \ensuremath{\ge}\,0 & (boş) \\*
+\multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Hesaba etkisi:} Apojeden kubbenin açılmasına kadar geçen süre (s); bu sürede araç gövde sürüklemesiyle düşer. Yalnız paraşüt alanı girildiğinde okunur. Kabul: 0 ya da büyük. \emph{Boşsa:} 2B çözücünün varsayılan gecikmesi kullanılır ve sonucun altında varsayım olarak yazılır.} \\ \midrule
 \textbf{KISAYOLLAR (KISIT DEĞİL -- HER NOKTA SEÇİLEBİLİR)} & \texttt{ls-presets} &  &  & -- \\*
 \multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Hesaba etkisi:} Bilinen sahaların kısayol listesi: seçince enlem ve boylamı alanlara yazılır ve küre oraya gider. Kısıt değildir -- küre üzerinde her nokta seçilebilir. Seçenekler: --; Kennedy Space Center LC-39A; Cape Canaveral SLC-40; Vandenberg SLC-4E; Wallops Flight Facility Pad 0A; Guiana Space Centre ELA-3 (Kourou); Baikonur Site 1/5 (Gagarin Start); Esrange Space Center (Kiruna); Andoya Space; Rocket Lab LC-1 (Mahia); Tanegashima Yoshinobu LP-1; Satish Dhawan SC (Sriharikota); Jiuquan LC-43; Sinop (TR) - bölge referansı, fırlatma tesisi değil; Konya (TR) - bölge referansı, fırlatma tesisi değil; Everest Dağı (yüksek arazi) - arazi referansı, fırlatma sahası değil.} \\ \midrule
 \textbf{ls-online} & \texttt{ls-online} &  &  & işaretsiz \\*
@@ -3848,11 +4317,132 @@ Eksik bir araç girdisi adıyla reddedilir ya da kullanılan varsayılan
 
 \ekran{img/v3_0_6/firlatma_sahasi_ucus_tr.png}{Kayıtlı örnek hibrit proje seçildi: araç künyesi ve motordan türetilen gövde çapı ve boyu. \ui{GÖVDE KURU KÜTLESİ} boş olduğu için uçuş başlamaz; \ui{UÇUŞ YOLU} panelindeki satır alanı adıyla ister.}{fig:saha-ucus}
 
+\subsection{Kanatçık kuralı}\label{sec:saha-kanat}
+
+Kanatçık kök veteri, uç veteri, oku ve açıklığı girdidir
+(Tablo~\ref{tab:saha-2}). Boş bırakılan ölçüler şu kuralla kurulur ve uçuştan
+sonra kanatçıkların altında her biri değeri ve kaynağıyla yazılır:
+
+\begin{itemize}[leftmargin=1.4em]
+  \item \textbf{Planform} (kök, uç, ok): örnek aracın kanatçığı bu gövde
+  çapıyla ölçeklenir (geometrik benzerlik; HRMA seçimi). Girilen veter
+  korunur, eksik olanlar ondan türetilir. Kök veteri gövdenin burun arkasına
+  sığmazsa uçuş adıyla reddedilir.
+  \item \textbf{Açıklık}: statik marjı uçuş boyunca (dolu ve boş, Mach 0'dan
+  uçuşun en yüksek Mach'ına kadar) en az 1,5 kalibrede tutan en küçük
+  açıklık. Kaynak: S.~Niskanen, \emph{OpenRocket technical documentation}
+  (2013), §2.4 --- basınç merkezi ağırlık merkezinin yaklaşık 1--2 kalibre
+  arkasında olmalıdır; HRMA hedefi bandın ortasıdır. 4 gövde çapına kadar
+  açıklıkla 1,5 kalibre sağlanamazsa 1 kalibrenin üstünde kalan en küçük
+  açıklık kullanılır ve bu adıyla yazılır. Hiçbiri sağlanamazsa uçuş adıyla
+  reddedilir, başka bir kanatçıkla uçurulmaz.
+  \item Kararlılık hükmünün eşiği 1 kalibredir; marjı 1 ile 1,5 kalibre
+  arasındaki araç kararlıdır.
+  \item \ui{KANATÇIK SAYISI} 0 ise boyutlandırılacak kanatçık yoktur; araç
+  kanatsız uçar.
+\end{itemize}
+
+Açıklığı kendiniz girerseniz değer olduğu gibi uçurulur. Araç o açıklıkla
+kararlı değilse, aynı ölçütle kararlı olacağı en küçük açıklık önerilir ve
+öneri aynı girdilerle bir doğrulama uçuşunda sınanır; \ui{Bu kanat açıklığını
+kullan} düğmesi yalnız doğrulama uçuşu kararlıysa çıkar ve alanı doldurur.
+Kararsızlık kanatçıktan gelmiyorsa (bugünkü açıklık ölçütü zaten
+sağlıyorsa) açıklık önerilmez ve nedeni yazılır. \ui{Kanat kuralının dayanağı}
+açılır bölümü kuralın sayılarını gösterir.
+
+\subsection{İniş ve paraşüt}\label{sec:saha-inis}
+
+6-DOF çözücü apojede biter; iniş ayrı bir modelle çözülür ve iz yere kadar
+çizilir. \ui{PARAŞÜT ALANI} boşsa iniş burun önde balistik düşüştür (HRMA
+seçimi). Paraşüt alanı (izdüşüm alanı, m\textsuperscript{2}) girilirse iniş
+motor sayfalarının yörünge panelindeki kurtarma modeliyle çözülür: apojeden
+açılma gecikmesine kadar gövde sürüklemesi, sonra paraşüt sürüklemesi. Bu iki
+sayfa aynı girdilerle aynı inişi verir. \ui{PARAŞÜT CD KATSAYISI} ve
+\ui{APOJEDEN SONRA AÇILMA BEKLEME SÜRESİ} boşsa düzlemsel çözücünün
+varsayılanları (Cd: Hoerner 1965, içi boş yarımküre) kullanılır ve sonucun
+altında varsayım olarak yazılır. Durum satırı inişin türünü ve yere iniş
+hızını yazar.
+
+Yanma sonu, uçurulan itkinin bittiği andır: katıda motorun itki eğrisi,
+sıvıda girilen yanma süresi ile sabit itki, kendinden basınçlı
+N\textsubscript{2}O hibritte tank boşalma eğrisi. Olay listesi zamanı ve
+irtifayı çözücünün tam çözünürlüklü olay listesinden alır.
+
+Dünya dönüşü çözümdedir: saha enleminden Coriolis etkisi yükselişte ve
+inişte, merkezkaç etkisi yerel yerçekiminde (WGS84) hesaba girer. Uçuş
+denklemleri düz Dünya'dadır (rampada teğet düzlem); çizilen iz yerel eğrilik
+yarıçaplarıyla birinci mertebe izdüşümdür ve hatası menzille büyür.
+
+\subsection{Proje dosyasından içe aktarma}\label{sec:saha-dosya}
+
+\ui{KAYNAK} = \ui{Bu bilgisayardaki proje dosyası (.hrma)} seçilince bir
+\kod{.hrma} dosyası seçilir. Dosya sunucuda okunur, proje deposunun kayıt
+şemasından ve sürüm göçlerinden geçer ve projenin sayfasındaki hesapla
+yeniden çözülür; kaydedilmez ve diske yazılmaz. Yalnız \kod{.hrma} uzantılı,
+en çok 1~MB dosya kabul edilir; bozuk, aşırı iç içe ya da sayı olmayan değer
+(NaN, sonsuz) taşıyan dosya adıyla reddedilir. Dosya gövde ve kanatçık
+ölçüleri taşıyorsa alanlar oradan dolar.
+
+\subsection{Görev izleme}\label{sec:saha-izleme}
+
+Uçuştan sonra üst şeritteki \ui{Görev izleme} düğmesi etkinleşir. İzleme
+ekranı sol ve sağ panellerin yerine geçer:
+
+\begin{itemize}[leftmargin=1.4em]
+  \item \textbf{Sol}: görev zamanı (T+), gösterilen çözücü örneği, telemetri
+  (uçuş evresi, saha üstü irtifa, yatay menzil, hız, Mach, dinamik basınç),
+  olay zaman çizelgesi (geçenler işaretli, gelecekler T$-$ ile) ve iniş notu.
+  Çözücünün yayımlamadığı büyüklükler (ivme ve yük çarpanı, zamana bağlı araç
+  kütlesi) için gösterge konmaz; bu adıyla yazılır.
+  \item \textbf{Sağ}: oynat/duraklat, \ui{Başa sar}, hız çarpanı (×1 gerçek
+  zaman, ×2, ×5, ×10, ×20, ×50), olay imli zaman şeridi ve kamera kipleri:
+  \ui{Roketi izle}, \ui{Yer izi}, \ui{Serbest}. \ui{İzlemeyi kapat} ya da Esc
+  ekranı kapatır.
+\end{itemize}
+
+Göstergeler oynatma anına eşit ya da ondan önceki son çözücü örneğini
+gösterir; örnekler arasında değer üretilmez. Araç kararsızsa oynatma kapalıdır
+ve nedeni statik marjlarla yazılır.
+
+\subsection{Harita paketleri}\label{sec:harita-paket}
+
+Sol paneldeki \ui{HARİTA PAKETLERİ (ÇEVRİMDIŞI AYRINTI)} bölümü, bir fırlatma
+sahasının çevresi için yakın ölçekli harita ayrıntısını (yol, bina, su, yer
+adı) OpenStreetMap verisinden indirir (Şekil~\ref{fig:harita-liste}). Liste on
+beş paket taşır: on iki fırlatma sahası ile Sinop ve Konya bölgeleri için
+saha çevresinde 200 × 200~km'lik birer kutu ve 1668 × 712~km'lik
+\ui{Türkiye ve çevresi (bölge paketi)}. Her satır paketin adını, kapsamını,
+boyutunu (saha paketlerinde 4,3--233,7~MB, bölge paketinde 1628,2~MB),
+lisansını (ODbL-1.0, © OpenStreetMap katkıcıları) ve durumunu gösterir;
+listenin üstünde kurulu paket sayısı ve diskte kapladığı yer yazılır.
+
+\ekran{img/v3_0_7/harita_paketleri_liste_tr.png}{Harita paketleri listesi
+(kurulu paket yok).}{fig:harita-liste}
+
+\ui{Paketi indir} düğmesi önce bir onay kutusu açar
+(Şekil~\ref{fig:harita-onay}). Kutu ne indirileceğini, boyutunu, kaynağını
+(HRMA'nın kendi GitHub sürümü) ve lisansını yazar. İndirme yalnız \ui{Onayla ve indir} ile başlar;
+\ui{Şimdi değil} kutuyu kapatır ve hiçbir istek göndermez. İlerleme sunucunun
+diske yazdığı bayttır; indirme iptal edilebilir. Paket kullanılmadan önce boyut
+ve SHA-256 özetiyle denetlenir; uymayan ya da yarım dosya kurulmaz. Kurulu
+paket çevrimdışı çalışır ve onaylı silme ile kaldırılır.
+
+\ekran{img/v3_0_7/harita_paketi_onay_tr.png}{İndirme öncesi açık onay kutusu
+(Sinop bölgesi paketi).}{fig:harita-onay}
+
+Kurulu bir paketin kutusunun içinde, yakın yakınlaştırmada (sokak ölçeğine,
+yakınlaştırma düzeyi 15'e kadar) yollar, binalar, su ve yer adları küreye
+eklenir; fırlatma kompleksleri ve rampalar ayrı türde adlandırılır. Paket
+ekrandayken künye (OpenStreetMap katkıcıları, ODbL 1.0; Protomaps) notlar
+kutusunda görünür. Paket kapsamı dışında ve paket kurulu değilken küre önceki
+gibi görünür. Küre WebGL ister.
+
 \subsection{Sınırlar}
 
 \begin{itemize}[leftmargin=1.4em]
-  \item Dünya dönüşü ve Coriolis etkisi modellenmez; yer izi düz Dünya
-  izdüşümüdür.
+  \item Uçuş denklemleri düz Dünya'dadır; Dünya dönüşü (Coriolis ve
+  merkezkaç) dahildir, çizilen iz birinci mertebe izdüşümdür
+  (Bölüm~\ref{sec:saha-inis}).
   \item Yol yörünge altı, balistik bir uçuştur; araç yörüngeye girmez.
   \item \ui{İrtifayı abart} yalnız okunabilirlik içindir ve varsayılan olarak
   kapalıdır (ölçek gerçektir).
@@ -4007,6 +4597,16 @@ Nozul rejimi: \ui{TAM GENİŞLEME}, \ui{EKSİK GENİŞLEMİŞ}, \ui{AŞIRI GENİ
   yoksa istek reddedilir ve çelişki adıyla yazılır.
 \end{enumerate}
 
+\subsection{İrtifa girdileri}\label{sec:irtifa}
+
+Kullanıcının girdiği irtifa (tasarım irtifası, test irtifası, profil irtifası,
+fırlatma rakımı, saha rakımı) deniz seviyesinden \emph{geometrik} irtifadır.
+Standart atmosfer tablosu (US Standard Atmosphere 1976) geopotansiyel irtifayla
+tanımlıdır; girilen irtifa tabloya $H = h\,r_0/(r_0 + h)$ ile ($r_0$ =
+6\,356\,766~m) geopotansiyele çevrilerek verilir. Aynı irtifa her panelde aynı
+ortam basıncını verir. Dönüşüm deniz seviyesinde değeri değiştirmez; 20~km'de
+dönüşümsüz okumaya göre ortam basıncı \%1, 50~km'de \%5 farklıdır.
+
 \subsection{Hibrit formunun iletileri}
 
 \begin{table}[htbp]
@@ -4077,7 +4677,12 @@ sayılar \kod{docs/\allowbreak{}VALIDATION\_\allowbreak{}STATUS.md}):
 Sıvı & Vakum Isp & 14 & \%0,9 & Yayımlanmış motor künyeleri \\
 Sıvı & Vakum itkisi & 4 & \%0,2 & 4/4 zayıf kanıt \\
 Sıvı & Deniz seviyesi Isp & 4 & \%2,0 & Küçük örneklem \\
-Katı & Yanma hızı & 27 & \%0,5 & 27/27 kendi uyum verisi \\
+Katı & Yanma hızı & 27 & \%0,5 & KN-şeker; 27/27 kendi uyum verisi \\
+Katı & Isp & 4 & \%4,9 & AN/AP/Al/HTPB; NASA-CR-158815 BATES ateşlemeleri \\
+Katı & Et tükenme süresi & 4 & \%4,2 & AN/AP/Al/HTPB \\
+Katı & Ortalama itki & 4 & \%13,5 & AN/AP/Al/HTPB \\
+Katı & Ortalama oda basıncı & 4 & \%9,9 & AN/AP/Al/HTPB \\
+Katı & Isp & 2 & \%7,3 & AN/HMX/AP/Al/HTPB; NASA-CR-158815 \\
 Hibrit & Karakteristik hız & 18 & \%3,3 & \\
 Hibrit & Özgül impuls & 18 & \%5,0 & \\
 Hibrit & Son port çapı & 18 & \%10,1 & \\
@@ -4089,7 +4694,12 @@ Hibrit & Regresyon hızı & 35 & \%36,7 & 17/35 kendi uyum verisi \\
 
 Sıvıdaki \%0,9'luk medyan hata, gerçek çalışma noktası ve yayımlanmış geometri
 verildiğinde Isp'nin yeniden üretildiğini gösterir; bilinmeyen bir motorun
-uçuş performansının bu hatayla öngörüleceğini göstermez. ``Kendi uyum
+uçuş performansının bu hatayla öngörüleceğini göstermez. Katı satırları itici
+ailesine göre ayrıdır; NASA BATES kayıtları kaydın kendi boğazı, genleşme oranı
+ve yoğunluğuyla, motorun kendi verim varsayılanları ve iki fazlı kayıp
+tahminiyle koşar; süre, et tükenme süresi tanımıyla kıyaslanır. Model
+kapsamının dışındaki kayıtlar (motor içi üçgen basınç profilli iki KN-şeker
+motoru) ayrı bir katmanda yayımlanır. ``Kendi uyum
 verisi'' satırları, katsayıların türetildiği veriye karşı puanlanmıştır;
 bağımsız doğrulama değildir. Hibrit regresyon hızındaki saçılma hibrit
 motorların bilinen bir özelliğidir.
@@ -4108,7 +4718,7 @@ motorların bilinen bir özelliğidir.
   modelinin geçerlilik tavanını (0,35~mm/s) aşarsa.
 \end{itemize}
 
-\subsection{Bilinen sınırlamalar (3.0.6)}
+\subsection{Bilinen sınırlamalar (3.0.7)}
 
 \begin{itemize}[leftmargin=1.4em]
   \item Sıvı teslim Isp'si bir ön tasarım kestirimidir; gerçek enjektör ve
@@ -4145,10 +4755,23 @@ motorların bilinen bir özelliğidir.
   tekerleği) gerilme yığılması çözülmez; çatlak hükmü yalnız dairesel port
   gerinimi kapasiteyi tek başına aşıyorsa verilir, aksi hâlde
   \ui{Belirlenmedi} yazılır.
-  \item Sıvı sayfası deniz seviyesinde tasarlar. Deniz seviyesinde ayrılan
-  sabit bir üst kademe nozulu (ör. $\varepsilon$ 61, RL10 sınıfı) adıyla
-  reddedilir; ret, akışın yapışık kaldığı en büyük genleşme oranını söyler.
-  Vakum ya da irtifa tasarım ortamı planlanmıştır.
+  \item Sıvı motorun tasarım ortamı seçilebilir (Bölüm~\ref{sec:sivi-ortam}).
+  Deniz seviyesi dışındaki tasarım CEA çözümü gerektirir; CEA çözümü olmayan
+  statik tablo yolunda adıyla reddedilir. Yer testi notu ayrılma ölçütünü
+  bir boyutlu çıkış basıncına uygular; konturlu bir nozulun cidar basıncı
+  dağılımı çözülmez.
+  \item Katı motorda iki fazlı nozul kaybı yalnız alüminyumlu kompozitte,
+  korelasyonun aralığında ve nozul ya da kinetik verim girilmeyen hesapta
+  uygulanır (Bölüm~\ref{sec:kati-dayanak}). KN-şeker ailesinde ve küçük
+  boğazda kayıp hesaplanamaz ve yayımlanan değerlere dahil değildir; yanma
+  verimi varsayımı doğrulanmamıştır.
+  \item Tank çalkantısı doğrusal eşdeğer mekanik modeldir; eksenel simetrik
+  olmayan tank çözülmez. Sıvı tankında yoğunluk yanma boyunca sabittir;
+  N\textsubscript{2}O'nun viskozitesi ve itici yüzey gerilimi
+  yayımlanmadığından hibritte çeper sönümü ve Bond sayısı denetimi
+  hesaplanmaz. Donmuş katsayılı tarama yerçekiminin yörüngeyi eğmesini
+  donmuş modele katmaz (beyanlı; büyüme hızını tutucu yönde en çok \%3 fazla
+  verir).
   \item Sayı kutuları işletim sisteminin ondalık ayracını izler; değer doğru
   okunur.
   \item İstasyon marşı kalın cidara genişletilmedi; kalın cidarda beyanlı toplu
@@ -4164,7 +4787,8 @@ motorların bilinen bir özelliğidir.
 
 \subsection{Bu sürümde olmayanlar}
 
-C++ çözücü çekirdeği; 3B CFD, 3B FEA, yanmalı (reaktif) CFD, modal FEA;
+Araç güdüm, seyrüsefer ve kontrolü (GNC), itki yönlendirme (TVC) ve
+otopilot kontrol döngüsü; araç yapısal analizi. C++ çözücü çekirdeği; 3B CFD, 3B FEA, yanmalı (reaktif) CFD, modal FEA;
 ayrıntılı CAD (enjektör kafası ve domu, flanşlar, cıvata dairesi, O-ring
 kanalları, rejeneratif kanallar, kapalı STL); turbopompa, ön yakıcı, besleme
 hatları, valf ve gimbal modelleri ve CAD'i; egzoz plümü görselleri. Çevrim
@@ -4207,6 +4831,50 @@ Hesap ``İstek GÖNDERİLMEDİ'' diyor & Zorunlu bir alan boştur ya da formun b
 
 Sorun bildirmek için \ui{Ayarlar} penceresinin \ui{Hata bildir} bölümü
 kullanılır.
+
+% =====================================================================
+\section{3.0.7 Sürümündeki Değişiklikler}\label{sec:v307}
+
+3.0.7, 3.0.6'dan sonraki sürümdür. Roketsan mühendislerinin istekleri (sıvı ve
+hibrit tankında çalkantı, 6-DOF kararlılığına bağlanması, tank geometrisi
+girdisi), sekmeler arasında çelişen sayıların onarımı, katı motorun bağımsız
+doğrulaması, sıvı motorun tasarım ortamı, Fırlatma Sahası'nın uçuş ve harita
+ekleri ve güncelleme penceresi bu sürümdedir. Aşağıdaki tablo kullanıcıya
+görünen değişiklikleri verir: panel ya da alan, eskiden ne yayımlandığı ve
+şimdi ne yayımlandığı, nedeni. Tam liste uygulamadaki \ui{Sürüm Notları}
+penceresinde ve \kod{CHANGELOG.md} dosyasındadır.
+
+\begin{longtable}{@{}>{\raggedright\arraybackslash}p{3.0cm}>{\raggedright\arraybackslash}p{8.0cm}>{\raggedright\arraybackslash}p{4.6cm}@{}}
+\caption{3.0.7 değişiklikleri (kullanıcı gözünden)}\label{tab:v307}\\
+\toprule
+\textbf{Panel / alan} & \textbf{Eski → yeni} & \textbf{Neden} \\
+\midrule\endfirsthead
+\toprule
+\textbf{Panel / alan} & \textbf{Eski → yeni} & \textbf{Neden} \\
+\midrule\endhead
+\bottomrule\endlastfoot
+Tank çalkantı modeli & Yeni: \ui{BESLEME SİSTEMİ} → \ui{Çalkantı} sekmesinde tank başına eşdeğer mekanik model (29 doluluk satırı), doluluk--$g_{eff}$ frekans haritası, motorun tüketiminden doluluk geçmişi, iki genlik düzeyinde SP-8009 yükleri, halka perde önerisi ve araç ekibine aktarım dosyaları (JSON ve iki CSV); katıda ``çalkantı uygulanmaz'' satırı (Bölüm~\ref{sec:calkanti}). & Tank çalkantısının araç ekibine aktarılması istendi. \\
+Tank geometrisi & Yeni: tank iç geometrisi dosyadan (nokta bulutu CSV, XYZ, PLY, STL, STEP ya da $(r,z)$ profili); eksenel simetrik tank sonlu eleman çözümüyle; eksenel simetrik olmayan tank adıyla reddedilir, yaklaşık sonuç verilmez. & Gerçek tank geometrisi nokta bulutu olarak verilebilsin istendi. \\
+6-DOF ve çalkantı & Yeni: 6-DOF panelinde tank yeri girilirse sıvı ve hibrit uçuş tank çalkantısıyla bağlaşık çözülür; kararlılık hükmü yanma boyunca taramadan (pencere, gereken sönüm, büyüme üssü), doğrusal sınır işareti ve pencereyi kapatan halka perde dizisi (Bölüm~\ref{sec:calkanti-6dof}). Tank yeri girilmezse uçuş 3.0.6 ile aynıdır. TVC ve otopilot kontrol döngüsü modellenmez. & Çalkantının 6-DOF kararlılığına bağlanması istendi. \\
+Çalkantı sayıları ve terimi & Birinci mod kökü dört basamaklı 1,8412 yerine kesin değeriyle (1,841184): çalkantı frekansı ve kütleleri beşinci anlamlı basamakta değişir (en çok bağıl 3,4·10\textsuperscript{$-$5}). Perde önerisindeki kaynaksız ``yaklaşık bir yarıçap'' aralığı kalktı; doğrusal genlik sınırı 0,25 → 0,2~R (Dodge 2000). \ui{BESLEME SİSTEMİ} panelinde ``çalkalanma'' → ``çalkantı''. & Kaynağın kesin değeri; kaynaksız sayılar. \\
+Sıvı tasarım ortamı & Yeni \ui{Tasarım Ortamı} girdisi: deniz seviyesi (varsayılan), irtifa, ortam basıncı, vakum; itki o ortamda tanımlıdır (\ui{Hedef Motor İtkisi (deniz seviyesi)} → \ui{(tasarım ortamında)}), deniz seviyesi dışında genleşme oranı zorunludur, sonuçta yer testi notu vardır (Bölüm~\ref{sec:sivi-ortam}). Örnek sıvı motor $\varepsilon$ 61 ile deniz seviyesinde adıyla reddedilir, vakumda tasarlanır (motor Isp 322,4~s; deniz seviyesinde akış ayrılır). Deniz seviyesi tasarımında sayılar aynıdır. & Vakum ve üst kademe motorları deniz seviyesinde ayrıldıkları için tasarlanamıyordu. \\
+İrtifa okuması & Sıvı tasarım irtifası geometrik irtifadır; standart atmosfere geopotansiyele çevrilerek verilir ve yörünge çözücüsüyle aynı basıncı verir (Bölüm~\ref{sec:irtifa}). & Aynı irtifa iki okumayla iki ortam basıncı veriyordu (20~km'de \%1). \\
+Katı iki fazlı kayıp & Alüminyumlu kompozitte yerleşik iki fazlı nozul kaybı tahmini (NASA SP-8039) nozul ya da kinetik verim girilmeyen hesapta uygulanır; katı sayfası bu alanları gönderdiği için sayfadaki sayılar 3.0.6 ile aynıdır; girdiğiniz iki fazlı kayıp katsayısı tahminin yerine geçer (Bölüm~\ref{sec:kati-dayanak}). & İtici tablosunun nozul verimi bu kaybı içermiyordu; toplu verim girdisi ise içerir, kayıp iki kez sayılmaz. \\
+Katı Performans Özeti & \ui{Teslim performansının dayanağı} notu (yanma, nozul ve kinetik verimin kaynağı, iki fazlı kayıp); \ui{Yanma Süresi} → \ui{Yanma Süresi (et tükenişi)} (sayı aynı, teknik PDF'te de); KN-şeker ailesinde iki fazlı kaybın dahil olmadığı uyarısı; test irtifası deniz seviyesinde değilse \ui{Test ortamında} önekli kartlar ve \ui{Deniz seviyesinde toplam impuls} kartı. & Teslim sayılarının dayanağı ve ortamı ekranda yoktu; yayımlanan süre etki süresi değildir. \\
+Katı emniyet sınırı & 500~bar ya da 1000~s'de duran yanma sıfır süreli ve sıfır Isp'li bir sonuç olarak yayımlanıyordu → adlı ret. Monte Carlo'da bu örnekler başarısız sayılır, istatistiğe girmez ve ayrı satırla bildirilir (ölçüm, alüminyumlu kompozit, 450~bar, 200 örnek: Isp ortalaması 266,7 → 289,9~s, P5 0,0 → 284,4~s). & Sınırda duran koşu sessizce sıfır sonuç veriyordu. \\
+Katı doğrulama tablosu & İstatistik itici ailesine göre ayrı; altı NASA BATES ateşlemesi (NASA-CR-158815) veri tabanında; motor içi üçgen profilli iki KN-şeker kaydı model kapsamı dışı katmanda; kıyas kaydın kendi boğazı, genleşme oranı ve yoğunluğuyla; süre et tükenme süresiyle. \ui{KORELASYON} paneli aile etiketini ve kapsam dışı katmanı gösterir. & Farklı itici aileleri tek satırda karışıyordu; kıyas donanımla yapılmıyordu. \\
+Hibrit \ui{İrtifa Profili} & Sekme hesaba girmiyordu, boş alanlar 0~m / 10\,000~m / 10 noktaya dönüyordu → profil tablosu: aynı nozulun irtifa boyunca itki ve Isp'si ve vakum satırı; boş alan adıyla reddedilir. & Sekme gösterdiğini hesaplamıyordu. \\
+Hibrit form & \ui{Kütle Akısı} ve \ui{Daralma Oranı} yalnız sonlu yanma tipinde görünüyordu → her tipte görünür (sayılar aynı). & Sunucu iki alanı her tipte okuyordu. \\
+Hibrit teknik PDF & İmalat asgari kalınlığının belirlediği nozul ``doğrulanmış'' emniyet katsayısı sayılıyordu → PDF ekrandaki \ui{YAPISAL ASGARİ EK} kartını belirleyen istasyonla taşır; HRMA'nın boyutlandırdığı ve imalat tabanındaki istasyonlar kendi adıyla. & PDF ile ekran farklı emniyet katsayısı veriyordu. \\
+Analiz Güvertesi & Motor hesaplanmamışsa ya da son hesap başarısızsa analiz koşmaz: gizli tanım değerleri (oda basıncı 40--50~bar, oda çapı 0,1~m gibi) yedi sekmede kalktı, alanlar boş ve zorunludur. \ui{BASINÇLI KAP} motorun cidarını değerlendirir (patlama basıncı \ui{GÜVENLİK} ile aynı cidardan; başlık kimin cidarı olduğunu söyler). \ui{YAPISAL}: yük tabanı tablonun başında, gereken cidar iki tanımla yan yana. \ui{TERMAL}: soğutma tipi motordan, korunan cidarda soğutma bütçesi yayımlanmaz, sıvıda motorun ısı yükü ayrı satırda ve farkın nedeniyle. \ui{PERFORMANS}: ısı akısı referans düzlemleri yalnız girilirse. & Sekmeler motorla çelişen ya da başka bir motorun sayılarını veriyordu. \\
+Fırlatma Sahası kanatçık & Kanatçık planformu sabitti (kök 0,20, uç 0,10, ok 0,08~m), açıklık 0,11~m önden doluydu → dört ölçü girdidir; boş olanlar kaynaklı kuralla kurulur (statik marj uçuş boyunca en az 1,5 kalibre; Niskanen 2013 §2.4); \ui{Bu kanat açıklığını kullan} önerisi aynı kuralla (Bölüm~\ref{sec:saha-kanat}). & Sıvı ve hibrit örnek araçlar sabit kanatçıkla kararsız uçuyordu. \\
+Fırlatma Sahası uçuşu & Yalnız yükseliş çiziliyordu → iniş balistik ya da paraşütlü (motor sayfalarının yörünge paneliyle aynı model) ve yer izi; yanma sonu uçurulan itkinin sonu; ``Dünya dönüşü ve Coriolis modellenmez'' notu yanlıştı → Coriolis dahil, düz Dünya izdüşümü. & Uçuş apojede bitiyordu; yanma sonu girdi süresinden türetiliyordu. \\
+Fırlatma Sahası kaynak ve izleme & Kayıtlı proje seçilince araç yüklenmiyordu → yüklenir; yeni kaynak \ui{Bu bilgisayardaki proje dosyası (.hrma)}; yeni \ui{Görev izleme} ekranı (telemetri, olay çizelgesi, oynatma hızı, kamera kipleri). & Kaynak seçimi yarışa giriyordu; uçuş yalnız bir çizgi olarak görünüyordu. \\
+Harita paketleri & Yeni: Fırlatma Sahası'nda indirilebilir çevrimdışı harita paketleri (OpenStreetMap; on iki fırlatma sahası, Sinop ve Konya bölgeleri ve Türkiye bölge paketi), açık onayla indirme, yakın zoomda yol, bina, su ve yer adları; küre yakın zoomda üst üste binen karolar onarıldı (Bölüm~\ref{sec:harita-paket}). & Yakınlaşınca şehir ve zemin ayrıntısı yoktu. \\
+Güncelleme penceresi & Uygulama kapanınca kurulum bitene kadar ekranda bir şey yoktu → ``HRMA güncelleniyor'' penceresi (aşamalar, kopyalanan miktar, geçen süre, hata nedeni). 3.0.7'den sonraki güncellemelerde görünür (Bölüm~\ref{sec:guncelleme}). & Kullanıcı kurulumun sürüp sürmediğini göremiyordu. \\
+Hibrit gaz N\textsubscript{2}O & Gaz fazlı beslemede enjektör delik planı, basınç düşümü, çıkış hızı ve ilgili uyarılar sıvı modelle hesaplanıyordu → yayımlanmaz, nedeni yazılır; enjektör plakası kütlesi delik hacmi düşülmeden (örnek 0,017927 → 0,018002~kg). & Sıvı modelin sayıları gaz faz için geçerli değildi. \\
+Küçük düzeltmeler & Hibritte Yörünge'den sonra her Hesapla'da çıkan hata iletisi kalktı; 6-DOF'ta enlem verilmediğinde not ``yanal sapma sıfır'' yerine Coriolis'in kapsam dışı olduğunu söyler ve \ui{UÇUŞ SONU YATAY UZAKLIK} rozeti eklendi; sıvı performans panosunda küçük itkiler en az üç anlamlı basamakla (1,0~kN → 0,954~kN). & Yanıltıcı ileti ve yuvarlama. \\
+\end{longtable}
 
 % =====================================================================
 \section{3.0.6 Sürümündeki Değişiklikler}\label{sec:v306}
@@ -4375,7 +5043,7 @@ yazmadan önce onay ister.
   \item[Boğaz.] Nozulun en küçük kesitli yeri; akışın ses hızına ulaştığı istasyon.
   \item[Boşalma (blowdown).] Tankın kendi basıncıyla boşalması; besleme basıncı yanma boyunca düşer.
   \item[Chug.] Besleme sistemi ile oda arasındaki düşük frekanslı basınç salınımı.
-  \item[Çalkalanma (slosh).] Tanktaki sıvının serbest yüzey salınımı.
+  \item[Çalkantı (slosh).] Tanktaki sıvının serbest yüzey salınımı; arayüzdeki terim (3.0.6'ya dek ``çalkalanma'').
   \item[Daralma oranı.] Oda kesit alanının boğaz alanına oranı.
   \item[Dökülme (spallation).] Sıcak cidardaki karbon birikiminin kopması; altındaki cidar birikimsiz ısı akısını görür.
   \item[Emniyet katsayısı.] Dayanımın uygulanan gerilmeye oranı.
@@ -4604,6 +5272,12 @@ tablosuna dizin. Aynı kimlik birden çok sayfada ya da panelde geçebilir.
 \texttt{chamber\_\allowbreak{}wall\_\allowbreak{}thickness} & \ref{tab:sivi-5} & Sıvı sayfası: 5. Yanma Odası Tasarımı \\
 \texttt{char\_\allowbreak{}velocity} & \ref{tab:kati-1} & Katı sayfası: 1. Yakıt Özellikleri \\
 \texttt{characteristic\_\allowbreak{}length} & \ref{tab:sivi-5} & Sıvı sayfası: 5. Yanma Odası Tasarımı \\
+\texttt{clk\_\allowbreak{}geff\_\allowbreak{}max} & \ref{tab:p-besleme} & Güverte: Besleme Sistemi paneli girdileri (çalkantı, basınçlandırıcı, su koçu) \\
+\texttt{clk\_\allowbreak{}geff\_\allowbreak{}min} & \ref{tab:p-besleme} & Güverte: Besleme Sistemi paneli girdileri (çalkantı, basınçlandırıcı, su koçu) \\
+\texttt{clk\_\allowbreak{}geo\_\allowbreak{}tank} & \ref{tab:p-besleme} & Güverte: Besleme Sistemi paneli girdileri (çalkantı, basınçlandırıcı, su koçu) \\
+\texttt{clk\_\allowbreak{}geo\_\allowbreak{}unit} & \ref{tab:p-besleme} & Güverte: Besleme Sistemi paneli girdileri (çalkantı, basınçlandırıcı, su koçu) \\
+\texttt{clk\_\allowbreak{}geo\_\allowbreak{}up} & \ref{tab:p-besleme} & Güverte: Besleme Sistemi paneli girdileri (çalkantı, basınçlandırıcı, su koçu) \\
+\texttt{clk\_\allowbreak{}yontem} & \ref{tab:p-besleme} & Güverte: Besleme Sistemi paneli girdileri (çalkantı, basınçlandırıcı, su koçu) \\
 \texttt{closeout\_\allowbreak{}material} & \ref{tab:sivi-6} & Sıvı sayfası: 6. Nozul ve Soğutma Sistemi \\
 \texttt{closeout\_\allowbreak{}thickness} & \ref{tab:sivi-6} & Sıvı sayfası: 6. Nozul ve Soğutma Sistemi \\
 \texttt{closure\_\allowbreak{}bolt\_\allowbreak{}class} & \ref{tab:kati-3} & Katı sayfası: 3. Yanma Odası ve Gövde \\
@@ -4631,6 +5305,9 @@ tablosuna dizin. Aynı kimlik birden çok sayfada ya da panelde geçebilir.
 \texttt{core\_\allowbreak{}diameter} & \ref{tab:kati-2} & Katı sayfası: 2. Yakıt Bloğu Geometrisi \\
 \texttt{data\_\allowbreak{}collection\_\allowbreak{}time} & \ref{tab:kati-8} & Katı sayfası: 8. Test Standı Planlaması (motor hesabına girmez) \\
 \texttt{density} & \ref{tab:kati-1} & Katı sayfası: 1. Yakıt Özellikleri \\
+\texttt{design\_\allowbreak{}ambient\_\allowbreak{}altitude\_\allowbreak{}m} & \ref{tab:sivi-3} & Sıvı sayfası: 3. Besleme Sistemi / Motor Çevrimi \\
+\texttt{design\_\allowbreak{}ambient\_\allowbreak{}mode} & \ref{tab:sivi-3} & Sıvı sayfası: 3. Besleme Sistemi / Motor Çevrimi \\
+\texttt{design\_\allowbreak{}ambient\_\allowbreak{}pressure\_\allowbreak{}bar} & \ref{tab:sivi-3} & Sıvı sayfası: 3. Besleme Sistemi / Motor Çevrimi \\
 \texttt{discharge\_\allowbreak{}coeff} & \ref{tab:kati-5} & Katı sayfası: 5. Verim ve Deneysel Katsayılar \\
 \texttt{discharge\_\allowbreak{}coefficient} & \ref{tab:hib-enj} & Hibrit sayfası: Enjektör Ayarları \\
 \texttt{discharge\_\allowbreak{}coefficient} & \ref{tab:sivi-4} & Sıvı sayfası: 4. Enjektör Sistemi Parametreleri \\
@@ -4658,33 +5335,33 @@ tablosuna dizin. Aynı kimlik birden çok sayfada ya da panelde geçebilir.
 \texttt{feed\_\allowbreak{}line\_\allowbreak{}length\_\allowbreak{}m} & \ref{tab:sivi-3} & Sıvı sayfası: 3. Besleme Sistemi / Motor Çevrimi \\
 \texttt{feed\_\allowbreak{}line\_\allowbreak{}material} & \ref{tab:sivi-3} & Sıvı sayfası: 3. Besleme Sistemi / Motor Çevrimi \\
 \texttt{feed\_\allowbreak{}line\_\allowbreak{}wall\_\allowbreak{}thickness} & \ref{tab:sivi-3} & Sıvı sayfası: 3. Besleme Sistemi / Motor Çevrimi \\
-\texttt{feed\_\allowbreak{}pressurant\_\allowbreak{}collapse\_\allowbreak{}factor} & \ref{tab:p-besleme} & Güverte: Besleme Sistemi paneli girdileri (çalkalanma, basınçlandırıcı, su koçu) \\
-\texttt{feed\_\allowbreak{}pressurant\_\allowbreak{}gas} & \ref{tab:p-besleme} & Güverte: Besleme Sistemi paneli girdileri (çalkalanma, basınçlandırıcı, su koçu) \\
-\texttt{feed\_\allowbreak{}pressurant\_\allowbreak{}initial\_\allowbreak{}pressure} & \ref{tab:p-besleme} & Güverte: Besleme Sistemi paneli girdileri (çalkalanma, basınçlandırıcı, su koçu) \\
-\texttt{feed\_\allowbreak{}pressurant\_\allowbreak{}initial\_\allowbreak{}temperature} & \ref{tab:p-besleme} & Güverte: Besleme Sistemi paneli girdileri (çalkalanma, basınçlandırıcı, su koçu) \\
-\texttt{feed\_\allowbreak{}pressurant\_\allowbreak{}initial\_\allowbreak{}ullage\_\allowbreak{}volume} & \ref{tab:p-besleme} & Güverte: Besleme Sistemi paneli girdileri (çalkalanma, basınçlandırıcı, su koçu) \\
-\texttt{feed\_\allowbreak{}pressurant\_\allowbreak{}mode} & \ref{tab:p-besleme} & Güverte: Besleme Sistemi paneli girdileri (çalkalanma, basınçlandırıcı, su koçu) \\
-\texttt{feed\_\allowbreak{}pressurant\_\allowbreak{}polytropic\_\allowbreak{}n} & \ref{tab:p-besleme} & Güverte: Besleme Sistemi paneli girdileri (çalkalanma, basınçlandırıcı, su koçu) \\
-\texttt{feed\_\allowbreak{}pressurant\_\allowbreak{}propellant\_\allowbreak{}volume} & \ref{tab:p-besleme} & Güverte: Besleme Sistemi paneli girdileri (çalkalanma, basınçlandırıcı, su koçu) \\
-\texttt{feed\_\allowbreak{}pressurant\_\allowbreak{}regulator\_\allowbreak{}margin} & \ref{tab:p-besleme} & Güverte: Besleme Sistemi paneli girdileri (çalkalanma, basınçlandırıcı, su koçu) \\
-\texttt{feed\_\allowbreak{}pressurant\_\allowbreak{}storage\_\allowbreak{}pressure} & \ref{tab:p-besleme} & Güverte: Besleme Sistemi paneli girdileri (çalkalanma, basınçlandırıcı, su koçu) \\
-\texttt{feed\_\allowbreak{}pressurant\_\allowbreak{}tank\_\allowbreak{}pressure} & \ref{tab:p-besleme} & Güverte: Besleme Sistemi paneli girdileri (çalkalanma, basınçlandırıcı, su koçu) \\
+\texttt{feed\_\allowbreak{}pressurant\_\allowbreak{}collapse\_\allowbreak{}factor} & \ref{tab:p-besleme} & Güverte: Besleme Sistemi paneli girdileri (çalkantı, basınçlandırıcı, su koçu) \\
+\texttt{feed\_\allowbreak{}pressurant\_\allowbreak{}gas} & \ref{tab:p-besleme} & Güverte: Besleme Sistemi paneli girdileri (çalkantı, basınçlandırıcı, su koçu) \\
+\texttt{feed\_\allowbreak{}pressurant\_\allowbreak{}initial\_\allowbreak{}pressure} & \ref{tab:p-besleme} & Güverte: Besleme Sistemi paneli girdileri (çalkantı, basınçlandırıcı, su koçu) \\
+\texttt{feed\_\allowbreak{}pressurant\_\allowbreak{}initial\_\allowbreak{}temperature} & \ref{tab:p-besleme} & Güverte: Besleme Sistemi paneli girdileri (çalkantı, basınçlandırıcı, su koçu) \\
+\texttt{feed\_\allowbreak{}pressurant\_\allowbreak{}initial\_\allowbreak{}ullage\_\allowbreak{}volume} & \ref{tab:p-besleme} & Güverte: Besleme Sistemi paneli girdileri (çalkantı, basınçlandırıcı, su koçu) \\
+\texttt{feed\_\allowbreak{}pressurant\_\allowbreak{}mode} & \ref{tab:p-besleme} & Güverte: Besleme Sistemi paneli girdileri (çalkantı, basınçlandırıcı, su koçu) \\
+\texttt{feed\_\allowbreak{}pressurant\_\allowbreak{}polytropic\_\allowbreak{}n} & \ref{tab:p-besleme} & Güverte: Besleme Sistemi paneli girdileri (çalkantı, basınçlandırıcı, su koçu) \\
+\texttt{feed\_\allowbreak{}pressurant\_\allowbreak{}propellant\_\allowbreak{}volume} & \ref{tab:p-besleme} & Güverte: Besleme Sistemi paneli girdileri (çalkantı, basınçlandırıcı, su koçu) \\
+\texttt{feed\_\allowbreak{}pressurant\_\allowbreak{}regulator\_\allowbreak{}margin} & \ref{tab:p-besleme} & Güverte: Besleme Sistemi paneli girdileri (çalkantı, basınçlandırıcı, su koçu) \\
+\texttt{feed\_\allowbreak{}pressurant\_\allowbreak{}storage\_\allowbreak{}pressure} & \ref{tab:p-besleme} & Güverte: Besleme Sistemi paneli girdileri (çalkantı, basınçlandırıcı, su koçu) \\
+\texttt{feed\_\allowbreak{}pressurant\_\allowbreak{}tank\_\allowbreak{}pressure} & \ref{tab:p-besleme} & Güverte: Besleme Sistemi paneli girdileri (çalkantı, basınçlandırıcı, su koçu) \\
 \texttt{feed\_\allowbreak{}pressure} & \ref{tab:sivi-3} & Sıvı sayfası: 3. Besleme Sistemi / Motor Çevrimi \\
-\texttt{feed\_\allowbreak{}slosh\_\allowbreak{}baffle\_\allowbreak{}depth\_\allowbreak{}ratio} & \ref{tab:p-besleme} & Güverte: Besleme Sistemi paneli girdileri (çalkalanma, basınçlandırıcı, su koçu) \\
-\texttt{feed\_\allowbreak{}slosh\_\allowbreak{}baffle\_\allowbreak{}width\_\allowbreak{}ratio} & \ref{tab:p-besleme} & Güverte: Besleme Sistemi paneli girdileri (çalkalanma, basınçlandırıcı, su koçu) \\
-\texttt{feed\_\allowbreak{}slosh\_\allowbreak{}fill\_\allowbreak{}height} & \ref{tab:p-besleme} & Güverte: Besleme Sistemi paneli girdileri (çalkalanma, basınçlandırıcı, su koçu) \\
-\texttt{feed\_\allowbreak{}slosh\_\allowbreak{}fluid\_\allowbreak{}density} & \ref{tab:p-besleme} & Güverte: Besleme Sistemi paneli girdileri (çalkalanma, basınçlandırıcı, su koçu) \\
-\texttt{feed\_\allowbreak{}slosh\_\allowbreak{}g\_\allowbreak{}eff} & \ref{tab:p-besleme} & Güverte: Besleme Sistemi paneli girdileri (çalkalanma, basınçlandırıcı, su koçu) \\
-\texttt{feed\_\allowbreak{}slosh\_\allowbreak{}radius} & \ref{tab:p-besleme} & Güverte: Besleme Sistemi paneli girdileri (çalkalanma, basınçlandırıcı, su koçu) \\
-\texttt{feed\_\allowbreak{}water\_\allowbreak{}hammer\_\allowbreak{}fluid} & \ref{tab:p-besleme} & Güverte: Besleme Sistemi paneli girdileri (çalkalanma, basınçlandırıcı, su koçu) \\
-\texttt{feed\_\allowbreak{}water\_\allowbreak{}hammer\_\allowbreak{}line\_\allowbreak{}id\_\allowbreak{}mm} & \ref{tab:p-besleme} & Güverte: Besleme Sistemi paneli girdileri (çalkalanma, basınçlandırıcı, su koçu) \\
-\texttt{feed\_\allowbreak{}water\_\allowbreak{}hammer\_\allowbreak{}line\_\allowbreak{}length\_\allowbreak{}m} & \ref{tab:p-besleme} & Güverte: Besleme Sistemi paneli girdileri (çalkalanma, basınçlandırıcı, su koçu) \\
-\texttt{feed\_\allowbreak{}water\_\allowbreak{}hammer\_\allowbreak{}mdot\_\allowbreak{}kg\_\allowbreak{}s} & \ref{tab:p-besleme} & Güverte: Besleme Sistemi paneli girdileri (çalkalanma, basınçlandırıcı, su koçu) \\
-\texttt{feed\_\allowbreak{}water\_\allowbreak{}hammer\_\allowbreak{}pipe\_\allowbreak{}material} & \ref{tab:p-besleme} & Güverte: Besleme Sistemi paneli girdileri (çalkalanma, basınçlandırıcı, su koçu) \\
-\texttt{feed\_\allowbreak{}water\_\allowbreak{}hammer\_\allowbreak{}valve\_\allowbreak{}closure\_\allowbreak{}time\_\allowbreak{}ms} & \ref{tab:p-besleme} & Güverte: Besleme Sistemi paneli girdileri (çalkalanma, basınçlandırıcı, su koçu) \\
-\texttt{feed\_\allowbreak{}water\_\allowbreak{}hammer\_\allowbreak{}wall\_\allowbreak{}thickness\_\allowbreak{}mm} & \ref{tab:p-besleme} & Güverte: Besleme Sistemi paneli girdileri (çalkalanma, basınçlandırıcı, su koçu) \\
-\texttt{feed\_\allowbreak{}water\_\allowbreak{}hammer\_\allowbreak{}working\_\allowbreak{}pressure\_\allowbreak{}bar} & \ref{tab:p-besleme} & Güverte: Besleme Sistemi paneli girdileri (çalkalanma, basınçlandırıcı, su koçu) \\
-\texttt{feed\_\allowbreak{}water\_\allowbreak{}hammer\_\allowbreak{}working\_\allowbreak{}pressure\_\allowbreak{}reference} & \ref{tab:p-besleme} & Güverte: Besleme Sistemi paneli girdileri (çalkalanma, basınçlandırıcı, su koçu) \\
+\texttt{feed\_\allowbreak{}slosh\_\allowbreak{}baffle\_\allowbreak{}depth\_\allowbreak{}ratio} & \ref{tab:p-besleme} & Güverte: Besleme Sistemi paneli girdileri (çalkantı, basınçlandırıcı, su koçu) \\
+\texttt{feed\_\allowbreak{}slosh\_\allowbreak{}baffle\_\allowbreak{}width\_\allowbreak{}ratio} & \ref{tab:p-besleme} & Güverte: Besleme Sistemi paneli girdileri (çalkantı, basınçlandırıcı, su koçu) \\
+\texttt{feed\_\allowbreak{}slosh\_\allowbreak{}fill\_\allowbreak{}height} & \ref{tab:p-besleme} & Güverte: Besleme Sistemi paneli girdileri (çalkantı, basınçlandırıcı, su koçu) \\
+\texttt{feed\_\allowbreak{}slosh\_\allowbreak{}fluid\_\allowbreak{}density} & \ref{tab:p-besleme} & Güverte: Besleme Sistemi paneli girdileri (çalkantı, basınçlandırıcı, su koçu) \\
+\texttt{feed\_\allowbreak{}slosh\_\allowbreak{}g\_\allowbreak{}eff} & \ref{tab:p-besleme} & Güverte: Besleme Sistemi paneli girdileri (çalkantı, basınçlandırıcı, su koçu) \\
+\texttt{feed\_\allowbreak{}slosh\_\allowbreak{}radius} & \ref{tab:p-besleme} & Güverte: Besleme Sistemi paneli girdileri (çalkantı, basınçlandırıcı, su koçu) \\
+\texttt{feed\_\allowbreak{}water\_\allowbreak{}hammer\_\allowbreak{}fluid} & \ref{tab:p-besleme} & Güverte: Besleme Sistemi paneli girdileri (çalkantı, basınçlandırıcı, su koçu) \\
+\texttt{feed\_\allowbreak{}water\_\allowbreak{}hammer\_\allowbreak{}line\_\allowbreak{}id\_\allowbreak{}mm} & \ref{tab:p-besleme} & Güverte: Besleme Sistemi paneli girdileri (çalkantı, basınçlandırıcı, su koçu) \\
+\texttt{feed\_\allowbreak{}water\_\allowbreak{}hammer\_\allowbreak{}line\_\allowbreak{}length\_\allowbreak{}m} & \ref{tab:p-besleme} & Güverte: Besleme Sistemi paneli girdileri (çalkantı, basınçlandırıcı, su koçu) \\
+\texttt{feed\_\allowbreak{}water\_\allowbreak{}hammer\_\allowbreak{}mdot\_\allowbreak{}kg\_\allowbreak{}s} & \ref{tab:p-besleme} & Güverte: Besleme Sistemi paneli girdileri (çalkantı, basınçlandırıcı, su koçu) \\
+\texttt{feed\_\allowbreak{}water\_\allowbreak{}hammer\_\allowbreak{}pipe\_\allowbreak{}material} & \ref{tab:p-besleme} & Güverte: Besleme Sistemi paneli girdileri (çalkantı, basınçlandırıcı, su koçu) \\
+\texttt{feed\_\allowbreak{}water\_\allowbreak{}hammer\_\allowbreak{}valve\_\allowbreak{}closure\_\allowbreak{}time\_\allowbreak{}ms} & \ref{tab:p-besleme} & Güverte: Besleme Sistemi paneli girdileri (çalkantı, basınçlandırıcı, su koçu) \\
+\texttt{feed\_\allowbreak{}water\_\allowbreak{}hammer\_\allowbreak{}wall\_\allowbreak{}thickness\_\allowbreak{}mm} & \ref{tab:p-besleme} & Güverte: Besleme Sistemi paneli girdileri (çalkantı, basınçlandırıcı, su koçu) \\
+\texttt{feed\_\allowbreak{}water\_\allowbreak{}hammer\_\allowbreak{}working\_\allowbreak{}pressure\_\allowbreak{}bar} & \ref{tab:p-besleme} & Güverte: Besleme Sistemi paneli girdileri (çalkantı, basınçlandırıcı, su koçu) \\
+\texttt{feed\_\allowbreak{}water\_\allowbreak{}hammer\_\allowbreak{}working\_\allowbreak{}pressure\_\allowbreak{}reference} & \ref{tab:p-besleme} & Güverte: Besleme Sistemi paneli girdileri (çalkantı, basınçlandırıcı, su koçu) \\
 \texttt{film\_\allowbreak{}cooling\_\allowbreak{}percent} & \ref{tab:sivi-6} & Sıvı sayfası: 6. Nozul ve Soğutma Sistemi \\
 \texttt{filter\_\allowbreak{}cutoff} & \ref{tab:kati-8} & Katı sayfası: 8. Test Standı Planlaması (motor hesabına girmez) \\
 \texttt{fin\_\allowbreak{}count} & \ref{tab:kati-2b} & Katı sayfası: tane tipine özgü alanlar (Yıldız, Finocyl, Vagon Tekerleği, Yivli) \\
@@ -4799,10 +5476,16 @@ tablosuna dizin. Aynı kimlik birden çok sayfada ya da panelde geçebilir.
 \texttt{ls-a-bodydia} & \ref{tab:saha-2} & Fırlatma Sahası: Uçurulan Araç \\
 \texttt{ls-a-bodylen} & \ref{tab:saha-2} & Fırlatma Sahası: Uçurulan Araç \\
 \texttt{ls-a-cd0} & \ref{tab:saha-2} & Fırlatma Sahası: Uçurulan Araç \\
+\texttt{ls-a-chutearea} & \ref{tab:saha-2} & Fırlatma Sahası: Uçurulan Araç \\
+\texttt{ls-a-chutecd} & \ref{tab:saha-2} & Fırlatma Sahası: Uçurulan Araç \\
+\texttt{ls-a-chutedelay} & \ref{tab:saha-2} & Fırlatma Sahası: Uçurulan Araç \\
 \texttt{ls-a-drymass} & \ref{tab:saha-2} & Fırlatma Sahası: Uçurulan Araç \\
 \texttt{ls-a-elev} & \ref{tab:saha-2} & Fırlatma Sahası: Uçurulan Araç \\
 \texttt{ls-a-fincount} & \ref{tab:saha-2} & Fırlatma Sahası: Uçurulan Araç \\
+\texttt{ls-a-finroot} & \ref{tab:saha-2} & Fırlatma Sahası: Uçurulan Araç \\
 \texttt{ls-a-finspan} & \ref{tab:saha-2} & Fırlatma Sahası: Uçurulan Araç \\
+\texttt{ls-a-finsweep} & \ref{tab:saha-2} & Fırlatma Sahası: Uçurulan Araç \\
+\texttt{ls-a-fintip} & \ref{tab:saha-2} & Fırlatma Sahası: Uçurulan Araç \\
 \texttt{ls-a-winddir} & \ref{tab:saha-2} & Fırlatma Sahası: Uçurulan Araç \\
 \texttt{ls-a-windspeed} & \ref{tab:saha-2} & Fırlatma Sahası: Uçurulan Araç \\
 \texttt{ls-exagg} & \ref{tab:saha-3} & Fırlatma Sahası: Uçuş Yolu \\
@@ -4887,6 +5570,9 @@ tablosuna dizin. Aynı kimlik birden çok sayfada ya da panelde geçebilir.
 \texttt{sd\_\allowbreak{}body\_\allowbreak{}l} & \ref{tab:y-6dof} & Uçuş Dinamiği (6-DOF) paneli girdileri \\
 \texttt{sd\_\allowbreak{}burn} & \ref{tab:y-6dof} & Uçuş Dinamiği (6-DOF) paneli girdileri \\
 \texttt{sd\_\allowbreak{}cd0} & \ref{tab:y-6dof} & Uçuş Dinamiği (6-DOF) paneli girdileri \\
+\texttt{sd\_\allowbreak{}clk\_\allowbreak{}sira} & \ref{tab:y-6dof} & Uçuş Dinamiği (6-DOF) paneli girdileri \\
+\texttt{sd\_\allowbreak{}clk\_\allowbreak{}x\_\allowbreak{}n2o} & \ref{tab:y-6dof} & Uçuş Dinamiği (6-DOF) paneli girdileri \\
+\texttt{sd\_\allowbreak{}clk\_\allowbreak{}yer} & \ref{tab:y-6dof} & Uçuş Dinamiği (6-DOF) paneli girdileri \\
 \texttt{sd\_\allowbreak{}dry\_\allowbreak{}m} & \ref{tab:y-6dof} & Uçuş Dinamiği (6-DOF) paneli girdileri \\
 \texttt{sd\_\allowbreak{}elev} & \ref{tab:y-6dof} & Uçuş Dinamiği (6-DOF) paneli girdileri \\
 \texttt{sd\_\allowbreak{}fin\_\allowbreak{}count} & \ref{tab:y-6dof} & Uçuş Dinamiği (6-DOF) paneli girdileri \\
@@ -5031,7 +5717,7 @@ Genişleme oranı & $\varepsilon \leq 1$: \ui{UYARI}. Kabul edilebilirlik koşun
 \vspace{1cm}
 \begin{center}
 \color{hrmagray}\small
-HRMA 3.0.6 --- Roket Motoru Ön Tasarım ve Analiz Yazılımı\\
+HRMA 3.0.7 --- Roket Motoru Ön Tasarım ve Analiz Yazılımı\\
 \href{https://github.com/berketez/HRMA}{github.com/berketez/HRMA}
 \end{center}
 

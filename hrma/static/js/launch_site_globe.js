@@ -67,11 +67,11 @@
     // (target) ölçülür, Dünya merkezinden DEĞİL. Yerel görünümde hedef yüzeydedir;
     // bu yüzden hedefe yakın zoom için min HEDEF mesafesi KÜÇÜK olmalı. Kürenin
     // içine dalmayı ayrı bir YÜZEY KİLİDİ (SURFACE_MIN_LEN) engeller.
-    // 0,4 birim × 63.710 m = 25.484 m. Eski yorum "~2.5 km" diyordu, 10 kat
-    // yanlıştı (tasarım harita-detay §1).
-    var CTRL_MIN_TARGET = GLOBE_R * 0.004;   // hedefe ~25,5 km'ye kadar yaklaş
+    // Eski taban 0,4 birim × 63.710 m = 25.484 m idi (eski yorum "~2.5 km"
+    // diyordu, 10 kat yanlıştı; tasarım harita-detay §1). V307/FS-HARİTA: alt
+    // sınırın kuralı aşağıda, dinamik near sabitlerinin ardında
+    // (KAMERA_MIN_MESAFE).
     var CTRL_MAX_TARGET = GLOBE_R * 6.0;     // en fazla uzaklaşma
-    var SURFACE_MIN_LEN = GLOBE_R * 1.003;   // kamera merkezden en az bu kadar (yüzey kilidi)
 
     /* ÖH harita-detay K2 — DİNAMİK NEAR DÜZLEMİ (tasarım §3.2).
        Eskiden near sabit 0,01 birimdi (637 m) ve en yakın kamera yüzeyden
@@ -85,6 +85,26 @@
     var NEAR_ORANI = 0.3;
     var NEAR_MIN = 1e-4;
     var NEAR_MAX = 1.0;
+
+    /* V307 / FS-HARİTA (9 Kas 2026) — YAKIN BAKIŞ SINIRI (ölçülü kural).
+       Eski değerler: hedefe 25,5 km (0,004R), yüzey kilidi 19,1 km (1,003R),
+       uçuşlu 'Sahaya yakınlaş' tabanı 191 km. Ölçülen sonuç (FS-UÇUŞ,
+       FS-İZLEME bildirimleri): km ölçekli bir uçuş ve 57 m'lik bir uçuş
+       yakın görünümde nokta kalıyordu; fırlatma noktası birkaç yüz metreden
+       izlenemiyordu. KURAL: kamera, dinamik near düzleminin kendi kuralının
+       (near = NEAR_ORANI · mesafe) tabana (NEAR_MIN) çarpmadığı en küçük
+       mesafeye kadar yaklaşabilir: NEAR_MIN / NEAR_ORANI = 3,33e-4 birim =
+       21,2 m. Bu sınırın altında near tabana kırpılır ve kameraya near'dan
+       yakın geometri kesilmeye başlar; üstünde near her zaman mesafenin
+       %30'udur. Aynı sayı hem hedef mesafesi (OrbitControls minDistance)
+       hem yüzey kilidi (küre yüzeyinden irtifa) için kullanılır. Küre
+       arazi taşımaz (yükselti modeli yok); kilit küre yüzeyine göredir ve
+       o yakınlıkta çizilen en kaba karonun kiriş sarkması (z7 parça açısı,
+       19 m) yüzeyin ALTINDADIR, kameranın önünde değil. Bu yakınlıkta en
+       ince doku (Landsat ~30 m) büyütülür; büyütme notu bunu söyler. */
+    var KAMERA_MIN_MESAFE = NEAR_MIN / NEAR_ORANI;            // birim (21,2 m)
+    var CTRL_MIN_TARGET = KAMERA_MIN_MESAFE;                   // hedefe ~21 m'ye kadar yaklaş
+    var SURFACE_MIN_LEN = GLOBE_R + KAMERA_MIN_MESAFE;         // yüzey kilidi (~21 m irtifa)
 
     /* Web-mercator eşdeğer zoom: z_web = log2(Z_WEB_Z0_MPP / m/px).
        156.543,03 m/px = 256 px karolu web haritasının z0'da ekvator çözünürlüğü
@@ -133,7 +153,23 @@
     // burada tanımlı değilse atıf HİÇ basılmaz (fail-closed: başka katmanın
     // künyesini göstermektense hiç göstermemek).
     var TILE_ATTRIBUTION_KEY = { bluemarble: 'site.tileAttribution',
-                                 bm_local: 'site.tilePackagedAttribution' };
+                                 landsat_weld: 'site.tileDetailAttribution',
+                                 bm_local: 'site.tilePackagedAttribution',
+                                 pack_detail: 'site.mapPackAttribution' };
+    /* V307 / FS-HARİTA (9 Kas 2026) — YAKIN ZOOM AYRINTI KATMANI.
+       ÖLÇÜLDÜ (rıza açık, 'Sahaya yakınlaş' kipi, İstanbul 25 km): en ince
+       karo 'bluemarble' z7 idi (~489 m/px) ve ekran ~21 m/px iken 23 kat
+       büyütülüyordu; şehir/kıyı/rampa ayrıntısı yoktu. 'landsat_weld'
+       (NASA GIBS 31.25m ağacı, Landsat WELD gerçek renk, 2000 yıllık
+       bileşkesi, ~30 m/px z11) YALNIZ z > TILE_MAX_ZOOM (bluemarble tavanı)
+       iken istenir. Varlığı ve tavanı SUNUCUDAN okunur
+       (/api/tile/cache/status 'layers.layers.landsat_weld': kaynak 'gibs',
+       ui_offered, tamsayı max_zoom > TILE_MAX_ZOOM ve o düzeyin matris
+       geometrisi yayımlanmış). Okunamazsa katman kullanılmaz (fail-closed),
+       tavan eskisi gibi z7 kalır. Ağ kapısı (K5a) aynen geçerlidir. */
+    var TILE_LAYER_DETAIL = 'landsat_weld';
+    var TILE_SOURCE_GIBS = 'gibs';
+    var _detayTavan = null;             // sunucudan (yoksa null)
     /* harita-detay K4 (F2; tasarım §3.4) — PAKETLİ ÇEVRİMDIŞI KATMAN.
        NASA Blue Marble NG (Aralık 2004) z0-z5 WebP piramidi uygulamayla
        gelir; sunucu onu ağa çıkmadan verir (tile_cache 'bm_local').
@@ -150,6 +186,21 @@
     var TILE_LAYER_PACKAGED = 'bm_local';
     var TILE_SOURCE_PACKAGED = 'packaged';
     var _paketliTavan = null;           // sunucudan (yoksa null)
+    /* V307 / FS-HARİTA-KÜRE (16 Kas 2026) — İNDİRİLEN HARİTA PAKETİ KATMANI.
+       Kullanıcının onayıyla indirdiği OpenStreetMap paketi (FS-HARİTA-VERİ
+       faz 2, Parça S) sunucuda SAYDAM rastere çizilir (yol, bina, su, kıyı,
+       arazi kullanımı) ve zemin dokusunun (bm_local / rızalı Landsat)
+       ÜSTÜNE biner. Ağa çıkmaz. Varlığı ve tavanı SUNUCUDAN okunur
+       (/api/tile/cache/status 'layers.packs.pack_detail': kaynak 'pack',
+       ui_offered, tamsayı max_zoom > TILE_MAX_ZOOM ve o düzeyin matris
+       geometrisi yayımlanmış); okunamazsa katman hiç istenmez (fail-closed).
+       Yalnız KURULU bir paketin kutusuyla kesişen karo istenir; bindirme
+       karonun o kutuyla kesişen parçasına kırpılır (paket kapsamı dışında
+       bugünkü görünüm aynen). Kurulu paket listesi launch_site_map_packs.js
+       deposundan okunur (LaunchSiteMapPacks.kuruluKutular). */
+    var TILE_LAYER_PACK = 'pack_detail';
+    var TILE_SOURCE_PACK = 'pack';
+    var _paketTavan = null;             // sunucudan (yoksa null)
     // EBEVEYN YEDEĞİ: z düzeyindeki karo henüz çizilmemişse onu kapsayan
     // daha kaba karo (aynı katmanda) LRU'da tutulur ve çizilmeye devam eder;
     // zoom değişince taban dokuya düşüp geri gelen yanıp sönme biter.
@@ -186,11 +237,46 @@
     // zaten üstte olduğu için etkilenmez.
     var TILE_RADIUS = GLOBE_R;           // taban küreyle çakışık; ayrım polygonOffset ile
     var TILE_DEPTH_BIAS = -1;            // polygonOffsetFactor/Units: karo tabanın ÖNÜNE
+    /* V307 / FS-HARİTA-KÜRE (16 Kas 2026) — R7 DERİNLİK ÇAKIŞMASI (ölçülen kök).
+       ÖLÇÜLDÜ (kanıt docs/scofield/raw/OH/V307/fs-harita-kure/olcum/once_r7;
+       sentetik karolar: Landsat z9 KIRMIZI ebeveyn, z11 YEŞİL çocuk, Sinop,
+       rıza kapalı, karolar yalıtılmış önbellekten): 20 km'de z11 çocukların
+       kapladığı bölgede ebeveyn 3.619 pikselde (%0,73) ÜSTE çıkıyordu (çokgen
+       yama + dikey noktalı dikiş). İki kök:
+         (1) Karo köşeleri DÜNYA koordinatında float32 tutuluyordu: GLOBE_R =
+             100 birimde float32 adımı 2^-17 ≈ 7,6e-6 birim ≈ 0,49 m. z12'de
+             ebeveyn yüzünün küreden sarkması ~2 cm iken köşe gürültüsü
+             ±0,25 m: ebeveyn ile çocuk derinlikte rastgele yarışıyordu.
+         (2) Gürültü olmasa da ebeveyn köşelerinin çevresinde ebeveyn yüzü
+             küreye DEĞER, çocuğun kendi yüzü ise biraz altındadır; ikisi aynı
+             polygonOffsetUnits ile yazıldığı için orada ebeveyn kazanıyordu.
+       ONARIM: (1) karo köşeleri karonun KENDİ MERKEZİNE göre kurulur, merkez
+       nesnenin konumudur (Mesh.position; matris çarpımı JS'te float64);
+       köşeler artık metrenin altında hassas. (2) Zemin karoları İNCEDEN
+       KABAYA çizilir ve stencil biti yazar; daha kaba bir karo, daha ince
+       bir karonun çizdiği pikseli YAZAMAZ (derinlik yarışına bırakılmaz).
+       Paket bindirmesi kendi bitini kullanır (aynı kural, kendi içinde).
+       Bit 0: zemin karosu çizildi. Bit 1: paket bindirmesi çizildi. */
+    var STENCIL_ZEMIN = 1;
+    var STENCIL_PAKET = 2;
+    /* Çizim sırası (renderOrder). Zemin karoları opaktır ve sahnedeki diğer
+       opak nesnelerden (taban küre, iğne, roket, olay noktaları: renderOrder
+       0) SONRA, inceden kabaya çizilir: ZEMIN_RO_TABANI - z (z <= 99 her
+       düzey için pozitif). Paket bindirmesi saydam geçiştedir ve gökyüzü
+       yıldızlarından (-1) sonra, bütün çizgi/halka/izlerden (>= 0) ÖNCE
+       çizilir: -0,5 - z/1000 (yine inceden kabaya). */
+    var ZEMIN_RO_TABANI = 100;
+    var PAKET_RO_TABANI = -0.5;
     // GPU bellek: üstündeki en eski mesh THREE dispose edilir. ÖH harita-detay
     // K2 (tasarım §3.4): 128 karo × 512²×4 B×4/3 (mipmap) = ~179 MB tavandı;
     // 64 × 1,40 MB = ~90 MB. 5×5 yama + iki düzeylik ebeveyn yedeği için
     // 25 + 25 + 7 = ~57 karo yeter.
     var TILE_LRU_MAX = 64;
+    /* V307/FS-HARİTA-KÜRE: paket bindirmesinin AYRI tavanı. Zemin tavanını
+       paylaşsaydı 5×5 paket yaması + 5×5 Landsat + 5×5 paketli (75) 64'ü
+       aşar, kullanılan karolar her turda budanıp yeniden istenirdi. Zeminle
+       aynı akıl yürütme: 5×5 yama + iki düzeylik ebeveyn yedeği = 25 + 7. */
+    var TILE_LRU_MAX_PAKET = 32;
     var TILE_UPDATE_MS = 250;           // patch güncelleme kısması (her karede değil)
     // Negatif önbellek (ÖH D17 / P12aB4-04): başarısız karo hemen unutulmaz;
     // üstel geri çekilmeyle beklenir, TILE_FAIL_MAX denemeden sonra hiç
@@ -255,13 +341,59 @@
         }
     }
 
+    /* V307/FS-HARİTA-KÜRE — KATMAN URL SÜRÜMÜ (katman -> sürüm dizesi).
+       Ağa çıkmayan ama içeriği KURULU PAKETE bağlı katmanın (pack_detail)
+       URL'si kurulu paket kümesine göre sürümlenir (?v=) ve rıza parametresi
+       taşımaz: karo yanıtları bir yıl 'immutable' önbelleklenir (app.py
+       tile_proxy); sürümsüz URL'de paket silinince/yenisi kurulunca tarayıcı
+       eski karoyu göstermeye devam ederdi. Sürümü _paketKatmani yazar:
+       uygulama sürümü + kurulu paketlerin kimliği ve sha256'sı
+       (LaunchSiteMapPacks.imza) üstünden 32 bit FNV-1a özeti, onaltılık
+       (yalnız önbellek ayrımı içindir, güvenlik iddiası taşımaz). */
+    var _katmanUrlSurumu = {};
+
     //: Karo URL'si; rıza parametresi YALNIZ anahtar açık ve sözleşme
-    //: sunucudan okunmuşsa eklenir.
+    //: sunucudan okunmuşsa eklenir. Sürümlü katman (yukarıda) rıza
+    //: parametresi almaz.
     function tileUrl(layer, z, tx, ty) {
         var url = '/api/tile/' + layer + '/' + z + '/' + tx + '/' + ty;
+        if (Object.prototype.hasOwnProperty.call(_katmanUrlSurumu, layer))
+            return url + '?v=' + _katmanUrlSurumu[layer];
         if (tileAgAcik() && _tileAgRizasi)
             url += '?' + _tileAgRizasi.param + '=' + _tileAgRizasi.value;
         return url;
+    }
+
+    function fnv32(s) {
+        var h = 0x811c9dc5;
+        for (var i = 0; i < s.length; i++) {
+            h ^= s.charCodeAt(i);
+            h = (h + ((h << 1) + (h << 4) + (h << 7) + (h << 8) + (h << 24))) >>> 0;
+        }
+        return h.toString(16);
+    }
+
+    //: Kurulu paketlerin kutuları ve imzası (launch_site_map_packs.js
+    //: deposu). Depo yoksa ya da biçim tutmazsa null: paket katmanı istenmez.
+    function paketDeposuOku() {
+        var P = global.LaunchSiteMapPacks;
+        if (!P || typeof P.kuruluKutular !== 'function' || typeof P.imza !== 'function') return null;
+        var ham = P.kuruluKutular(), kutular = [];
+        if (!Array.isArray(ham)) return null;
+        for (var i = 0; i < ham.length; i++) {
+            var b = ham[i] && ham[i].bbox;
+            if (b && b.length === 4 && isFinite(b[0]) && isFinite(b[1]) && isFinite(b[2])
+                    && isFinite(b[3]) && b[0] < b[2] && b[1] < b[3])
+                kutular.push([+b[0], +b[1], +b[2], +b[3]]);
+        }
+        return { kutular: kutular, imza: String(P.imza()) };
+    }
+
+    //: [w,s,e,n] iki kutu kesişimi (alan > 0) ya da null.
+    function kutuKesisim(a, b) {
+        var w = Math.max(a[0], b[0]), s = Math.max(a[1], b[1]);
+        var e = Math.min(a[2], b[2]), n = Math.min(a[3], b[3]);
+        return (w < e && s < n) ? [w, s, e, n] : null;
     }
 
     function tileGeomYukle() {
@@ -275,7 +407,37 @@
             }
             tileAgRizasiOku(d);
             paketliTavanOku(d);
+            detayTavanOku(d);
+            paketTavanOku(d);
         }).catch(function () { /* çevrimdışı: geometri yok, karo istenmez */ });
+    }
+
+    //: İndirilen paket katmanının tavanı (V307/FS-HARİTA-KÜRE). Kaynak 'pack'
+    //: değilse, arayüze sunulmuyorsa (künyesi yoksa sunucu ui_offered=false
+    //: yayımlar), tavan bluemarble tavanının üstünde bir tamsayı değilse ya
+    //: da o düzeyin geometrisi yayımlanmadıysa null: katman hiç istenmez.
+    function paketTavanOku(d) {
+        var k = d && d.layers && d.layers.packs && d.layers.packs[TILE_LAYER_PACK];
+        var mz = k ? k.max_zoom : null;
+        var lv = d && d.tile_matrix && d.tile_matrix.levels;
+        if (k && k.source === TILE_SOURCE_PACK && k.ui_offered === true
+                && typeof mz === 'number' && isFinite(mz) && Math.floor(mz) === mz
+                && mz > TILE_MAX_ZOOM && lv && lv[String(mz)])
+            _paketTavan = mz;
+    }
+
+    //: Ayrıntı katmanının tavanı sunucunun GIBS kataloğundan (V307/FS-HARİTA).
+    //: Kaynak 'gibs' değilse, arayüze sunulmuyorsa, tavan bluemarble
+    //: tavanının üstünde bir tamsayı değilse ya da o düzeyin geometrisi
+    //: yayımlanmadıysa null: katman hiç istenmez.
+    function detayTavanOku(d) {
+        var k = d && d.layers && d.layers.layers && d.layers.layers[TILE_LAYER_DETAIL];
+        var mz = k ? k.max_zoom : null;
+        var lv = d && d.tile_matrix && d.tile_matrix.levels;
+        if (k && k.source === TILE_SOURCE_GIBS && k.ui_offered === true
+                && typeof mz === 'number' && isFinite(mz) && Math.floor(mz) === mz
+                && mz > TILE_MAX_ZOOM && lv && lv[String(mz)])
+            _detayTavan = mz;
     }
 
     //: Paketli katmanın tavanı sunucunun katman kataloğundan; kaynak türü
@@ -531,6 +693,7 @@
         // GIBS karo yamaları ayrı grupta (arazi; uçuş yolundan bağımsız yaşar)
         this._tileGroup = new THREE.Group();
         scene.add(this._tileGroup);
+        this._paketKur(scene);
         this._tiles = new Map();        // anahtar layer:z:x:y -> {mesh,t,loading}
         this._tileNextT = 0;            // patch güncelleme kısma zamanı
         // P5B4-30 — ÖNYÜKLEME SÖZLEŞMESİ: matris geometrisi sunucudan
@@ -544,6 +707,40 @@
         this._resize();
         this._animate();
         if (this._onReady) this._onReady();
+    };
+
+    /* V307/FS-HARİTA-KÜRE — PAKET BİNDİRMESİ GRUBU. Bindirme saydamdır ve
+       derinlik YAZMAZ; zemin karosuyla aynı küre üstünde durduğu için
+       çizgilerle AYNI kuralla kaldırılır (LaunchSiteVectors.kaldirmaOlcegi:
+       yüzeyden max(2 m, 1e-4·irtifa); ikinci kural yok). Bu kaldırma ekran
+       pikselinin ~0,13'ü kadardır (1e-4·irtifa ÷ ~7,7e-4·irtifa m/px), yani
+       yatayda görünmez; derinlikte ise zemin karosunun (küreye değen ya da
+       altında) önünde kalmayı güvenceler. Bindirmenin kendi yüzünün küreden
+       sarkması bu kaldırmanın en küçük değerinin yarısıyla sınırlanır
+       (_makeTileMesh, ince bölme). Kural okunamazsa (vektör modülü yoksa)
+       paket katmanı hiç istenmez (fail-closed). */
+    LaunchSiteGlobe.prototype._paketKur = function (scene) {
+        var THREE = global.THREE;
+        var VK = global.LaunchSiteVectors;
+        this._paketKaldir = (VK && typeof VK.kaldirmaOlcegi === 'function') ? VK.kaldirmaOlcegi : null;
+        this._paketGroup = new THREE.Group();
+        this._paketGroup.visible = false;
+        scene.add(this._paketGroup);
+        this._paketImza = null;         // son okunan kurulu paket imzası
+        this._paketEtkin = false;       // bindirme bu turda çiziliyor mu
+        this._paketZ = null;            // bindirmenin istenen düzeyi
+        this._maskeliSeviyeler = {};    // NE su çizgisi maskesi uygulanmış basamaklar
+        this._paketAdimDeg = null;
+        if (!this._paketKaldir) return;
+        var hMin = (this._paketKaldir(0, R_EARTH_M) - 1) * R_EARTH_M;
+        // Yüz sarkması sınırı hMin/2: kare yüzün merkezi küreden R·a²/4
+        // kadar sarkar -> a <= 2·sqrt((hMin/2)/R) [rad].
+        if (hMin > 0) this._paketAdimDeg = rad2deg(2 * Math.sqrt(hMin / 2 / R_EARTH_M));
+        var self = this;
+        this.addFrameListener(function (f) {
+            self._paketGroup.scale.setScalar(self._paketKaldir(f.camAltitudeM, R_EARTH_M));
+            self._neSuMaskele();
+        });
     };
 
     LaunchSiteGlobe.prototype._loadTexture = function () {
@@ -727,15 +924,45 @@
             if (self._disposed || !data || !data.layers) return;
             var layers = data.layers;
             var group = new THREE.Group();
+            /* V307/FS-HARİTA — YEDEK SINIR ÇİZGİSİ YÜKSEKLİĞİ. Çizgiler
+               GLOBE_R·1,001'de (6,4 km yukarıda) kuruluyordu: 110m verisinin
+               en uzun parçası 7,85 km sarkar (ölçüldü: 7.647 parçada
+               R(1-cos(θ/2)) en büyüğü 7.852 m), 6,4 km bunu örtmek içindi;
+               bedeli, yakın görünümde çizginin sondaj roketi yayının ÜSTÜNDE
+               durmasıydı (FS-İZLEME). Artık vektör modülünün kaldırma kuralı
+               (launch_site_vectors.js kaldirmaOlcegi: yüzeyden max(2 m,
+               1e-4·irtifa)) burada da uygulanır: parçalar büyük çember
+               üzerinde, kiriş sarkması bu kuralın tabanını (2 m) aşmayacak
+               açıyla bölünür (θ_max = 2·acos(1 - 2 m / R) = 0,0908°, 58.865
+               parça) ve grup her karede aynı ölçekle kaldırılır. Vektör
+               modülü yoksa kural okunamaz: eski 1,001R kurulumu aynen kalır. */
+            var V = global.LaunchSiteVectors;
+            var kaldir = (V && typeof V.kaldirmaOlcegi === 'function') ? V.kaldirmaOlcegi : null;
+            var hMin = kaldir ? (kaldir(0, R_EARTH_M) - 1) * R_EARTH_M : null;
+            var rCiz = (hMin > 0) ? GLOBE_R : GLOBE_R * 1.001;
+            var thMax = (hMin > 0) ? 2 * Math.acos(1 - hMin / R_EARTH_M) : Infinity;
             var mkLines = function (polylines, color, opacity) {
                 if (!polylines) return;
-                var positions = [];
+                var positions = [], pa = [0, 0, 0], pb = [0, 0, 0];
                 for (var i = 0; i < polylines.length; i++) {
                     var flat = polylines[i];
                     for (var j = 0; j + 3 < flat.length; j += 2) {
-                        var a = latLonToVec3(flat[j + 1], flat[j], GLOBE_R * 1.001);
-                        var b = latLonToVec3(flat[j + 3], flat[j + 2], GLOBE_R * 1.001);
-                        positions.push(a.x, a.y, a.z, b.x, b.y, b.z);
+                        latLonToXYZ(flat[j + 1], flat[j], 1, pa, 0);
+                        latLonToXYZ(flat[j + 3], flat[j + 2], 1, pb, 0);
+                        var cs = clamp(pa[0] * pb[0] + pa[1] * pb[1] + pa[2] * pb[2], -1, 1);
+                        var th = Math.acos(cs), sn = Math.sin(th);
+                        var n = (th > thMax && sn > 1e-12) ? Math.ceil(th / thMax) : 1;
+                        var ox = pa[0] * rCiz, oy = pa[1] * rCiz, oz = pa[2] * rCiz;
+                        for (var q = 1; q <= n; q++) {
+                            var x, y, z;
+                            if (n === 1) { x = pb[0]; y = pb[1]; z = pb[2]; }
+                            else {   // büyük çember (slerp)
+                                var ka = Math.sin((1 - q / n) * th) / sn, kb = Math.sin(q / n * th) / sn;
+                                x = ka * pa[0] + kb * pb[0]; y = ka * pa[1] + kb * pb[1]; z = ka * pa[2] + kb * pb[2];
+                            }
+                            positions.push(ox, oy, oz, x * rCiz, y * rCiz, z * rCiz);
+                            ox = x * rCiz; oy = y * rCiz; oz = z * rCiz;
+                        }
                     }
                 }
                 var g = new THREE.BufferGeometry();
@@ -743,20 +970,29 @@
                 var m = new THREE.LineBasicMaterial({
                     color: color, transparent: true, opacity: opacity, depthWrite: false
                 });
-                group.add(new THREE.LineSegments(g, m));
+                var ls = new THREE.LineSegments(g, m);
+                group.add(ls);
+                return ls;
             };
             // ÖH D21 / P12aB4-20: bu iki çağrı srgb() dönüşümünü ATLIYORDU;
             // çıkış sRGB kodlandığı için ham hex lineer sayılıp ekranda
             // açılıyordu (0x8fd6ff -> ~#c5ecff, 0xbfe6ff -> ~#e0f4ff), koyu
             // okyanus üstünde kıyı/sınır ayrımı zayıflıyordu.
-            mkLines(layers.coastline, srgb(0x8fd6ff), 0.34);
+            var kiyi = mkLines(layers.coastline, srgb(0x8fd6ff), 0.34);
+            // V307/FS-HARİTA-KÜRE: yedek kıyı çizgisi de paket bindirmesinin
+            // çizildiği pikselde basılmaz (NE su maskesi, _neSuMaskele).
+            if (kiyi) paketMaskesiUygula(kiyi.material);
             mkLines(layers.borders, srgb(0xbfe6ff), 0.5);
             // ÖH harita-detay K2: bu bindirme artık 110m YEDEĞİDİR. Vektör
             // basamakları (launch_site_vectors.js) hazırsa gizli doğar; vektör
             // varlıkları yüklenemez ya da sonradan bozulursa yeniden görünür.
             group.visible = !self._vectorsReady;
             self.bordersGroup = group;
+            self._bordersMinLiftM = (hMin > 0) ? hMin : null;
             self.scene.add(group);
+            if (hMin > 0) self.addFrameListener(function (f) {
+                group.scale.setScalar(kaldir(f.camAltitudeM, R_EARTH_M));
+            });
         }).catch(function () { /* sınır bindirmesi opsiyonel; sessiz geç */ });
     };
 
@@ -795,6 +1031,46 @@
         v.start();
     };
 
+    /* V307/FS-HARİTA-KÜRE — PAKET VARKEN NE SU ÇİZGİLERİ GİZLİ (R11).
+       Natural Earth 1:10m kıyı/göl/akarsu çizgileri yakın ölçekte gerçek
+       kıyıdan yüzlerce metre-kilometre sapar (faz 1 ölçümü); paket bindirmesi
+       aynı yerde OpenStreetMap su ve kıyısını çizer. Bu katmanların
+       malzemesi stencil sınavı alır: paket bindirmesinin çizildiği pikselde
+       (bit 1) basılmaz, dışında bugünkü gibi basılır. Böylece gizleme tam
+       olarak paket kapsamıyla (bindirme paket kutusuna kırpılır) ve
+       bindirmenin çizildiği ölçekle sınırlıdır. Ülke/il sınırları paket
+       tarafından çizilmediği için maskelenmez. Katman adları vektör
+       modülünün KATMAN_STILI anahtarlarıdır. */
+    var NE_SU_KATMANLARI = ['coastline', 'lakes', 'rivers'];
+    function paketMaskesiUygula(mat) {
+        var THREE = global.THREE;
+        if (!mat || (mat.userData && mat.userData.hrmaPaketMaskesi)) return;
+        mat.stencilWrite = true;            // r128: stencil sınavı yalnız bununla açılır
+        mat.stencilWriteMask = 0;           // yazmaz, yalnız sınar
+        mat.stencilFunc = THREE.NotEqualStencilFunc;
+        mat.stencilRef = STENCIL_PAKET;
+        mat.stencilFuncMask = STENCIL_PAKET;
+        mat.stencilFail = THREE.KeepStencilOp;
+        mat.stencilZFail = THREE.KeepStencilOp;
+        mat.stencilZPass = THREE.KeepStencilOp;
+        mat.userData = mat.userData || {};
+        mat.userData.hrmaPaketMaskesi = true;
+    }
+    LaunchSiteGlobe.prototype._neSuMaskele = function () {
+        var v = this._vectors;
+        if (!v || !v.seviyeler) return;
+        for (var ad in v.seviyeler) {
+            if (!Object.prototype.hasOwnProperty.call(v.seviyeler, ad)) continue;
+            var sv = v.seviyeler[ad];
+            if (!sv || !sv.hucreler || this._maskeliSeviyeler[ad]) continue;
+            for (var i = 0; i < sv.hucreler.length; i++) {
+                var h = sv.hucreler[i];
+                if (NE_SU_KATMANLARI.indexOf(h.katman) >= 0) paketMaskesiUygula(h.malzeme);
+            }
+            this._maskeliSeviyeler[ad] = true;
+        }
+    };
+
     // Vektör katmanının canlı durumu (etiket notu, kabul ölçümü, testler).
     // Modül hiç kurulmadıysa yalnız yedeğin durumu döner; sayı uydurulmaz.
     LaunchSiteGlobe.prototype.getVectorInfo = function () {
@@ -812,6 +1088,8 @@
          f.target          controls.target (THREE.Vector3)
          f.metersPerPixel  ekran merkezinde m/px (getScaleInfo ile aynı formül)
          f.zWeb            log2(Z_WEB_Z0_MPP / metersPerPixel)
+         f.zMercator       z_web + log2(cos φ), φ ekran merkezi odağının enlemi
+                           (gerçek Web Mercator düzeyi; V307/FS-HARİTA-KÜRE)
          f.camAltitudeM    kameranın küre yüzeyinden yüksekliği [m]
          f.size            {width, height} CSS piksel
          f.globeRadius     küre yarıçapı [sahne birimi]
@@ -831,9 +1109,53 @@
         };
     };
 
+    /* V307 / FS-HARİTA (9 Kas 2026) — EKRAN MERKEZİNİN ODAĞI (tek tanım).
+       ÖLÇÜLEN KÖK NEDEN ("yakınlaştırınca şehirler ve zemin yüklenmiyor";
+       kanıt ~/HRMA-calisma/2026-11-09/FS-HARITA/olcum/once*): sayfa
+       açılışta ve 'Tüm Dünya' düğmesinden sonra yörünge hedefini Dünya
+       MERKEZİNE koyar (viewGlobe). Tekerlekle yaklaşmak (OrbitControls
+       dolly) hedefi değiştirmez; kamera 19 km irtifaya inse de hedef
+       merkezde kalır. Eskiden iki şey hedefe bakıyordu:
+         (1) m/px hedefe UZAKLIKTAN hesaplanıyordu: 19,1 km irtifada
+             5.208 m/px (gerçek yüzey 15,6 m/px, 334 kat). z_web ~4,9'da
+             donuyor, etiket süzgeci (NE min_zoom), vektör basamağı ve
+             ölçek çubuğu ("521 km" @ 20 km) küresel düzeyde kalıyordu;
+         (2) karo yaması hedef merkezdeyse HİÇ çalışmıyordu
+             (`target.length() < 1e-3 -> return`): rıza açıkken de 0 istek.
+       ARTIK: hedef kürenin İÇİNDEYSE ekran merkezinin odağı, kameradan
+       hedefe giden görüş ışınının küre YÜZEYİNİ deldiği noktadır
+       (analitik ışın-küre kesişimi; kamera dışarıda olduğu için ışın
+       yüzeyi hedeften önce deler). Hedef yüzeyde ya da üstündeyse
+       (Sahaya yakınlaş, uçuş yolu) odak hedefin KENDİSİDİR: o kiplerde
+       sayı değişmez. İşlev süreklidir: hedef yüzeye yaklaştıkça kesişim
+       noktası hedefe yakınsar. Eşik yok; dönüş nesnesi yeniden kullanılır
+       (kare başına çöp yok). */
+    LaunchSiteGlobe.prototype._odak = function () {
+        var o = this._odakSonuc || (this._odakSonuc = { dist: 0, point: null, yuzey: false });
+        var cam = this.camera.position, tgt = this.controls.target;
+        var dT = cam.distanceTo(tgt);
+        o.dist = dT; o.point = tgt; o.yuzey = false;
+        // Kayan nokta payı: yüzeye konmuş hedef (|t| = R) "içeride" sayılmaz.
+        if (!(tgt.length() < GLOBE_R * (1 - 1e-9)) || !(dT > 0)) return o;
+        var dx = (tgt.x - cam.x) / dT, dy = (tgt.y - cam.y) / dT, dz = (tgt.z - cam.z) / dT;
+        var b = cam.x * dx + cam.y * dy + cam.z * dz;
+        var c = cam.x * cam.x + cam.y * cam.y + cam.z * cam.z - GLOBE_R * GLOBE_R;
+        var disk = b * b - c;
+        // Kamera kürenin içindeyse (c <= 0) ya da ışın küreyi kaçırıyorsa
+        // (olmaz: hedef içeride) eski tanım korunur, sayı uydurulmaz.
+        if (!(c > 0) || !(disk >= 0)) return o;
+        var t = -b - Math.sqrt(disk);
+        if (!(t > 0) || !(t <= dT)) return o;
+        var p = this._odakP || (this._odakP = new global.THREE.Vector3());
+        p.x = cam.x + dx * t; p.y = cam.y + dy * t; p.z = cam.z + dz * t;
+        o.dist = t; o.point = p; o.yuzey = true;
+        return o;
+    };
+
     // Ekran merkezindeki m/px — getScaleInfo ve kare kancasının TEK formülü.
+    // Derinlik ekran merkezinin ODAĞINA uzaklıktır (_odak, yukarıda).
     LaunchSiteGlobe.prototype._metersPerPixel = function () {
-        var dist = this.camera.position.distanceTo(this.controls.target);
+        var dist = LaunchSiteGlobe.prototype._odak.call(this).dist;
         var fov = deg2rad(this.camera.fov);
         var vh = this.container.clientHeight || 600;
         return (2 * dist * Math.tan(fov / 2)) / vh * M_PER_UNIT;
@@ -848,6 +1170,15 @@
         f.target = this.controls.target;
         f.metersPerPixel = mpp;
         f.zWeb = Math.log2(Z_WEB_Z0_MPP / mpp);
+        // V307/FS-HARİTA-KÜRE: ekran merkezinin GERÇEK Web Mercator düzeyi.
+        // z_web ekvator eşdeğeridir; Mercator karosu φ enleminde cos φ kadar
+        // küçülür, yani aynı ekran ölçeğinin Mercator düzeyi z_web + log2(cos φ)
+        // (φ: odak noktasının enlemi). Paket yer adı isteği karo sayısını bu
+        // düzeyle sınırlar. Odak yoksa null (istek yapılmaz).
+        var odp = LaunchSiteGlobe.prototype._odak.call(this).point, odr = odp ? odp.length() : 0;
+        f.zMercator = (odr > 0)
+            ? f.zWeb + Math.log2(Math.max(Math.cos(Math.asin(clamp(odp.y / odr, -1, 1))), 1e-6))
+            : null;
         f.camAltitudeM = this.camera.position.length() * M_PER_UNIT - R_EARTH_M;
         f.size.width = this.container.clientWidth || 800;
         f.size.height = this.container.clientHeight || 600;
@@ -887,7 +1218,11 @@
     };
     LaunchSiteGlobe.prototype._updateScalables = function () {
         if (!this._scalables) return;
-        var d = this.camera.position.distanceTo(this.controls.target);
+        // V307/FS-HARİTA: derinlik ekran merkezinin odağıdır (_odak). Hedef
+        // Dünya merkezindeyken tekerlekle yaklaşınca işaretçi eskiden merkez
+        // derinliğine (~100 birim) göre büyütülüyordu: 20 km irtifada
+        // yüzeydeki iğne ~330 kat büyük çiziliyordu.
+        var d = LaunchSiteGlobe.prototype._odak.call(this).dist;
         for (var i = 0; i < this._scalables.length; i++) {
             var s = this._scalables[i];
             if (s.obj.parent) s.obj.scale.setScalar(Math.max(d, 1e-3) * s.k);
@@ -1033,7 +1368,12 @@
         // bağlamdır (kıyı/yarımada tanınsın), çerçevelenecek bir yay yoktur.
         // 'Rakımı abart' anahtarı (varsayılan kapalı) hâlâ ayrı bir seçenektir;
         // bu taban onun yerini almaz. Üst sınır uzaya çıkan apojeleri sığdırır.
-        var floor = (this._flight ? GLOBE_R * 0.03 : GLOBE_R * 0.1);
+        // V307/FS-HARİTA: uçuş VARKEN taban artık kameranın yakın bakış
+        // sınırıdır (CTRL_MIN_TARGET, ~21 m); çerçeve yolun kendi 3B sınır
+        // yarıçapından gelir (yukarıdaki dist, 2,2 kat pay). Eski 3 birimlik
+        // (191 km) taban bu formülü bağlıyordu: km ölçekli bir yol ekranın
+        // birkaç pikseline sığıyordu.
+        var floor = (this._flight ? CTRL_MIN_TARGET : GLOBE_R * 0.1);   // uçuşta ~21 m
         dist = clamp(dist, floor, GLOBE_R * 2.5);
         var tilt = deg2rad(46);   // oblik bakış: bölge + hafif eğrilik
         var camDir = normal.clone().multiplyScalar(Math.cos(tilt))
@@ -1178,16 +1518,45 @@
         this.viewSite();
     };
 
+    /* V307/FS-İZLEME — YER İZİNİN YÜKSEKLİĞİ UÇUŞ ÖLÇEĞİNE BAĞLI.
+       ÖLÇÜLEN KUSUR (9 Kas, üç örnek motor): yer izi sabit 1,0015 R
+       yarıçapında, yani yüzeyden ~9,6 km YUKARIDA çiziliyordu. Apojesi
+       2,9-5,7 km olan bir sondaj roketinde "yüzeye izdüşüm" uçuşun ÜSTÜNDE
+       kalıyor, yakın kamerada yoldan kilometrelerce kopuk görünüyordu.
+       Artık yer izi saha rakımındaki yüzeyin (kalkış noktasının yarıçapı)
+       hemen üstündedir; pay yalnız derinlik çatışmasını önleyen bir GÖRÜNTÜ
+       payıdır: uçuş kapsamının (apoje ile çözüm sonu yatay mesafesinin
+       büyüğü) binde ikisi, en az 20 m, en çok eski 1,0015 R payı. Küre ağı
+       (96 dilim) gerçek kürenin içinde kalır (kirişler), karo yamaları da
+       taban yarıçapındadır; bu yüzden yüzeyin üstündeki pay her yerde
+       ağın üstündedir. Sayı (konum) değişmez; yalnız çizim yüksekliği. */
+    var YER_IZI_ORANI = 1.0015;            // eski sabit pay = üst sınır (~9,6 km)
+    var YER_IZI_PAY_ORANI = 0.002;         // uçuş kapsamına oranla görüntü payı
+    var YER_IZI_PAY_MIN_M = 20.0;          // en küçük görüntü payı [m]
+
+    // Yer izinin çizim yarıçapı [sahne birimi] — TEK TANIM (izleme ekranının
+    // düşey çizgisi de bunu okur: getTrackingContext.groundTrackRadius).
+    LaunchSiteGlobe.prototype._flightGroundRadius = function () {
+        var f = this._flight; if (!f) return GLOBE_R * YER_IZI_ORANI;
+        var kapsamM = Math.max((f.apogee || 0) - (f.h0 || 0), f.range || 0, 0);
+        var payM = clamp(YER_IZI_PAY_ORANI * kapsamM, YER_IZI_PAY_MIN_M,
+            (YER_IZI_ORANI - 1.0) * R_EARTH_M);
+        // Kalkış noktasıyla AYNI dönüşüm (rakım abartması saha rakımına da
+        // uygulanır, yol çizimi gibi); pay abartılmaz.
+        return GLOBE_R * (1.0 + this._exaggerate * (f.h0 || 0) / R_EARTH_M) + payM / M_PER_UNIT;
+    };
+
     LaunchSiteGlobe.prototype._buildFlightGeometry = function () {
         var THREE = global.THREE, f = this._flight;
         if (!f) return;
         var n = f.t.length;
         this._pathPoints = new Array(n);
         this._groundPoints = new Array(n);
+        var rYer = this._flightGroundRadius();
         for (var i = 0; i < n; i++) {
             var rr = GLOBE_R * (1.0 + this._exaggerate * f.alt[i] / R_EARTH_M);
             this._pathPoints[i] = latLonToVec3(f.lat[i], f.lon[i], rr);
-            this._groundPoints[i] = latLonToVec3(f.lat[i], f.lon[i], GLOBE_R * 1.0015);
+            this._groundPoints[i] = latLonToVec3(f.lat[i], f.lon[i], rYer);
         }
         // orta nokta (çerçeveleme için): saha ile apoje arası
         var ap = this._pathPoints[f.apogeeIdx];
@@ -1234,6 +1603,17 @@
             dashSize: GLOBE_R * 0.004, gapSize: GLOBE_R * 0.004 }));
         this._groundLine.computeLineDistances();
         this.flightGroup.add(this._groundLine);
+        // V307/FS-İZLEME — YER İZİNİN GEÇİLEN KISMI. Kesikli soluk çizgi
+        // yer izinin TAMAMIDIR (kalan yol dahil); üstüne kesiksiz parlak bir
+        // çizgi oynatım anına kadar olan kısmı doldurur. Kural yoldaki iz
+        // (_trailLine) ile aynıdır: aynı nokta dizisi (_groundPoints), aynı
+        // indis (_seekTime). Yeni nokta üretilmez, yalnız çizim aralığı değişir.
+        var g2b = new THREE.BufferGeometry().setFromPoints(this._groundPoints);
+        this._groundTrailLine = new THREE.Line(g2b, new THREE.LineBasicMaterial({
+            color: srgb(0x7fe9f5), transparent: true, opacity: 0.95, depthWrite: false }));
+        this._groundTrailLine.renderOrder = 2;
+        this._groundTrailLine.geometry.setDrawRange(0, 2);
+        this.flightGroup.add(this._groundTrailLine);
 
         // Olay işaretçileri (kalkış/yanma sonu/apoje/bitiş) — çözümden türetildi
         this._buildEventMarkers();
@@ -1315,6 +1695,16 @@
             add(bi, 0xffd166, 'burnout', this);          // yanma sonu
         }
         add(f.apogeeIdx, 0x00e5ff, 'apogee', this);      // apoje
+        // V307/FS-KÜÇÜK (kalem 1): paraşüt açılışı. Zaman sunucunun olay
+        // listesinden (launch_site.html sözleşmenin `deploy` olayını
+        // opts.deployTime'a verir; olay yoksa null → işaretçi yok). Konum,
+        // yanma sonu işaretçisiyle aynı kural: çizilen yolun o zamana
+        // kadarki son örneği (sayı ve irtifa olay listesinde sunucudan).
+        if (this.opts.deployTime != null) {
+            var dt = this.opts.deployTime, di = -1;
+            for (var k = 0; k < f.t.length; k++) { if (f.t[k] <= dt) di = k; }
+            add(di, 0xff7eb6, 'deploy', this);           // paraşüt açılışı
+        }
         // Bitiş işaretçisi YALNIZ apojeden anlamlı biçimde farklıysa ve
         // çözücünün DURDUĞU nedene göre etiketlenir (dürüstlük): 6-DOF çözücü
         // apojede sonlanır -> ayrı "yer" işaretçisi EKLENMEZ; yalnız yere iniş
@@ -1349,6 +1739,7 @@
         this._pathTangents = null;
         this._events = null; this._rocket = null; this._pathLine = null;
         this._trailLine = null; this._groundLine = null; this._pathMid = null;
+        this._groundTrailLine = null;   // V307/FS-İZLEME
         this._playing = false; this._playT = 0;
         // Ölçeklenebilir işaretçi listesinden uçuşa ait (artık sahnede olmayan)
         // ögeleri temizle; kalıcı saha iğnesi (parent hâlâ var) korunur.
@@ -1453,6 +1844,9 @@
         if (this._trailLine) {
             var drawn = Math.max(2, Math.floor(i + a) + 1);
             this._trailLine.geometry.setDrawRange(0, drawn);
+            // V307/FS-İZLEME: yer izinin geçilen kısmı aynı indise kadar.
+            if (this._groundTrailLine)
+                this._groundTrailLine.geometry.setDrawRange(0, drawn);
         }
         if (this._follow) {
             var normal = p.clone().normalize();
@@ -1494,6 +1888,32 @@
         });
     };
 
+    /* V307/FS-İZLEME — GÖREV İZLEME EKRANINA TEK DIŞA AÇMA.
+       launch_site_tracking.js sahneye kendi nesnesini (roketten yere düşey
+       çizgi) ekler, izleme kiplerinde kamerayı yönetir ve oynatım anını
+       okur. Gereken iç öğeler TEK bir yöntemle, erişimci olarak verilir;
+       izleme modülü küre içindeki adlara (_rocket, _flight, _flyCameraPos)
+       doğrudan uzanmaz. SAYI ÜRETMEZ: konum çözücü serisinden kurulan
+       çizimden (_flight, roketin çizilmiş konumu) okunur. Küre kurulamadıysa
+       (WebGL yok) dosya sonundaki genel koruma bu yöntemi de null döndürür. */
+    LaunchSiteGlobe.prototype.getTrackingContext = function () {
+        var self = this;
+        return {
+            THREE: global.THREE,
+            scene: this.scene,
+            camera: this.camera,
+            controls: this.controls,
+            globeRadius: GLOBE_R,
+            metersPerUnit: M_PER_UNIT,
+            groundTrackRadius: function () { return self._flightGroundRadius(); },
+            latLonToVec3: latLonToVec3,
+            flight: function () { return self._flight; },
+            rocketPosition: function () { return self._rocket ? self._rocket.position : null; },
+            playTime: function () { return self._playT; },
+            flyTo: function (pos, target) { self._flyCameraPos(pos, target); }
+        };
+    };
+
     // ---- Ölçek / kamera-yükseklik göstergesi -------------------------------
     /* Ekrana GERÇEKTEN çizilmiş (mesh'i olan) karo sayısı — TEK TANIM.
        Negatif önbellek girdileri ve başarısız karolar sayılmaz.
@@ -1502,7 +1922,10 @@
     LaunchSiteGlobe.prototype._drawnTileCount = function () {
         var n = 0;
         if (this._tiles) {
-            this._tiles.forEach(function (e) { if (e && e.mesh) n += 1; });
+            // V307/FS-HARİTA-KÜRE: ZEMİN karoları. Paket bindirmesi zemin
+            // dokusu değildir (çözünürlük/künye notları zemin içindir);
+            // sayısı getTileInfo().pack'te ayrı yayımlanır.
+            this._tiles.forEach(function (e) { if (e && e.mesh && !e.paket) n += 1; });
         }
         return n;
     };
@@ -1551,12 +1974,15 @@
         // için "kaç karo var" artık Map boyutu DEĞİL, ekrana gerçekten
         // çizilmiş (mesh'i olan) karo sayısıdır. Başarısızlar ayrı sayılır;
         // sayı uydurulmaz.
-        var cizilen = this._drawnTileCount(), basarisiz = 0;
+        var cizilen = this._drawnTileCount(), basarisiz = 0, paketCizili = 0;
         if (this._tiles) {
             this._tiles.forEach(function (e) {
+                if (e && e.paket) { if (e.mesh) paketCizili += 1; return; }
                 if (e && !e.mesh && e.failed) basarisiz += 1;
             });
         }
+        var gl = this.renderer && this.renderer.getContext ? this.renderer.getContext() : null;
+        var ozellik = (gl && gl.getContextAttributes) ? gl.getContextAttributes() : null;
         // Künye, ekran merkezinde ÇİZİLEN katmanınkidir (paketli ya da
         // GIBS); merkezde karo yoksa varsayılan (GIBS) katmanın anahtarı.
         var katman = (cizilen > 0 && this._merkezDoku) ? this._merkezDoku.layer : TILE_LAYER;
@@ -1570,7 +1996,20 @@
             count: cizilen,
             // Şu anki karo kümesinde düşen karo sayısı (canlı ölçüm; ekrandaki
             // çevrimdışı notu buna bağlıdır, yapışkan bayrağa değil).
-            failedCount: basarisiz
+            failedCount: basarisiz,
+            // V307/FS-HARİTA-KÜRE: indirilen paket bindirmesi. active = bu
+            // turda çiziliyor VE en az bir karosu ekranda; künye anahtarı
+            // yalnız o zaman basılır (paket kapsamı dışında atıf yok).
+            pack: {
+                active: !!(this._paketEtkin && paketCizili > 0),
+                count: paketCizili,
+                z: this._paketZ,
+                layer: TILE_LAYER_PACK,
+                attributionKey: TILE_ATTRIBUTION_KEY[TILE_LAYER_PACK] || null
+            },
+            // R7 düzeninin dayandığı stencil arabelleği bağlamda var mı
+            // (ölçüm/teşhis; yoksa en-ince-kazanır kuralı uygulanamaz).
+            stencil: !!(ozellik && ozellik.stencil)
         };
     };
 
@@ -1603,18 +2042,28 @@
         var info = this.getScaleInfo();
         if (!info) return;
         // Uzaktaysak yeni karo yükleme; mevcutlar LRU ile budanır (aşağıda).
-        if (!(info.camAltitudeM < TILE_ACTIVE_ALT_M)) { this._pruneTiles(); return; }
+        if (!(info.camAltitudeM < TILE_ACTIVE_ALT_M)) {
+            this._detayNotu(false);
+            this._paketKapat();
+            this._pruneTiles();
+            return;
+        }
         var mpx = info.metersPerPixel;
         if (!(mpx > 0)) return;
 
         // z seçimi: ekvator m/px @ z0 = TILE_Z0_MPP; z = log2(z0/mpx).
         var z = Math.round(Math.log2(TILE_Z0_MPP / mpx));
+        var zHam = z;                      // kırpılmamış: ayrıntı katmanı için
         z = clamp(z, TILE_MIN_ZOOM, TILE_MAX_ZOOM);
 
-        // Kameranın baktığı yüzey noktası = controls.target yönü (yerel görünümde
-        // yüzeye çapalı). Merkeze çok yakınsa (global görünüm) atla.
-        if (this.controls.target.length() < 1e-3) return;
-        var c = vec3ToLatLon(this.controls.target);
+        // Kameranın baktığı yüzey noktası = ekran merkezinin ODAĞI (_odak):
+        // hedef yüzeyde/üstündeyse hedefin kendisi, hedef Dünya merkezindeyse
+        // (açılış ve 'Tüm Dünya' kipi, tekerlekle yaklaşma) görüş ışınının
+        // yüzeyi deldiği nokta. V307/FS-HARİTA: eskiden hedef merkezdeyse
+        // burada DÖNÜLÜYORDU ve o kipte hiçbir karo istenmiyordu.
+        var od = this._odak();
+        if (!od.point || od.point.length() < 1e-3) { this._pruneTiles(); return; }
+        var c = vec3ToLatLon(od.point);
 
         // P5B4-30: geometri SUNUCUDAN. Yüklenmediyse bu turda karo
         // istenmez (fail-closed) ve bir sonraki tur için istenir.
@@ -1623,16 +2072,169 @@
         // K4 kaynak sırası: paketli katman (ağsız) her zaman, tavanına
         // kırpılmış z'de; GIBS yalnız z paketli tavanın üstündeyse. Paketli
         // tavan bilinmiyorsa (sunucu yayımlamadı) yalnız GIBS (eski yol).
+        // V307/FS-HARİTA: istenen z bluemarble tavanını aşıyorsa ve ayrıntı
+        // katmanı sunucudan okunduysa GIBS düzeyi o katmandan, kendi tavanına
+        // kırpılmış z'de istenir (bluemarble z7 + ayrıntı aynı anda değil).
         if (_paketliTavan !== null) this._patchKatmani(TILE_LAYER_PACKAGED, Math.min(z, _paketliTavan), c);
-        if (_paketliTavan === null || z > _paketliTavan) this._patchKatmani(TILE_LAYER, z, c);
+        var zDetay = (_detayTavan !== null && zHam > TILE_MAX_ZOOM)
+            ? Math.min(zHam, _detayTavan) : null;
+        if (zDetay !== null && tileLevel(zDetay)) this._patchKatmani(TILE_LAYER_DETAIL, zDetay, c);
+        else if (_paketliTavan === null || z > _paketliTavan) this._patchKatmani(TILE_LAYER, z, c);
+        // V307/FS-HARİTA-KÜRE: indirilen paket bindirmesi (zeminden bağımsız
+        // kendi tavanıyla, en çok z15; yalnız kurulu paket kapsamında).
+        this._paketKatmani(c, zHam, mpx);
         this._merkezDoku = this._merkezDokusu(c);
+        this._istenenZ = (zDetay !== null && tileLevel(zDetay)) ? zDetay : z;
+        // V307/FS-HARİTA: rıza kapalıyken ekran merkezinin GIBS karosu
+        // reddedildiyse (önbellekte yok, dış istek yapılmadı) kullanıcıya
+        // nedenini ve ayarın yerini söyleyen not. Koşul ölçümdür: merkezde
+        // gereken GIBS karosu negatif önbellekte (failed) durur.
+        // Not yalnız eksik doku GERÇEKTEN büyütülüyorken açılır: ekran
+        // merkezindeki en ince çizilen dokunun m/px'i ekranın
+        // TEXTURE_MAG_RATIO katından kaba (getScaleInfo büyütme ölçütüyle aynı;
+        // hiç karo yoksa taban doku, yani büyütülmüş sayılır).
+        var gerekenKatman = (this._istenenZ > TILE_MAX_ZOOM) ? TILE_LAYER_DETAIL : TILE_LAYER;
+        var gibsGerekli = _paketliTavan === null || this._istenenZ > _paketliTavan;
+        var mrk = this._merkezDoku;
+        var dokuMpp = mrk ? TILE_Z0_MPP / Math.pow(2, mrk.z) : Infinity;
+        this._detayNotu(gibsGerekli && !tileAgAcik() && dokuMpp > TEXTURE_MAG_RATIO * mpx
+                        && this._merkezKarosuDustu(gerekenKatman, this._istenenZ, c));
         this._pruneTiles();
+    };
+
+    // Ekran merkezini (c) kapsayan, verilen katman/z karosu düştü mü
+    // (negatif önbellekte, mesh'siz)? Geometri yoksa false (iddia yok).
+    LaunchSiteGlobe.prototype._merkezKarosuDustu = function (layer, z, c) {
+        var lv = tileLevel(z);
+        if (!lv) return false;
+        var tx = (((Math.floor((c.lon + 180.0) / lv.span)) % lv.mw) + lv.mw) % lv.mw;
+        var ty = Math.floor((90.0 - c.lat) / lv.span);
+        var e = this._tiles.get(layer + ':' + z + ':' + tx + ':' + ty);
+        return !!(e && e.failed && !e.mesh);
+    };
+
+    /* V307/FS-HARİTA — RIZA KAPALI NOTU (küre üstünde, alt orta).
+       ÖLÇÜLDÜ: rıza kapalıyken yakın zoomda ekranda yalnız sağ alt not
+       kutusunun içinde, kaydırılması gereken bir satır vardı; ayarın
+       kendisi aynı kutunun altında, çoğu pencerede görünür alanın dışında
+       kalıyordu. Not metni i18n sözlüğünden gelir (data-i18n, dil değişince
+       I18N.apply tazeler); I18N yoksa not hiç basılmaz (ham anahtar ya da
+       ikinci bir İngilizce kopya yok). Düğme rızayı AÇMAZ: sayfadaki mevcut
+       ağ anahtarını görünür alana getirip odaklar, kararı kullanıcı o
+       anahtarın gizlilik açıklamasıyla birlikte verir. Anahtar sayfada
+       yoksa düğme kurulmaz. */
+    var TILE_NETWORK_CONTROL_ID = 'ls-tile-network';
+    LaunchSiteGlobe.prototype._detayNotu = function (goster) {
+        var el = this._detayNotuEl;
+        if (!goster) { if (el) el.style.display = 'none'; return; }
+        var I = global.I18N, doc = global.document;
+        if (!el) {
+            if (!I || !I.applyTo || !doc || !doc.createElement || !this.container) return;
+            el = doc.createElement('div');
+            el.id = 'ls-tile-detail-off';
+            el.setAttribute('role', 'status');
+            var st = el.style;
+            st.position = 'absolute'; st.zIndex = '15'; st.left = '50%'; st.bottom = '14px';
+            st.transform = 'translateX(-50%)'; st.maxWidth = 'min(560px, 56%)';
+            st.display = 'flex'; st.alignItems = 'center'; st.gap = '10px';
+            st.padding = '8px 12px'; st.borderRadius = '8px'; st.fontSize = '12px';
+            st.lineHeight = '1.45'; st.cursor = 'default';
+            st.color = 'var(--hd-ink, #cfe8f2)'; st.background = 'rgba(6,14,26,0.86)';
+            st.border = '1px solid var(--hd-line, rgba(0,229,255,0.18))';
+            st.borderLeft = '3px solid var(--hd-orange, #ff8c33)';
+            var m = doc.createElement('span');
+            m.setAttribute('data-i18n', 'site.tileDetailOffHint');
+            el.appendChild(m);
+            var cb = doc.getElementById ? doc.getElementById(TILE_NETWORK_CONTROL_ID) : null;
+            if (cb) {
+                var b = doc.createElement('button');
+                b.type = 'button';
+                b.className = 'ls-iconbtn';
+                b.style.width = 'auto'; b.style.padding = '0 10px'; b.style.whiteSpace = 'nowrap';
+                b.setAttribute('data-i18n', 'site.tileDetailOffButton');
+                b.addEventListener('click', function () {
+                    var hedef = doc.getElementById(TILE_NETWORK_CONTROL_ID);
+                    if (!hedef) return;
+                    if (hedef.scrollIntoView) hedef.scrollIntoView({ block: 'center' });
+                    try { hedef.focus({ preventScroll: true }); } catch (e) { hedef.focus(); }
+                });
+                el.appendChild(b);
+            }
+            this.container.appendChild(el);
+            I.applyTo(el);
+            this._detayNotuEl = el;
+        }
+        el.style.display = 'flex';
+    };
+
+    /* V307/FS-HARİTA-KÜRE — PAKET BİNDİRMESİNİN AKIŞI (her yama turunda).
+       Kurulu paket imzası değiştiyse (indirildi/silindi) eski bindirme
+       karoları atılır ve URL sürümü tazelenir. Bindirme, odak çevresindeki
+       yama bir kurulu paket kutusuyla kesişiyorsa ve o kutunun kısa kenarı
+       ekran genişliğinden (ekran px × m/px) büyük ya da eşitse çizilir: paket
+       ekranı dolduramadığı uzak ölçekte kutunun kenarı dikdörtgen bir leke
+       gibi görünürdü; bu ölçek paket kutusunun kendi boyutundan gelir (100 km
+       yarıçaplı sahada ~139 m/px, Sinop'ta z9), sabit bir eşik değildir.
+       Düzey min(istenen z, paket tavanı); zemin tavanı (z11/z5) değişmez. */
+    LaunchSiteGlobe.prototype._paketKatmani = function (c, zHam, mpx) {
+        var depo = paketDeposuOku();
+        var imza = depo ? depo.imza : '';
+        if (imza !== this._paketImza) {
+            this._paketKarolariniSil();
+            this._paketImza = imza;
+            _katmanUrlSurumu[TILE_LAYER_PACK] = fnv32(String(global.HRMA_APP_VERSION || '') + '|' + imza);
+        }
+        this._paketKutular = depo ? depo.kutular : [];
+        var etkin = false, zP = null;
+        if (depo && depo.kutular.length && _paketTavan !== null && this._paketKaldir
+                && this._paketAdimDeg > 0) {
+            zP = Math.min(zHam, _paketTavan);
+            var lv = tileLevel(zP);
+            if (lv) {
+                var R = Math.min(TILE_PATCH_R, TILE_PATCH_R_MAX);
+                var cx = Math.floor((c.lon + 180.0) / lv.span);
+                var cy = Math.floor((90.0 - c.lat) / lv.span);
+                var yama = [-180.0 + (cx - R) * lv.span, 90.0 - (cy + R + 1) * lv.span,
+                            -180.0 + (cx + R + 1) * lv.span, 90.0 - (cy - R) * lv.span];
+                var ekranM = (this.container.clientWidth || 800) * mpx, uygun = [];
+                for (var i = 0; i < depo.kutular.length; i++) {
+                    var b = depo.kutular[i];
+                    if (!kutuKesisim(b, yama)) continue;
+                    var dogu = deg2rad(b[2] - b[0]) * R_EARTH_M * Math.cos(deg2rad((b[1] + b[3]) / 2));
+                    var kuzey = deg2rad(b[3] - b[1]) * R_EARTH_M;
+                    if (Math.min(dogu, kuzey) >= ekranM) uygun.push(b);
+                }
+                etkin = uygun.length > 0;
+                if (etkin) this._patchKatmani(TILE_LAYER_PACK, zP, c, uygun);
+            }
+        }
+        this._paketEtkin = etkin;
+        this._paketZ = etkin ? zP : null;
+        if (this._paketGroup) this._paketGroup.visible = etkin;
+    };
+
+    LaunchSiteGlobe.prototype._paketKapat = function () {
+        this._paketEtkin = false;
+        this._paketZ = null;
+        if (this._paketGroup) this._paketGroup.visible = false;
+    };
+
+    // Bütün paket bindirmesi karolarını (çizilmiş ya da düşmüş) at.
+    LaunchSiteGlobe.prototype._paketKarolariniSil = function () {
+        if (!this._tiles) return;
+        var sil = [];
+        this._tiles.forEach(function (e, k) { if (e && e.paket) sil.push(k); });
+        for (var i = 0; i < sil.length; i++) {
+            this._disposeTileEntry(this._tiles.get(sil[i]));
+            this._tiles.delete(sil[i]);
+        }
     };
 
     // Bir katmanın (layer) z düzeyinde merkez etrafı (2R+1)² karo bloğu:
     // eksikleri yükle, mevcutları LRU'da tazele, çizilmemiş karonun
-    // ebeveynini (yedek) tut.
-    LaunchSiteGlobe.prototype._patchKatmani = function (layer, z, c) {
+    // ebeveynini (yedek) tut. V307/FS-HARİTA-KÜRE: `kutular` verilirse
+    // (paket katmanı) yalnız bu kutulardan biriyle kesişen karo istenir.
+    LaunchSiteGlobe.prototype._patchKatmani = function (layer, z, c, kutular) {
         var lv = tileLevel(z);
         if (!lv) return;
         var span = lv.span, mw = lv.mw, mh = lv.mh;
@@ -1645,6 +2247,13 @@
             if (ty < 0 || ty >= mh) continue;             // kutup kırpma (singularity yok)
             for (var dx = -R; dx <= R; dx++) {
                 var tx = (((cx + dx) % mw) + mw) % mw;      // tarih çizgisi sarmalama
+                if (kutular) {
+                    var karo = [-180.0 + tx * span, 90.0 - (ty + 1) * span,
+                                -180.0 + (tx + 1) * span, 90.0 - ty * span], kesen = false;
+                    for (var ki = 0; ki < kutular.length && !kesen; ki++)
+                        kesen = !!kutuKesisim(karo, kutular[ki]);
+                    if (!kesen) continue;
+                }
                 var key = layer + ':' + z + ':' + tx + ':' + ty;
                 var entry = this._tiles.get(key);
                 if (entry && entry.failed) {
@@ -1682,19 +2291,35 @@
     // Ebeveyn yedeği: çizilmemiş (yükleniyor/başarısız) karonun çizilmiş en
     // yakın atasını LRU'da tazele (budanmasın, çizilmeye devam etsin). Yeni
     // istek ATILMAZ; ata yalnız zaten çizilmişse tutulur.
+    // V307/FS-HARİTA: ata önce AYNI katmanda, sonra daha kaba katmanlarda
+    // (bluemarble, paketli) aranır. Ayrıntı katmanı z > 7'de istendiği için
+    // kendi z <= 7 atası yoktur; yüklenirken altındaki bluemarble/paketli
+    // karo budanmasın diye. Bütün katmanlar aynı EPSG:4326 matris
+    // geometrisini paylaşır (288/2^z), (x/2, y/2) ilişkisi her birinde geçerli.
+    var KATMAN_SIRASI = [TILE_LAYER_DETAIL, TILE_LAYER, TILE_LAYER_PACKAGED];
     LaunchSiteGlobe.prototype._ebeveynTut = function (layer, z, tx, ty) {
         for (var pz = z - 1; pz >= TILE_PARENT_MIN_ZOOM; pz--) {
             tx = Math.floor(tx / 2); ty = Math.floor(ty / 2);
             var e = this._tiles.get(layer + ':' + pz + ':' + tx + ':' + ty);
             if (e && e.mesh) { this._touchTile(layer + ':' + pz + ':' + tx + ':' + ty); return; }
+            // Paket bindirmesinin atası yalnız kendi katmanındadır (zemin
+            // karosu bindirmenin yedeği değildir; zemin zaten çizilir).
+            if (layer === TILE_LAYER_PACK) continue;
+            for (var i = 0; i < KATMAN_SIRASI.length; i++) {
+                var L = KATMAN_SIRASI[i];
+                if (L === layer) continue;
+                var k = L + ':' + pz + ':' + tx + ':' + ty, e2 = this._tiles.get(k);
+                if (e2 && e2.mesh) { this._touchTile(k); return; }
+            }
         }
     };
 
     // Ekran merkezini (c) kapsayan, ÇİZİLMİŞ en ince karo: {layer, z} ya da
     // null. Not ve künye bunu söyler (en ince z önce; aynı z'de GIBS önce).
     LaunchSiteGlobe.prototype._merkezDokusu = function (c) {
-        var katmanlar = [TILE_LAYER, TILE_LAYER_PACKAGED];
-        for (var z = TILE_MAX_ZOOM; z >= TILE_PARENT_MIN_ZOOM; z--) {
+        var katmanlar = KATMAN_SIRASI;
+        var zUst = Math.max(TILE_MAX_ZOOM, _detayTavan !== null ? _detayTavan : 0);
+        for (var z = zUst; z >= TILE_PARENT_MIN_ZOOM; z--) {
             var lv = tileLevel(z);
             if (!lv) continue;
             var tx = (((Math.floor((c.lon + 180.0) / lv.span)) % lv.mw) + lv.mw) % lv.mw;
@@ -1713,7 +2338,8 @@
         var THREE = global.THREE, self = this;
         var key = layer + ':' + z + ':' + tx + ':' + ty;
         // Rezervasyon (aynı karo iki kez yüklenmesin); mesh doku gelince eklenir.
-        this._tiles.set(key, { mesh: null, t: performance.now(), loading: true });
+        var paket = (layer === TILE_LAYER_PACK);
+        this._tiles.set(key, { mesh: null, t: performance.now(), loading: true, paket: paket });
         var url = tileUrl(layer, z, tx, ty);
         new THREE.TextureLoader().load(url, function (tex) {
             if (self._disposed) { tex.dispose(); return; }
@@ -1722,11 +2348,11 @@
             tex.colorSpace = THREE.SRGBColorSpace || tex.colorSpace;
             tex.encoding = THREE.sRGBEncoding || tex.encoding;
             tex.anisotropy = Math.min(8, self.renderer.capabilities.getMaxAnisotropy());
-            var mesh = self._makeTileMesh(z, tx, ty, tex);
+            var mesh = self._makeTileMesh(z, tx, ty, tex, layer);
             // P5B4-30: geometri bilinmiyorsa yama kurulmadı — doku
             // serbest bırakılır, sahte kutu çizilmez (fail-closed).
             if (!mesh) { tex.dispose(); self._tiles.delete(key); return; }
-            self._tileGroup.add(mesh);
+            (paket ? self._paketGroup : self._tileGroup).add(mesh);
             entry.mesh = mesh; entry.loading = false; entry.t = performance.now();
         }, undefined, function () {
             // Offline / GIBS erişilemez / 503 → SAHTE doku YOK, mesh EKLENMEZ.
@@ -1740,12 +2366,15 @@
             // `failed` durumuyla kalır, üstel geri çekilme (backoff) süresi
             // dolmadan yeniden istenmez ve deneme sayısı TILE_FAIL_MAX'te
             // durur (o karo oturum boyunca bir daha istenmez).
-            self._tileAnyFail = true;
+            // V307/FS-HARİTA-KÜRE: paket bindirmesinin düşen karosu (kapsam
+            // dışı 404) 'uydu karosu indirilemedi' notunu AÇMAZ: o not ağ/
+            // uydu karoları içindir; paket karosu ağa çıkmaz.
+            if (!paket) self._tileAnyFail = true;
             if (self._disposed) { self._tiles.delete(key); return; }
             var prev = self._tiles.get(key);
             var tries = (prev && prev.fails ? prev.fails : 0) + 1;
             self._tiles.set(key, {
-                mesh: null, loading: false, failed: true, fails: tries,
+                mesh: null, loading: false, failed: true, fails: tries, paket: paket,
                 t: performance.now(),
                 retryAt: (tries >= TILE_FAIL_MAX)
                     ? Infinity
@@ -1757,7 +2386,11 @@
     // Karo -> küresel yama geometrisi. SphereGeometry UV'sine GÜVENİLMEZ; UV
     // doğrudan enlem/boylamdan türetilir → taban küre UV konvansiyonundan
     // bağımsız, iç tutarlı.
-    LaunchSiteGlobe.prototype._makeTileMesh = function (z, tx, ty, tex) {
+    // V307/FS-HARİTA-KÜRE: `layer` paket katmanıysa (pack_detail) yama,
+    // karonun kurulu paket kutularıyla kesişen parçalarına kırpılır (her
+    // parça kendi ızgarası; UV karonun tamamına göredir) ve saydam bindirme
+    // malzemesi alır. Kesişen parça yoksa yama KURULMAZ (null).
+    LaunchSiteGlobe.prototype._makeTileMesh = function (z, tx, ty, tex, layer) {
         var THREE = global.THREE;
         // P5B4-30: açıklık sunucudan; bilinmiyorsa yama KURULMAZ (bir
         // karo, geometrisi bilinmeden Dünya'nın hangi parçasını
@@ -1767,46 +2400,124 @@
         var lonW = -180.0 + tx * span;
         var latN = 90.0 - ty * span;
         var latS = latN - span;
-        var S = TILE_PATCH_SEG, row = S + 1;
-        var pos = [], uv = [], idx = [];
-        for (var iy = 0; iy <= S; iy++) {
-            var fy = iy / S;
-            var lat = latS + fy * span;                 // güneyden kuzeye
-            for (var ix = 0; ix <= S; ix++) {
-                var fx = ix / S;
-                var lon = lonW + fx * span;
-                var p = latLonToVec3(lat, lon, TILE_RADIUS);
-                pos.push(p.x, p.y, p.z);
-                // u = batı→doğu, v = güney→kuzey. THREE varsayılan flipY=true ile
-                // (taban dokuyla aynı): görüntünün üstü(kuzey)→v=1, altı(güney)→v=0.
-                uv.push(fx, fy);
+        var paket = (layer === TILE_LAYER_PACK);
+        // V307/FS-HARİTA: kaba karolar (z < TILE_MAX_ZOOM) z7 karosunun
+        // parça açısıyla (288/2^7/8 = 0,28125°) bölünür: S = 8·2^(7-z).
+        // Neden: yama kirişi kürenin altına R(1-cos(a/2)) kadar iner; 8
+        // parçalı z5 karoda a = 1,125° -> 307 m, z7 açısında 19 m. Karo
+        // artık taban küreyle DERİNLİK EĞİMİ (polygonOffsetFactor) yarışı
+        // yapmıyor (aşağıda); bu sarkma taban kürenin köşe noktalarında
+        // karonun içinden görünmesin diye sınırlanır.
+        var S = TILE_PATCH_SEG * Math.pow(2, Math.max(0, TILE_MAX_ZOOM - z));
+        var adim = span / S;
+        var parcalar = [[lonW, latS, lonW + span, latN]];
+        if (paket) {
+            // Bindirme kaldırması (çizgi kuralı) en küçük değerinin yarısı
+            // kadar sarkmaya izin verir (_init, _paketAdimDeg).
+            if (!(this._paketAdimDeg > 0)) return null;
+            adim = Math.min(adim, this._paketAdimDeg);
+            parcalar = [];
+            var kutular = this._paketKutular || [];
+            for (var k = 0; k < kutular.length; k++) {
+                var kes = kutuKesisim([lonW, latS, lonW + span, latN], kutular[k]);
+                if (kes) parcalar.push(kes);
             }
+            if (!parcalar.length) return null;
         }
-        for (var jy = 0; jy < S; jy++)
-            for (var jx = 0; jx < S; jx++) {
-                var a = jy * row + jx, b = a + 1, cc = a + row, d = cc + 1;
-                idx.push(a, cc, b, b, cc, d);
+        // V307/FS-HARİTA-KÜRE — R7 kök (1): köşeler karonun MERKEZİNE göre
+        // kurulur; merkez Mesh.position'dır. three nesne matrisini JS'te
+        // float64 çarpar, GPU'ya giden göreli köşe (en çok karo boyu) ve
+        // kamera-göreli öteleme float32'de metrenin çok altında hassastır.
+        // Eskiden köşe dünya koordinatındaydı (GLOBE_R = 100 birimde float32
+        // adımı ~0,49 m): ebeveyn ile çocuk derinlikte rastgele yarışıyordu.
+        var merkez = latLonToVec3(latS + span / 2, lonW + span / 2, TILE_RADIUS);
+        var pos = [], uv = [], idx = [];
+        for (var pi = 0; pi < parcalar.length; pi++) {
+            var w = parcalar[pi][0], s0 = parcalar[pi][1], e = parcalar[pi][2], n = parcalar[pi][3];
+            var nx = Math.max(1, Math.ceil((e - w) / adim - 1e-9));
+            var ny = Math.max(1, Math.ceil((n - s0) / adim - 1e-9));
+            var taban = pos.length / 3, row = nx + 1;
+            for (var iy = 0; iy <= ny; iy++) {
+                var lat = s0 + (n - s0) * iy / ny;            // güneyden kuzeye
+                for (var ix = 0; ix <= nx; ix++) {
+                    var lon = w + (e - w) * ix / nx;
+                    var p = latLonToVec3(lat, lon, TILE_RADIUS);
+                    pos.push(p.x - merkez.x, p.y - merkez.y, p.z - merkez.z);
+                    // u = batı→doğu, v = güney→kuzey. THREE varsayılan flipY=true ile
+                    // (taban dokuyla aynı): görüntünün üstü(kuzey)→v=1, altı(güney)→v=0.
+                    uv.push((lon - lonW) / span, (lat - latS) / span);
+                }
             }
+            // V307/FS-HARİTA — SARIM YÖNÜ (ölçülen kök neden). Eskiden üçgenler
+            // (a, cc, b) sırasıyla kuruluyordu: a güneybatı, cc kuzey, b doğu
+            // köşe. latLonToXYZ'de (doğu, kuzey, yukarı) sağ ellidir, yani
+            // kuzey x doğu = -yukarı: yüz normali İÇERİ bakıyordu ve dışarıdan
+            // bakan kamerada üçgenler saat yönünde görünüp ARKA YÜZ olarak
+            // atılıyordu (MeshPhongMaterial side = FrontSide). ÖLÇÜLDÜ
+            // (olcum/hata_ayikla, rıza açık, İstanbul 200 km): 64 karo
+            // 'çizilmiş' (mesh, 512x512 doku, görünür) ama bütün karo
+            // katmanları gizlendiğinde ekran pikseli ortalama 0,0 değişiyordu;
+            // rıza açık/kapalı ekran görüntüleri piksel piksel AYNIYDI. Karo
+            // sayacı mesh varlığını sayıyordu, pikseli değil. Artık (a, b, cc)
+            // ve (b, d, cc): doğu x kuzey = yukarı, normal dışarı, ön yüz.
+            for (var jy = 0; jy < ny; jy++)
+                for (var jx = 0; jx < nx; jx++) {
+                    var a = taban + jy * row + jx, b = a + 1, cc = a + row, d = cc + 1;
+                    idx.push(a, b, cc, b, d, cc);
+                }
+        }
         var geo = new THREE.BufferGeometry();
         geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
         geo.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
         geo.setIndex(idx);
-        geo.computeVertexNormals();
-        // Karo yaması taban küreyle ÇAKIŞIK (TILE_RADIUS = GLOBE_R). Ayrım
-        // geometrik kaydırmayla değil derinlik yanlılığıyla yapılır: karo
-        // parçaları taban küreden bir tık öne yazılır, sahte irtifa üretilmez.
-        var mat = new THREE.MeshPhongMaterial({
-            // ÖH D21 / P12aB4-20: specular DOKU değil DÜZ MALZEME RENGİDİR,
-            // dolayısıyla srgb() ondan da muaf değildir (ham hâlde ~#3a4450'ye
-            // açılıp parlaklığı kaldırıyordu). Doku (`map`) elbette çevrilmez.
-            map: tex, shininess: 4, specular: srgb(0x0a0e12),  // headlight ile tutarlı
-            polygonOffset: true,
-            polygonOffsetFactor: TILE_DEPTH_BIAS,
-            polygonOffsetUnits: TILE_DEPTH_BIAS });
+        var mat;
+        if (paket) {
+            // Saydam RGBA bindirme (Parça S sözleşmesi): ışıklandırılmaz
+            // (harita simgesidir, aydınlatılan bir yüzey değil), derinlik
+            // YAZMAZ (çizgiler ve işaretçiler zeminin derinliğiyle sınanır).
+            mat = new THREE.MeshBasicMaterial({ map: tex, transparent: true, depthWrite: false });
+        } else {
+            geo.computeVertexNormals();
+            // Karo yaması taban küreyle ÇAKIŞIK (TILE_RADIUS = GLOBE_R). Ayrım
+            // geometrik kaydırmayla değil derinlik yanlılığıyla yapılır: karo
+            // parçaları taban küreden bir tık öne yazılır, sahte irtifa üretilmez.
+            mat = new THREE.MeshPhongMaterial({
+                // ÖH D21 / P12aB4-20: specular DOKU değil DÜZ MALZEME RENGİDİR,
+                // dolayısıyla srgb() ondan da muaf değildir (ham hâlde ~#3a4450'ye
+                // açılıp parlaklığı kaldırıyordu). Doku (`map`) elbette çevrilmez.
+                map: tex, shininess: 4, specular: srgb(0x0a0e12),  // headlight ile tutarlı
+                // V307/FS-HARİTA — EĞİM YANLILIĞI KALDIRILDI. polygonOffsetFactor
+                // derinliği "piksel başına derinlik eğimi" kadar öne çeker; eğik
+                // bakışta bu bir pikselin yer izi kadardır (200 km irtifada ekran
+                // kenarında ~80 m). Natural Earth çizgileri yüzeyden yalnız
+                // max(2 m, 1e-4·irtifa) yukarıda (200 km'de 20 m) çizildiği için
+                // karolar görünür olunca çizgilerin ÜSTÜNE çıkıyordu. ÖLÇÜLDÜ
+                // (olcum/hata_ayikla_sonra): karolar açıkken kıyı/sınır çizgisi
+                // ekranda yoktu, karolar gizlenince geri geliyordu. Yalnız sabit
+                // birim yanlılığı (bir derinlik adımı) kalır: karo taban kürenin
+                // önüne geçer; ebeveyn/çocuk ayrımı artık aşağıdaki stencil'dedir.
+                polygonOffset: true,
+                polygonOffsetFactor: 0,
+                polygonOffsetUnits: TILE_DEPTH_BIAS });
+        }
+        // V307/FS-HARİTA-KÜRE — R7 kök (2): EN İNCE KAZANIR. Karo kendi
+        // bitinin yazılmadığı piksele çizilir ve biti yazar; çizim inceden
+        // kabaya olduğu için kaba karo (ebeveyn yedeği) yalnız ince karonun
+        // HENÜZ ÇİZMEDİĞİ yeri doldurur. Derinlik sınavı aynen geçerlidir
+        // (önündeki nesne karoyu yine örter, o pikselde bit yazılmaz).
+        var bit = paket ? STENCIL_PAKET : STENCIL_ZEMIN;
+        mat.stencilWrite = true;
+        mat.stencilWriteMask = bit;
+        mat.stencilFunc = THREE.NotEqualStencilFunc;
+        mat.stencilRef = bit;
+        mat.stencilFuncMask = bit;
+        mat.stencilFail = THREE.KeepStencilOp;
+        mat.stencilZFail = THREE.KeepStencilOp;
+        mat.stencilZPass = THREE.ReplaceStencilOp;
         var mesh = new THREE.Mesh(geo, mat);
-        // Taban küreden (varsayılan 0) sonra; ince z kaba z'den (ebeveyn
-        // yedeği) sonra çizilir: çakışık yüzeyde ince karo üstte kalır.
-        mesh.renderOrder = 1 + z;
+        mesh.position.copy(merkez);
+        // Çizim sırası inceden kabaya (yukarıdaki ZEMIN_RO_TABANI açıklaması).
+        mesh.renderOrder = paket ? PAKET_RO_TABANI - z / 1000 : ZEMIN_RO_TABANI - z;
         return mesh;
     };
 
@@ -1817,13 +2528,21 @@
     };
 
     // Cap aşımında en eski (Map ilk anahtar) karoları dispose et.
+    // V307/FS-HARİTA-KÜRE: zemin ve paket bindirmesi AYRI tavanla budanır
+    // (TILE_LRU_MAX / TILE_LRU_MAX_PAKET); sıra Map ekleme sırasıdır (en eski
+    // önce, _touchTile tazeler).
     LaunchSiteGlobe.prototype._pruneTiles = function () {
         if (!this._tiles) return;
-        while (this._tiles.size > TILE_LRU_MAX) {
-            var oldest = this._tiles.keys().next().value;
-            var e = this._tiles.get(oldest);
-            this._tiles.delete(oldest);
-            this._disposeTileEntry(e);
+        var zemin = [], paket = [];
+        this._tiles.forEach(function (e, k) { ((e && e.paket) ? paket : zemin).push(k); });
+        var fazla = [[zemin, TILE_LRU_MAX], [paket, TILE_LRU_MAX_PAKET]];
+        for (var f = 0; f < fazla.length; f++) {
+            var liste = fazla[f][0];
+            for (var i = 0; i < liste.length - fazla[f][1]; i++) {
+                var e = this._tiles.get(liste[i]);
+                this._tiles.delete(liste[i]);
+                this._disposeTileEntry(e);
+            }
         }
     };
 
@@ -1845,6 +2564,10 @@
         this._tiles.forEach(function (e) { self._disposeTileEntry(e); });
         this._tiles.clear();
         this._tileAnyFail = false;
+        // V307/FS-HARİTA: rıza notu da sökülür (dispose bu işlevi çağırır).
+        if (this._detayNotuEl && this._detayNotuEl.parentNode)
+            this._detayNotuEl.parentNode.removeChild(this._detayNotuEl);
+        this._detayNotuEl = null;
     };
 
     // ---- Ana döngü ---------------------------------------------------------

@@ -21,6 +21,7 @@
 \usepackage{longtable}
 \usepackage{float}
 \usepackage{amsmath}
+\usepackage{amssymb}
 \usepackage{chngcntr}
 \usepackage{hyperref}
 \usepackage{parskip}
@@ -54,7 +55,7 @@
 % ---- Header/footer ----
 \pagestyle{fancy}
 \fancyhf{}
-\fancyhead[L]{\small\color{hrmagray}HRMA 3.0.6}
+\fancyhead[L]{\small\color{hrmagray}HRMA 3.0.7}
 \fancyhead[R]{\small\color{hrmagray}User Guide}
 \fancyfoot[C]{\small\color{hrmagray}\thepage}
 \renewcommand{\headrulewidth}{0.4pt}
@@ -99,7 +100,7 @@
 {\Huge\bfseries\color{hrmadark}User Guide}\\[10pt]
 {\large\color{hrmagray}Getting started, worked examples and reference}\\[3cm]
 
-{\large Version 3.0.6 \quad|\quad November 2026}\\[6pt]
+{\large Version 3.0.7 \quad|\quad November 2026}\\[6pt]
 {\small\color{hrmagray}Developed by Berke Tezgöçen \quad•\quad Idea and testing: Ayberk Cem Aksoy}\\[1.5cm]
 
 \begin{notkutu}
@@ -197,7 +198,7 @@ The guide has two parts.
 Interface names & Labels, buttons and tabs are written \ui{in this typeface} exactly as on screen. \\
 Field identifier & The name used in the project file (\kod{.hrma}) and in server messages is written \kod{in this typeface} (example: \kod{chamber\_\allowbreak{}pressure}). Identifier to page: Appendix~\ref{sec:ekd}. \\
 Units & SI. Pressures are absolute and in bar unless stated otherwise. \\
-Numbers & The English text uses a decimal point (209.7~s). Example numbers were read from the screen of the version this guide describes (3.0.6). \\
+Numbers & The English text uses a decimal point (209.7~s). Example numbers were read from the screen of the version this guide describes (3.0.7). \\
 Procedures & Numbered steps; each step gives the action and the expected result. \\
 \bottomrule
 \end{tabular}
@@ -220,11 +221,15 @@ following accesses are started by the user:
   GIBS) and elevation and surface weather data (Open-Meteo). Both are off by
   default; when enabled, the request sends the coordinates of the viewed region
   to the provider.
+  \item Downloading a map pack on the Launch Site: only with the \ui{Confirm and
+  download} button of the explicit confirmation box, from HRMA's own GitHub
+  release. GitHub sees which pack is requested; where you look on the globe does
+  not leave the computer (Section~\ref{sec:harita-paket}).
 \end{enumerate}
 
 \subsection{Licence}\label{sec:lisans}
 
-HRMA 3.0.6 is distributed under the terms of the GNU General Public License,
+HRMA 3.0.7 is distributed under the terms of the GNU General Public License,
 version 3 or (at your option) any later version (\kod{GPL-3.0-or-later}). The
 licence text is the \kod{LICENSE} file at the root of the source repository;
 the same text is included in the application folder of the installation
@@ -244,8 +249,8 @@ components are in the package folder \kod{app/\allowbreak{}licenses/\allowbreak{
 \toprule
 \textbf{Platform} & \textbf{Package} & \textbf{Note} \\
 \midrule
-Windows 10/11 (64-bit) & \kod{HRMA-Setup-3.0.6.exe} & Per-user installation, no administrator rights needed. The package is unsigned; a SmartScreen warning may appear. \\
-macOS 11 or later, Apple Silicon & \kod{HRMA-Setup-3.0.6-macOS.dmg} & Does not run on Intel Macs. The package is unsigned; Gatekeeper asks for approval at first launch. \\
+Windows 10/11 (64-bit) & \kod{HRMA-Setup-3.0.7.exe} & Per-user installation, no administrator rights needed. The package is unsigned; a SmartScreen warning may appear. \\
+macOS 11 or later, Apple Silicon & \kod{HRMA-Setup-3.0.7-macOS.dmg} & Does not run on Intel Macs. The package is unsigned; Gatekeeper asks for approval at first launch. \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -257,7 +262,7 @@ plotting libraries) are inside the package; nothing else needs to be installed.
 
 \textbf{Windows}
 \begin{enumerate}[leftmargin=1.6em]
-  \item Run \kod{HRMA-Setup-3.0.6.exe}. Press \ui{Next} on the welcome page,
+  \item Run \kod{HRMA-Setup-3.0.7.exe}. Press \ui{Next} on the welcome page,
   \ui{Install} on the folder page and \ui{Finish} on the last page. If
   \ui{Launch HRMA now} is ticked on the last page, the application opens.
   \item The installation folder must be empty or contain a previous HRMA
@@ -269,7 +274,7 @@ plotting libraries) are inside the package; nothing else needs to be installed.
 
 \textbf{macOS}
 \begin{enumerate}[leftmargin=1.6em]
-  \item Open \kod{HRMA-Setup-3.0.6-macOS.dmg}.
+  \item Open \kod{HRMA-Setup-3.0.7-macOS.dmg}.
   \item Drag the \kod{HRMA} icon to the \kod{Applications} folder.
   \item At first launch right-click the application (or Control-click it),
   choose \ui{Open} and press \ui{Open} again in the dialog. If the dialog has
@@ -295,7 +300,7 @@ current example in a new version.
 
 \begin{table}[htbp]
 \centering\small
-\caption{Example projects shipped with the application (3.0.6)}\label{tab:ornekler}
+\caption{Example projects shipped with the application (3.0.7)}\label{tab:ornekler}
 \begin{tabular}{@{}>{\raggedright\arraybackslash}p{4.6cm}>{\raggedright\arraybackslash}p{6.6cm}>{\raggedright\arraybackslash}p{4.4cm}@{}}
 \toprule
 \textbf{Project name} & \textbf{Design} & \textbf{Main result on screen} \\
@@ -329,12 +334,71 @@ When a new version is found at startup, a window offers three options.
 \toprule
 \textbf{Option} & \textbf{Effect} \\
 \midrule
-\ui{Update now} & The installer is downloaded (with a percentage indicator), the application closes, installs and reopens. On macOS the installation takes a few minutes (release note: about 4~min); do not open the application manually during that time. \\
+\ui{Update now} & The installer is downloaded (with a percentage indicator), the application closes, installs and reopens. While the installation runs, the ``Updating HRMA'' window is open (below). \\
 \ui{Later} & The window closes; the application asks again at the next launch. \\
 \ui{Skip this version} & This version is not offered again. The decision is undone with \ui{Reset skipped version} in \ui{Settings}. \\
 \bottomrule
 \end{tabular}
 \end{table}
+
+\subsubsection*{The window during installation}
+
+When the download is complete, the application shows the message ``HRMA
+will close now'' and closes. The helper that runs the installation opens a
+small ``Updating HRMA --- please wait'' window before the application has
+closed (Figure~\ref{fig:guncelleme}). The window is a process separate from
+the application; it stays open while the installation replaces the
+application files. It shows:
+
+\begin{itemize}[leftmargin=1.4em]
+  \item the installed version and the version being installed (such as
+  ``3.0.6 → 3.0.7'');
+  \item the installation stages with status marks: $\checkmark$ done, $\bullet$ in progress,
+  $\circ$ pending, $\times$ error. macOS has six stages (Waiting for HRMA to close;
+  Opening the installer image; Copying the new version; Checking the copied
+  files; Putting the new version in place; Opening the new version),
+  Windows four (Waiting for HRMA to close; Installing the new version;
+  Checking the installation; Opening the new version);
+  \item on macOS, during the copy step, the amount copied and the total with
+  a ratio bar; both are values the installation script measures on disk, and
+  the bar is drawn only when both are available. The Windows installer does
+  not report progress, so no ratio is shown on Windows, only the step and the
+  time;
+  \item the time elapsed since the installation started;
+  \item the path of the log file that holds the details (macOS).
+\end{itemize}
+
+Closing the window does not stop the update. When the installation is
+complete the window shows ``Update complete'' and closes by itself within
+3~seconds while HRMA opens with the new version. If the installation cannot
+be completed, the window stays open and states the reason (for example
+``The installer image could not be opened.''), what to do and where the installer
+is; it also says whether the previous version is still in place or has been
+restored. If the installation helper closes without reporting a result, the
+window says so by name and describes a manual installation. If the
+installation takes more than 20~minutes, a line ``The update is taking
+longer than usual'' is added. The window uses the current interface
+language.
+
+On Windows the installation console window also stays open and writes the
+steps (\kod{[1/4]} … \kod{[4/4]}). If a corporate group policy blocks
+scripts, the status window does not open and the console remains the only
+indicator.
+
+\begin{notkutu}
+\small The installation is run by the helper of the \emph{installed}
+version. This window appears when moving from 3.0.7 to a later version. The
+move from 3.0.6 to 3.0.7 is run by the installed 3.0.6; this window does not
+appear then: the application closes and 3.0.7 opens by itself when the
+installation is complete.
+\end{notkutu}
+
+\ekran{img/v3_0_7/guncelleme_penceresi_en.png}{The ``Updating HRMA''
+window, macOS, copy step. The image is drawn by the product's own window
+renderer from the recorded state of a trial installation of the 3.0.6 →
+3.0.7 update, made on macOS with the real installation script and the real
+window: the trial package is a reduced package (179~MB); copying the full
+package takes longer.}{fig:guncelleme}
 
 % =====================================================================
 \section{Getting Started: the First 15 Minutes}\label{sec:ilk15}
@@ -758,9 +822,14 @@ Outer diameter / core / length & 75 / 32 / 360~mm & The length is the total leng
 
 The \ui{PERFORMANCE SUMMARY} shows ten cards: \ui{SEA LEVEL ISP} 125.3~s,
 \ui{VACUUM ISP} 141.5~s, \ui{AVERAGE THRUST} 1299~N, \ui{PEAK THRUST} 1498~N,
-\ui{PEAK CHAMBER PRESSURE} 40.0~bar, \ui{BURN TIME} 2.28~s, \ui{TOTAL IMPULSE}
-2957~N·s, \ui{C* EFFICIENCY} 95.0\,\%, \ui{THRUST COEFFICIENT} 1.41,
-\ui{PROPELLANT MASS} 2.41~kg.
+\ui{PEAK CHAMBER PRESSURE} 40.0~bar, \ui{BURN TIME (WEB BURNOUT)} 2.28~s,
+\ui{TOTAL IMPULSE} 2957~N·s, \ui{C* EFFICIENCY} 95.0\,\%, \ui{THRUST
+COEFFICIENT} 1.41, \ui{PROPELLANT MASS} 2.41~kg. The \ui{Basis of the delivered
+performance} note below the cards states the source of the efficiencies: the
+combustion efficiency 0.950, the nozzle efficiency 0.950 and the kinetic
+efficiency 0.970 come from the form; the two-phase loss cannot be calculated
+for this propellant class and is not included
+(Section~\ref{sec:kati-dayanak}).
 
 The Isp of KNDX is low because its flame temperature is low and its products
 have a high molar mass; $c^*$ scales approximately with
@@ -780,7 +849,7 @@ under the thrust-curve chart names the shape. The throat is given with two
 diameters: machined 18.40~mm and effective (with discharge coefficient)
 18.22~mm.
 
-\ekran{img/v3_0_6/kati_sonuc_ozet_en.png}{\ui{PERFORMANCE SUMMARY} of the solid example and the two-phase status band: the Isp carries no verified two-phase correction.}{fig:u2-ozet}
+\ekran{img/v3_0_7/kati_performans_dayanak_en.png}{\ui{PERFORMANCE SUMMARY} of the solid example, the two-phase status band and the \ui{Basis of the delivered performance} note: efficiencies from the form; the two-phase loss cannot be calculated for this propellant class and is not included.}{fig:u2-ozet}
 
 \ekran{img/v3_0_6/kati_itki_egrisi_en.png}{Thrust curve of the solid example: progressive-regressive shape and the regime-boundary note.}{fig:u2-itki}
 
@@ -1279,7 +1348,7 @@ Hybrid designer & \kod{/\allowbreak{}hybrid} & Liquid (or gaseous) oxidizer and 
 Solid designer & \kod{/\allowbreak{}solid} & Solid propellant motor. & \ref{sec:kati} \\
 Liquid designer & \kod{/\allowbreak{}liquid} & Bipropellant liquid engine. & \ref{sec:sivi} \\
 Analysis Dock and Analysis Center & inside the designer pages & Detailed analyses on the last calculation. & \ref{sec:guverte} \\
-Launch Site & \kod{/\allowbreak{}launch-site} & Site selection and the solved flight path. & \ref{sec:saha} \\
+Launch Site & \kod{/\allowbreak{}launch-site} & Site selection, the solved flight path and descent, mission tracking, map packs. & \ref{sec:saha} \\
 Formulas & \kod{/\allowbreak{}formulas} & Relations used by the solvers and their sources. & \ref{sec:formuller} \\
 \bottomrule
 \end{tabular}
@@ -1349,9 +1418,12 @@ its save state and the buttons.
 \end{table}
 
 Project names may contain Turkish letters; a rejected name states the
-offending character. 3.0.0 and 3.0.5 projects open in 3.0.6; the project file
-format has not changed. If the file was saved with another version, a load
-warning names both versions. 3.0.6 also writes the setup of the Flight
+offending character. 3.0.0, 3.0.5 and 3.0.6 projects open in 3.0.7; the
+project file format has not changed. If the file was saved with another
+version, a load warning names both versions. The liquid design ambient fields
+added in 3.0.7 are saved in the project file; an older liquid project without
+them opens with a sea-level design (the same as in 3.0.6). Since 3.0.6 the
+project file also carries the setup of the Flight
 Dynamics (6-DOF), Transient Analysis and Trajectory Analysis panels to the
 project file; in an older file
 without this setup the panels open with the page defaults and say so in their
@@ -1494,11 +1566,11 @@ Configuration} window: motor and injector design parameters.}{fig:hib-yap}
 \textbf{Ambient Pressure (US Standard Atmosphere 1976), $P_a$} & \texttt{single\_\allowbreak{}pressure} & bar & 0 -- 1.2 & 1.013250 \\*
 \multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Effect on the calculation:} Computed from altitude using the US Standard Atmosphere 1976 model (ISA). You can also type your launch site's measured barometric pressure directly -- the field then switches to site-specific mode until the altitude is changed again.} \\ \midrule
 \textbf{Initial Altitude} & \texttt{alt\_\allowbreak{}start} & m & 0 -- 50000 & 0 \\*
-\multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Effect on the calculation:} Start altitude of the altitude profile (m). The calculation runs at this altitude: its ISA 1976 ambient pressure is the nozzle back pressure, as in the single-altitude mode. Form range 0-50000 m. \emph{If blank:} Empty: 0 m.} \\ \midrule
+\multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Effect on the calculation:} Start altitude of the altitude profile (m). The motor is designed at this altitude: its ISA 1976 ambient pressure is the nozzle back pressure, as in the single-altitude mode. The Altitude Profile table shown after Calculate starts here. Form range 0-50000 m. \emph{If blank:} Empty: the request is not sent (no value is assumed).} \\ \midrule
 \textbf{Final Altitude} & \texttt{alt\_\allowbreak{}end} & m & 0 -- 50000 & 10000 \\*
-\multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Effect on the calculation:} End altitude of the altitude profile (m). Only the Preview Profile chart uses it (ISA 1976 ambient pressure from the start to the end altitude); the calculation does not read it. Form range 0-50000 m.} \\ \midrule
+\multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Effect on the calculation:} End altitude of the altitude profile (m). After Calculate, the Altitude Profile table evaluates the same nozzle (fixed geometry) from the start to this altitude: thrust and Isp at each point from the ISA 1976 ambient pressure. It does not change the motor design. Form range 0-50000 m; it must differ from the start altitude. \emph{If blank:} Empty: the request is not sent.} \\ \midrule
 \textbf{Number of Points} & \texttt{alt\_\allowbreak{}points} &  & 3 -- 100 & 10 \\*
-\multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Effect on the calculation:} Number of points of the Preview Profile curve between the start and end altitude. The calculation does not read it. Form range 3-100.} \\ \midrule
+\multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Effect on the calculation:} Number of evenly spaced points of the Altitude Profile table (and of the Preview Profile curve) from the start to the end altitude. Form range 3-100, whole number. \emph{If blank:} Empty: the request is not sent.} \\ \midrule
 \end{longtable}}
 
 {\small
@@ -1548,7 +1620,9 @@ Configuration} window: motor and injector design parameters.}{fig:hib-yap}
 \textbf{L* Value, $L^*$} & \texttt{l\_\allowbreak{}star} & m & \ensuremath{\ge}\,0.1 & (blank) \\*
 \multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Effect on the calculation:} Characteristic length L* = V\_c / A\_t, in m. The chamber volume is V\_c = L*\ensuremath{\cdot}A\_t, so it sets the chamber length (and with it the chamber and case mass) unless you give a chamber length override. Zero or a negative value is rejected by name. \emph{If blank:} Empty: 1.0 m is used and declared in the results as a default (HRMA placeholder, not a fuel-specific value).} \\ \midrule
 \textbf{Initial Port Diameter, $D_{p,0}$} & \texttt{initial\_\allowbreak{}port\_\allowbreak{}diameter} & mm & 0 -- 500 & 0 \\*
-\multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Effect on the calculation:} Starting fuel grain port diameter. Drives initial oxidizer mass flux, regression rate and the whole thrust-time curve. Leave 0 to size the port automatically from the design mass flux (350 kg/m2.s, or the chamber Gox you enter under finite combustion). \emph{If blank:} 0 = auto} \\ \midrule
+\multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Effect on the calculation:} Starting fuel grain port diameter. Drives initial oxidizer mass flux, regression rate and the whole thrust-time curve. \emph{If blank:} Leave 0 to size the port automatically from the design mass flux (the Mass Flux field below; empty or 0 there: 350 kg/m\textsuperscript{2}\ensuremath{\cdot}s, HRMA choice).} \\ \midrule
+\textbf{Mass Flux, $G$} & \texttt{mass\_\allowbreak{}flux\_\allowbreak{}chamber} & kg/\allowbreak{}m\textsuperscript{2}\ensuremath{\cdot}s & 0 -- 1000 & 0 \\*
+\multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Effect on the calculation:} Initial oxidizer mass flux in the fuel port, G\_ox = \ensuremath{\dot m}\_ox / A\_port, in kg/m\textsuperscript{2}\ensuremath{\cdot}s, used in every combustion type. When no initial port diameter is given it sizes the port: A\_port = \ensuremath{\dot m}\_ox / G\_ox (total over all ports); through the regression law ṙ = a\ensuremath{\cdot}G\_ox\textasciicircum{}n (the solver uses the oxidizer flux) it also sets the grain length. If you give an initial port diameter this field is not used and the flux is derived from the port. Above 600 kg/m\textsuperscript{2}\ensuremath{\cdot}s a port flooding warning is raised (HRMA threshold). Form range 0-1000. \emph{If blank:} Empty or 0: 350 kg/m\textsuperscript{2}\ensuremath{\cdot}s is used (HRMA choice, not a measured value) and the result reports the design flux.} \\ \midrule
 \textbf{Number of Ports empty = 1 port, $N_p$} & \texttt{port\_\allowbreak{}count} &  & \ensuremath{\ge}\,1 & (blank) \\*
 \multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Effect on the calculation:} Number of equivalent circular combustion ports in the fuel grain. It scales the burning area, the port flow area and the acoustic mode count, so it changes thrust, chamber pressure and the stability verdict. Above one port the solver states that port interaction, web thickness and burn-through are not modelled. \emph{If blank:} Leave empty for a single port.} \\ \midrule
 \textbf{Ae/At Ratio expansion ratio, 0=auto, $\varepsilon$} & \texttt{expansion\_\allowbreak{}ratio} &  & \ensuremath{\ge}\,0 & (blank) \\*
@@ -1564,9 +1638,7 @@ Configuration} window: motor and injector design parameters.}{fig:hib-yap}
 \textbf{Residual Web Thickness, $w_r$} & \texttt{residual\_\allowbreak{}web\_\allowbreak{}thickness} & mm & \ensuremath{\ge}\,0 & (blank) \\*
 \multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Effect on the calculation:} Fuel web kept between the end-of-burn port(s) and the grain outer surface. It adds 2 x this value to the grain outer diameter. \emph{If blank:} Empty means 0: zero nominal residual fuel, an idealised sizing default; thermal protection (liner/insulation) and regression uncertainty are not included, and the port is modelled as axially uniform, so local burn-through near the aft end is not captured.} \\ \midrule
 \textbf{Contraction Ratio Ac/At, $\varepsilon_c$} & \texttt{contraction\_\allowbreak{}ratio} &  & 0 -- 10 & (blank) \\*
-\multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Effect on the calculation:} Contraction ratio A\_c/A\_t (chamber cross-section over throat area). It sets the convergent cone length of the nozzle and, with the finite-area combustion type, the chamber Mach number and the injector-face to nozzle stagnation pressure ratio (isentropic area relation, Sutton and Biblarz Ch. 3). Below 2 a warning is raised. Form range 0-10; a value above 0 here clears and disables the mass flux. \emph{If blank:} A value above 1 is used as given; empty or 0 (any value up to 1): it is derived from the chamber geometry, (D\_ch/d\_t)\textsuperscript{2}.} \\ \midrule
-\textbf{Mass Flux, $G$} & \texttt{mass\_\allowbreak{}flux\_\allowbreak{}chamber} & kg/\allowbreak{}m\textsuperscript{2}\ensuremath{\cdot}s & 0 -- 1000 & 0 \\*
-\multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Effect on the calculation:} Initial oxidizer mass flux in the fuel port, G\_ox = \ensuremath{\dot m}\_ox / A\_port, in kg/m\textsuperscript{2}\ensuremath{\cdot}s. When no initial port diameter is given it sizes the port: A\_port = \ensuremath{\dot m}\_ox / G\_ox (total over all ports); through the regression law ṙ = a\ensuremath{\cdot}G\_ox\textasciicircum{}n (the solver uses the oxidizer flux) it also sets the grain length. If you give an initial port diameter this field is not used and the flux is derived from the port. Above 600 kg/m\textsuperscript{2}\ensuremath{\cdot}s a port flooding warning is raised (HRMA threshold). Form range 0-1000; a value above 0 here clears and disables the contraction ratio. \emph{If blank:} Empty or 0: 350 kg/m\textsuperscript{2}\ensuremath{\cdot}s is used (HRMA choice, not a measured value) and the result reports the design flux.} \\ \midrule
+\multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Effect on the calculation:} Contraction ratio A\_c/A\_t (chamber cross-section over throat area). It sets the convergent cone length of the nozzle in every combustion type and, with the finite-area combustion type, also the chamber Mach number and the injector-face to nozzle stagnation pressure ratio (isentropic area relation, Sutton and Biblarz Ch. 3). Below 2 a warning is raised. Form range 0-10. \emph{If blank:} A value above 1 is used as given; empty or 0 (any value up to 1): it is derived from the chamber geometry, (D\_ch/d\_t)\textsuperscript{2}.} \\ \midrule
 \end{longtable}}
 
 {\small
@@ -1771,6 +1843,26 @@ Configuration} window: motor and injector design parameters.}{fig:hib-yap}
 \end{longtable}}
 % <<OTO-SON:hibrit-girdiler>>
 
+\paragraph{Mass Flux and Contraction Ratio.} Both fields are shown and enter the
+calculation for every burn type: \ui{Mass Flux} is an input of the port sizing
+(next to \ui{Initial Port Diameter}), \ui{Contraction Ratio} sets the
+converging contour of the nozzle (next to the burn type). An empty \ui{Mass
+Flux} is not sent; the motor's design flux 350~kg/m\textsuperscript{2}$\cdot$s
+is used. For the finite type both fields may be left empty together; the ratio
+then comes from the geometry.
+
+\paragraph{Altitude Profile.} With the \ui{Altitude Profile} tab selected in
+\ui{FLIGHT ENVIRONMENT}, the motor is designed at the start altitude; after
+Calculate the \ui{Altitude Profile} table in the result section evaluates the
+same nozzle (fixed geometry) at equally spaced points from the start to the end
+altitude: altitude, ambient pressure, thrust, Isp at that altitude and a note
+column; the last row is vacuum. The values are built from the motor's own
+result with the same-nozzle relation ($F(h) = F_{des} + (p_{des} - p_a(h))A_e$);
+the design-altitude row equals the motor's thrust. On a row where flow
+separation is predicted, no thrust or Isp is written and the note gives the
+reason. If the start, end or number of points is empty, no request is sent and
+the empty field is named.
+
 \subsection{Outputs}
 
 \begin{longtable}{@{}>{\raggedright\arraybackslash}p{4.4cm}>{\raggedright\arraybackslash}p{1.3cm}>{\raggedright\arraybackslash}p{5.0cm}>{\raggedright\arraybackslash}p{4.9cm}@{}}
@@ -1785,7 +1877,8 @@ Configuration} window: motor and injector design parameters.}{fig:hib-yap}
 \ui{ISP (DESIGN POINT, AT DESIGN-ALTITUDE AMBIENT)} & s & Delivered specific impulse at the design point. & $c^*\,C_F/g_0$; $c^* = \eta_{c^*}\times$ equilibrium $c^*$ (Cantera). \\
 \ui{THRUST}, \ui{CHAMBER PRESSURE} & N, bar & Design point; inputs. & Form. \\
 \ui{MASS FLOW RATE} & kg/s & Total propellant flow. & $F/(I_{sp}\,g_0)$. \\
-\ui{STRUCTURAL MIN SF} & -- & Verdict of the structural chain and the minimum earned safety factor. & Wall check (Section~\ref{sec:hib-cidar}). \\
+\ui{STRUCTURAL MIN SF} & -- & Verdict of the structural chain and the minimum earned safety factor. The technical PDF carries the same card with the governing station; a station whose wall HRMA sized itself or whose thickness is set by the manufacturing minimum is a separate line under its own name and is not counted as ``verified''. & Wall check (Section~\ref{sec:hib-cidar}). \\
+\ui{Altitude Profile} table & m, bar, N, s & In profile mode, thrust and Isp of the same nozzle along the altitude, last row vacuum. & Fixed-geometry relation from the motor's design point; no numbers on a separated row. \\
 Throat / exit diameter & mm & Nozzle dimensions. & Throat: $\dot m\,c^*/(C_d\,P_c)$; exit: $\varepsilon$. \\
 Expansion ratio & -- & $A_e/A_t$. & Input or the $P_e = P_a$ solution. \\
 Chamber diameter, length, volume & mm, cm\textsuperscript{3} & Combustion chamber dimensions. & Fuel-grain sizing and L*. \\
@@ -2296,6 +2389,69 @@ diameter, nozzle material, erosion and design pressure.}{fig:kati-nozul}
 \end{longtable}}
 % <<OTO-SON:kati-girdiler>>
 
+\subsection{Basis of the delivered performance}\label{sec:kati-dayanak}
+
+The \ui{Basis of the delivered performance} note below the Performance
+Summary states, line by line, the efficiencies with which the published Isp,
+thrust and total impulse were built:
+
+\begin{itemize}[leftmargin=1.4em]
+  \item \textbf{Combustion efficiency} ($c^*$ efficiency): the value from the
+  form or the value you entered; both are stated as ``not verified''.
+  \item \textbf{Nozzle efficiency}: if the form carries a value it is used and
+  replaces the propellant-table value; the solver does not know which losses it
+  covers. If the form field is not sent, the propellant-table value is used
+  (composite 0.985, sugar 0.978, double-base 0.981; 15° conical nozzle
+  reference).
+  \item \textbf{Kinetic efficiency}: the value from the form.
+  \item \textbf{Two-phase loss} (nozzle loss of the condensed particles):
+  whether it is applied and, if so, the loss and its band.
+\end{itemize}
+
+\paragraph{Two-phase loss rule.} For an aluminized composite propellant
+(condensed-phase fraction 0--40\,\%, throat diameter at least 25.4~mm) the
+built-in estimate is a size-corrected engineering estimate anchored to NASA
+SP-8039. The estimate is applied only in a calculation in which no nozzle or
+kinetic efficiency is entered, together with the propellant table's nozzle
+efficiency. The solid page sends the nozzle and kinetic efficiency fields with
+every calculation, so the numbers on the page are the same as in 3.0.6: a
+lumped efficiency input already contains this loss and the loss is not counted
+twice. If you enter your own two-phase loss factor, that value applies and the
+built-in estimate is not applied. A propellant without a condensed phase
+(non-aluminized composite, double-base) has no such loss. For a propellant
+outside the range of the correlation (the KN-sugar family; the KNDX example)
+and for a throat smaller than 25.4~mm the loss cannot be calculated: the note
+states ``NOT included and cannot be calculated'', and a line is added to the
+warning list. That is not a zero loss; the real motor delivers less than the
+published values.
+
+For the solid example the note is in Figure~\ref{fig:u2-ozet}.
+
+\paragraph{Burn time.} The published time is named \ui{Burn Time (web
+burnout)}: the web burnout time with instantaneous ignition and simultaneous
+burnout. Test records usually give the action time (from the 5\,\% thrust
+threshold, AEDC-TR-74-83 definition); because the action time includes the
+ignition rise and the tail-off after burnout, it is usually a few percent
+longer. The two times are not converted into each other. The technical PDF
+carries the same name and definition.
+
+\paragraph{Test altitude.} If the \ui{Test Altitude} (or the ambient pressure)
+is not sea level, the thrust curve is solved at that ambient and the four
+ambient-dependent cards take the suffix \ui{at test ambient} (average thrust,
+peak thrust, total impulse, thrust coefficient). A \ui{Total Impulse at sea
+level} card is added beside them. If the nozzle runs with flow separation at
+sea level, the sea-level cards say \ui{(flow separated)} and a note is added
+below the cards. In a sea-level test the cards do not change.
+
+\paragraph{Safety limit.} The burn simulation stops if the chamber pressure
+exceeds 500~bar or the time exceeds 1000~s. The design is then not published;
+the request returns with a named rejection (``The burn simulation stopped on a
+safety limit, not on propellant burnout'') and no result with zero burn time
+and zero Isp is shown. In a Monte Carlo uncertainty run, samples that stop on
+the limit count as failures, do not enter the statistics and are reported on a
+separate line; the peak-pressure statistics cover only the samples that burned
+out.
+
 \subsection{Outputs}
 
 \begin{longtable}{@{}>{\raggedright\arraybackslash}p{4.4cm}>{\raggedright\arraybackslash}p{1.3cm}>{\raggedright\arraybackslash}p{5.0cm}>{\raggedright\arraybackslash}p{4.9cm}@{}}
@@ -2310,7 +2466,7 @@ diameter, nozzle material, erosion and design pressure.}{fig:kati-nozul}
 \ui{SEA LEVEL ISP}, \ui{VACUUM ISP} & s & Delivered specific impulse. The sea-level Isp is the same nozzle at 101.325~kPa; if a test altitude is given, the Isp in that ambient is shown on a separate card (\ui{Isp at test ambient}, with altitude and pressure). & Internal-ballistics solution and the efficiency chain (\ui{5. EFFICIENCY AND EMPIRICAL COEFFICIENTS}). \\
 \ui{AVERAGE THRUST}, \ui{PEAK THRUST} & N & Average = total impulse / burn time. & Thrust curve. \\
 \ui{PEAK CHAMBER PRESSURE} & bar & Largest pressure of the curve. & Internal-ballistics equilibrium. \\
-\ui{BURN TIME} & s & From ignition to web burnout. & The full thrust curve. \\
+\ui{BURN TIME (WEB BURNOUT)} & s & From ignition to web burnout (instantaneous ignition, simultaneous burnout); not the action time of test records. & The full thrust curve (Section~\ref{sec:kati-dayanak}). \\
 \ui{TOTAL IMPULSE} & kN·s & Integral of the thrust curve. & \\
 \ui{C* EFFICIENCY}, \ui{THRUST COEFFICIENT}, \ui{PROPELLANT MASS} & \%, --, kg & & Efficiency inputs; nozzle; grain volume $\times\rho_p$. \\
 Throat diameter (machined, effective) & mm & Machined diameter and the effective sonic-area diameter with discharge coefficient. & Design pressure. \\
@@ -2478,8 +2634,14 @@ thickness (two-layer regenerative wall).}{fig:sivi-ipucu}
 \multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Effect on the calculation:} Engine cycle: how the propellants reach the chamber. Pressure-fed: the tank pressure feeds the chamber, there is no turbopump. Gas generator and tap-off: a turbine branch drives the pumps and is exhausted separately (open cycle). Staged combustion, full-flow staged combustion and expander: the turbine flow goes on into the main chamber (closed cycle). Changes the feed system, turbopump and power-balance solution. Options: Pressure-Fed; Gas Generator; Staged Combustion; Full-Flow Staged Combustion; Expander Cycle; Tap-Off Cycle.} \\ \midrule
 \textbf{Preburner Type} & \texttt{preburner\_\allowbreak{}type} &  &  & Fuel-Rich \\*
 \multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Effect on the calculation:} Staged combustion runs its preburner either fuel-rich (RS-25, RD-0120) or oxidizer-rich (RD-180, NK-33). This sets the turbine drive gas and the pump pressure ladder. Full-flow staged combustion uses both and needs no choice here. Options: Fuel-Rich; Oxidizer-Rich.} \\ \midrule
-\textbf{Target Engine Thrust (sea level), $F$} & \texttt{thrust} & N & 100 -- 10000000 & (blank) \\*
-\multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Effect on the calculation:} Engine thrust at the sea-level design point, in N: ambient pressure 1.01325 bar (ISA sea level). For an open cycle (gas generator, tap-off) it is the ENGINE thrust = main chamber + turbine exhaust; the propellant flow, the throat and the tanks are sized from it. A vacuum thrust cannot be entered as the target: the vacuum thrust is computed from this design point and published separately. Accepted range: 100 N - 10 MN. \emph{If blank:} This field is a required design point: left blank, the request is refused by name.} \\ \midrule
+\textbf{Design Ambient} & \texttt{design\_\allowbreak{}ambient\_\allowbreak{}mode} &  &  & Sea level (1.01325 bar) \\*
+\multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Effect on the calculation:} Ambient pressure at which the engine is designed. The thrust you enter is the engine thrust at this ambient pressure; the propellant flow and the throat are sized there, and the nozzle is checked for attached flow there (Summerfield criterion). Altitude: the standard-atmosphere (ISA) pressure of the altitude you enter. Ambient pressure: the pressure you enter. Vacuum: zero ambient pressure, for upper-stage and space engines. A nozzle that separates at sea level is a valid altitude or vacuum design; the results then state the sea-level condition (ground test) separately. Any choice other than sea level needs the nozzle expansion ratio. Left unchanged, the design ambient is sea level. Options: Sea level (1.01325 bar); Altitude (standard atmosphere); Ambient pressure; Vacuum.} \\ \midrule
+\textbf{Design Altitude} & \texttt{design\_\allowbreak{}ambient\_\allowbreak{}altitude\_\allowbreak{}m} & m & 0 -- 84852 & (blank) \\*
+\multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Effect on the calculation:} Design altitude above sea level, in m (geometric altitude). The design ambient pressure is the standard-atmosphere (ISA, US Standard Atmosphere 1976) pressure at this altitude, the same atmosphere the altitude performance table and the trajectory use. Accepted 0-84852. \emph{If blank:} It is read only when the design ambient is Altitude; left blank there, the request is refused by name.} \\ \midrule
+\textbf{Design Ambient Pressure} & \texttt{design\_\allowbreak{}ambient\_\allowbreak{}pressure\_\allowbreak{}bar} & bar & 0 -- 1.01325 & (blank) \\*
+\multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Effect on the calculation:} Design ambient pressure, in bar. The engine thrust you enter is the thrust at this ambient pressure. 0 is vacuum; 1.01325 is sea level. Accepted 0-1.01325. \emph{If blank:} It is read only when the design ambient is Ambient pressure; left blank there, the request is refused by name.} \\ \midrule
+\textbf{Target Engine Thrust (at the design ambient), $F$} & \texttt{thrust} & N & 100 -- 10000000 & (blank) \\*
+\multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Effect on the calculation:} Engine thrust at the design point, in N, at the design ambient selected in the Design Ambient field: sea level (1.01325 bar) by default, the pressure of the entered altitude, the entered ambient pressure, or vacuum. For an open cycle (gas generator, tap-off) it is the ENGINE thrust = main chamber + turbine exhaust; the propellant flow, the throat and the tanks are sized from it. To design from a vacuum thrust select the vacuum design ambient; the vacuum thrust of a sea-level or altitude design is computed from this design point and published separately. Accepted range: 100 N - 10 MN. \emph{If blank:} This field is a required design point: left blank, the request is refused by name.} \\ \midrule
 \textbf{Chamber Pressure Pc, $P_c$} & \texttt{chamber\_\allowbreak{}pressure} & bar & 10 -- 500 & (blank) \\*
 \multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Effect on the calculation:} Combustion chamber operating pressure. Higher pressure improves Isp but increases complexity. Pressure-fed: 10-50 bar, Gas Generator: 50-150 bar, Staged Combustion: 150-300 bar. Accepted range: 10-500 bar. \emph{If blank:} This field is a required design point: left blank, the request is refused by name.} \\ \midrule
 \textbf{Feed System Pressure, $P_{feed}$} & \texttt{feed\_\allowbreak{}pressure} & bar & 1 -- 1000 & 130 \\*
@@ -2592,7 +2754,7 @@ thickness (two-layer regenerative wall).}{fig:sivi-ipucu}
 \textbf{Cooling Type} & \texttt{cooling\_\allowbreak{}type} &  &  & Regenerative (Fuel Cooling) \\*
 \multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Effect on the calculation:} Method for managing high chamber temperatures (3000K+). Regenerative: fuel/coolant channels, best performance, complex. Ablative: sacrificial liner, simpler, limited reuse. Film: propellant film cooling. Radiation: space engines only. Options: Regenerative (Fuel Cooling); Ablative Liner; Film Cooling; Radiation Cooling; Dump Cooling.} \\ \midrule
 \textbf{Nozzle Expansion Ratio \ensuremath{\varepsilon}e, $\varepsilon$} & \texttt{nozzle\_\allowbreak{}expansion\_\allowbreak{}ratio} &  & 1.5 -- 300 & (blank) \\*
-\multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Effect on the calculation:} Exit area to throat area ratio (Ae/At). It sets the nozzle exit and with it the thrust coefficient: a larger ratio raises the vacuum specific impulse but over-expands the nozzle at sea level, and at a low chamber pressure the flow separates and the sea-level thrust the engine is sized for collapses (the results warn about separation). Accepted 1.5-300. \emph{If blank:} Leave it empty: the solver matches the exit pressure to sea-level ambient pressure (ambient-matched; the results name the source of the ratio).} \\ \midrule
+\multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Effect on the calculation:} Exit area to throat area ratio (Ae/At). It sets the nozzle exit and with it the thrust coefficient: a larger ratio raises the vacuum specific impulse but over-expands the nozzle at higher ambient pressure; when the exit pressure falls below 0.4 times the design ambient pressure the flow separates and the design is refused by name with the largest attached ratio. Accepted 1.5-300. \emph{If blank:} In a sea-level design the field may be left empty: the solver matches the exit pressure to sea-level ambient pressure (ambient-matched; the results name the source of the ratio). In an altitude, ambient-pressure or vacuum design the ratio is required: left blank there, the request is refused by name.} \\ \midrule
 \textbf{Nozzle Type} & \texttt{nozzle\_\allowbreak{}type} &  &  & Conical (15\ensuremath{^\circ} half-angle) \\*
 \multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Effect on the calculation:} Nozzle geometry type. Conical: simple, 15\ensuremath{^\circ} half-angle. Bell: optimized contour, shorter. Aerospike: altitude compensation, complex. Dual-bell: two expansion ratios. Extendable: deployable for space. Options: Conical (15\ensuremath{^\circ} half-angle); Bell Nozzle (80\% length); Bell Nozzle (60\% length); Aerospike; Dual-Bell.} \\ \midrule
 \textbf{Nozzle Throat Diameter, $D_t$} & \texttt{throat\_\allowbreak{}diameter} & mm & 1 -- 3000 & (blank) \\*
@@ -2696,6 +2858,79 @@ thickness (two-layer regenerative wall).}{fig:sivi-ipucu}
 \multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Effect on the calculation:} Burn time flown by the trajectory, in seconds: (initial mass - final mass) divided by the engine total mass flow from the engine calculation. \emph{If blank:} Not an input: it is written here when the trajectory is computed and is empty before that.} \\ \midrule
 \end{longtable}}
 % <<OTO-SON:sivi-girdiler>>
+
+\subsection{Design ambient}\label{sec:sivi-ortam}
+
+The liquid engine is designed at the ambient pressure selected in the
+\ui{Design Ambient} field (Table~\ref{tab:sivi-3}). \ui{Target Engine Thrust
+(at the design ambient)} is the engine thrust at that ambient; the propellant
+flow, the throat and everything sized from them (tanks, feed, cycle, mass) are
+built at that ambient. The attached-flow check of the nozzle is also made
+there: if the exit pressure falls below 0.4 times the ambient pressure, the
+flow separates (Summerfield criterion).
+
+\begin{table}[htbp]
+\centering\small
+\caption{Liquid page: design ambient modes}\label{tab:sivi-ortam}
+\begin{tabular}{@{}>{\raggedright\arraybackslash}p{4.0cm}>{\raggedright\arraybackslash}p{4.6cm}>{\raggedright\arraybackslash}p{7.0cm}@{}}
+\toprule
+\textbf{Mode} & \textbf{Ambient pressure} & \textbf{Expansion ratio $\varepsilon$} \\
+\midrule
+\ui{Sea level (1.01325 bar)} (default) & 1.01325~bar & May be left empty: the solver matches the nozzle to the sea-level ambient pressure. \\
+\ui{Altitude (standard atmosphere)} & ISA pressure of the entered \ui{Design Altitude} (0--84\,852~m) & Required. \\
+\ui{Ambient pressure} & The entered \ui{Design Ambient Pressure} (0--1.01325~bar) & Required. \\
+\ui{Vacuum} & 0 & Required. \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The altitude and pressure fields appear and are read only in their own mode
+(Figure~\ref{fig:sivi-ortam-form}); left empty in their own mode, the request
+is rejected with the field's name. The altitude entered is a geometric
+altitude (Section~\ref{sec:irtifa}). A sea-level design adds no field to the
+request and its results are the same as in 3.0.6.
+
+\ekran{img/v3_0_7/sivi_tasarim_ortami_form_en.png}{\ui{Design Ambient} in section
+\ui{3. FEED SYSTEM / ENGINE CYCLE}: with \ui{Altitude (standard atmosphere)}
+selected, the \ui{Design Altitude} field appears.}{fig:sivi-ortam-form}
+
+\paragraph{Nozzle that separates at sea level.} In a sea-level design, if the
+expansion ratio entered separates the flow at sea level the design is not
+computed; the rejection states the largest ratio that stays attached and the
+way to design the nozzle for altitude or vacuum. In the example liquid engine
+(50~bar), setting only \ui{Nozzle Expansion Ratio $\varepsilon_e$} to 61 gives an
+exit pressure of 0.057~bar, below the 0.405~bar separation pressure; the
+largest ratio that does not separate at sea level is 13.36
+(Figure~\ref{fig:sivi-ortam-ret}).
+
+\ekran{img/v3_0_7/sivi_ortam_ret_en.png}{Sea-level design with $\varepsilon$ 61:
+named rejection and the field marked.}{fig:sivi-ortam-ret}
+
+\paragraph{Vacuum design and ground test.} The same engine with the same
+$\varepsilon$ 61 designed in \ui{Vacuum} mode completes: the 25~kN entered is the
+vacuum thrust, the engine Isp is 322.4~s (design ambient = vacuum) and the main
+thrust chamber Isp 324.8~s (Figure~\ref{fig:sivi-vakum}). The note below the
+Performance Summary states two things: the ambient at which the design was
+sized and the state of this nozzle in a ground test at sea level. In this
+example the nozzle separates at sea level (exit pressure 0.0566~bar <
+0.4053~bar); attached-flow relations do not hold there, so no sea-level thrust
+or Isp is published. The note also gives the largest ratio that stays attached
+at sea level at this chamber pressure (13.36). If the nozzle stays attached at
+sea level, the sea-level thrust is the same nozzle's $F_{vac} - p_{0}A_e$ and
+is published.
+
+\ekran{img/v3_0_7/sivi_vakum_tasarimi_en.png}{Vacuum design (example liquid
+engine, $\varepsilon$ 61): the card names state the ambient; below them the
+design ambient and ground test note.}{fig:sivi-vakum}
+
+Every field that carries a sea-level name carries only the sea-level value. In
+a design away from sea level the cards, the altitude table and chart, the
+ambient row of the CEA comparison and the Isp summary in the project list state
+the design ambient by name; in the altitude table no thrust or Isp is published
+on a row where the flow separates (gap and note on the chart). The Launch Site
+and the flight panels lift the vehicle off the ground, so they use the same
+nozzle's sea-level thrust; if the nozzle separates at sea level, no flight
+vehicle is built and the reason is stated.
 
 \subsection{Outputs}
 
@@ -2873,7 +3108,13 @@ consecutive runs.
 \end{table}
 
 If a required field is empty the request is not sent and the screen says
-\ui{Required fields are empty: \ldots{} The request was not sent}. If the
+\ui{Required fields are empty: \ldots{} The request was not sent}. The fields of
+quantities that come from the motor (chamber pressure and temperature, chamber
+and throat diameter, flow, wall, MEOP and the like) are filled from the motor
+calculation; before the motor is calculated, or after the last calculation
+failed, these fields are empty and required, and a panel does not solve another
+motor with its own definition values. If you enter the values yourself the
+panel runs. If the
 material used by the solver is not in the panel's material list the request is
 not sent either: a safety verdict is not issued on a material other than the
 one the motor was computed with.
@@ -2899,20 +3140,20 @@ A panel result is read in this order:
 \textbf{Category} & \textbf{Panel} & \textbf{Outputs} & \textbf{Verdict and limits} \\
 \midrule\endhead
 \bottomrule\endlastfoot
-\ui{THERMAL} & Thermal Safety (Bartz heat transfer and wall temperatures) & Gas-side heat-transfer coefficient, throat and chamber heat flux, wall temperatures, material-limit chart. & The wall temperature is compared with the material's allowable temperature. The $\gamma$ input is accepted in the band 1.05--1.67; outside it is rejected, not clipped. If empty, the repository default 1.20 is used and the result states \kod{gamma\_\allowbreak{}source: repo\_\allowbreak{}default}. An ambient temperature outside 180--340~K is rejected. \\
+\ui{THERMAL} & Thermal Safety (Bartz heat transfer and wall temperatures) & Gas-side heat-transfer coefficient, throat and chamber heat flux, wall temperatures, material-limit chart. & The wall temperature is compared with the material's allowable temperature. The cooling type comes from the motor result (for example a motor with an ablative liner is evaluated with the ablative liner). On a protected wall (ablative or thermal protection) the cooling budget of the bare wall (required cooling area, class efficiency) is not published and the reason is stated. For a liquid engine the motor's own heat load (engine subsystems) is a separate line below the panel's total heat power; the two numbers have different definitions (motor: at the maximum wall temperature, the throat Bartz coefficient scaled to the chamber, convection only; panel: at the reference cooled-wall temperature, the local Bartz coefficient along the contour and gas radiation) and the difference is stated with its reason. The $\gamma$ input is accepted in the band 1.05--1.67; outside it is rejected, not clipped. If empty, the repository default 1.20 is used and the result states \kod{gamma\_\allowbreak{}source: repo\_\allowbreak{}default}. An ambient temperature outside 180--340~K is rejected. \\
 \ui{THERMAL} & Thermal Protection (ablative, heat sink, radiation cooled) & Three modes: ablative liner (Q*), heat-sink wall (1D), radiation-cooled extension. In ablative mode: recession rate, total recession, required liner thickness, Q* used, mean heat flux and total heat load. & A steady Q* model (\ui{SIMPLIFIED MODEL}). No thickness is published, and the reason is given, in two cases: with no net heating (recovery temperature below the ablation temperature; solid example) and when the recession rate exceeds the model's validity ceiling of 0.35~mm/s (\ui{MODEL NOT VALID}; 1.200~mm/s in the hybrid example). In the liquid example the panel reads the motor's gas-side heat transfer coefficient and recovery temperature pair; the recession rate is 0.160~mm/s and the required liner thickness of 7.18~mm is published. Zero recession is not zero thickness. \\
 \ui{THERMAL} & Regenerative Cooling (1D station march, Bartz and Dittus--Boelter), liquid only & Gas- and coolant-side temperatures, heat flux and pressure drop station by station. & The coolant-side film coefficient is taken from a literature band. The jacket pressure drop is one number: the drop solved by the station march also enters the feed budget; for a pressure-sensitive coolant (methane, LH\textsubscript{2}) the inlet pressure is found by fixed-point iteration. The panel runs with the motor's own march inputs; the jacket pressure drop equals the motor's (example 6.13~bar). In staged and expander cycles the jacket inlet is the cycle's fuel pump discharge. If the model cannot build a consistent circuit for the engine (F-1 class) the jacket carries the \ui{model limit} label; the cooling-dependent feed, cycle, engine thrust, engine Isp and mass numbers are withheld with their reason. With dump cooling no jacket numbers are published. \\
-\ui{STRUCTURAL} & Structural Safety (pressure vessel, buckling, fatigue) & Stress components and safety factors, buckling, fatigue, thermal stress. & If HRMA sized the wall the verdict is withheld. A wall entered by the user that misses the target receives a verdict (\ui{UNSAFE}); one that meets it does not make the response as a whole accepted, because the closure and nozzle stations are not verified in this panel (Section~\ref{sec:uyg-kati}). Without a declared external-pressure load case buckling is \ui{NOT\_EVALUATED}. The gas temperature is filled only if the motor published a solved wall-temperature pair; otherwise the thermal path does not run, strength is read at 293.15~K and the panel says so. The panel gives the motor result's own check of the same wall (solid: case; liquid: chamber or two-layer stack safety factor) next to its own hoop safety factor; any difference is named with its reason (load: chamber pressure $\leftrightarrow$ 1.5 × design pressure; for two layers, which layer carries the coolant pressure; strength temperature; wall thickness). Burn time is not used by this model, and this is declared. \\
+\ui{STRUCTURAL} & Structural Safety (pressure vessel, buckling, fatigue) & Stress components and safety factors, buckling, fatigue, thermal stress. & The load basis is stated at the head of the table: safety factors and the required wall are taken at 1.5 × chamber pressure (HRMA's design margin); the motor result applies the same target at the chamber pressure (MEOP). The required wall is given side by side with both definitions (this tab and the motor result), each with its own design-pressure basis. If the wall source is the wall the motor sized, ``HRMA sized it in the motor result'' is written. If HRMA sized the wall the verdict is withheld. A wall entered by the user that misses the target receives a verdict (\ui{UNSAFE}); one that meets it does not make the response as a whole accepted, because the closure and nozzle stations are not verified in this panel (Section~\ref{sec:uyg-kati}). Without a declared external-pressure load case buckling is \ui{NOT\_EVALUATED}. The gas temperature is filled only if the motor published a solved wall-temperature pair; otherwise the thermal path does not run, strength is read at 293.15~K and the panel says so. The panel gives the motor result's own check of the same wall (solid: case; liquid: chamber or two-layer stack safety factor) next to its own hoop safety factor; any difference is named with its reason (load: chamber pressure $\leftrightarrow$ 1.5 × design pressure; for two layers, which layer carries the coolant pressure; strength temperature; wall thickness). Burn time is not used by this model, and this is declared. \\
 \ui{STRUCTURAL} & Bolted Joint (Shigley) & Recommended tightening torque, preload and its $\pm$25\,\% scatter, proof safety factor, overload factor $n_L$, separation factor $n_0$, load sharing. & Proof and yield safety are evaluated at the upper end of the preload scatter and separation at the lower end (assumptions on screen: Shigley Ch.~8, NASA-STD-5020A). Member crushing under the bolt head is checked; it is flagged in the hybrid example (aluminium member). Bolt count, size and grade are the panel defaults (\ui{ASSUMED} badge, 8 × M8, 8.8): the result is an example joint until the motor's actual joint is entered. \\
 \ui{SAFETY} & Comprehensive Safety (risk assessment and pressure vessel) & Two separate verdicts: \ui{MOTOR DESIGN RISK} and \ui{FACILITY / SITING HAZARD}. Risk score on six axes (1--5: structural, pressure, thermal, explosive, toxic, fire), 5×5 risk matrix, pressure vessel summary, TNT equivalent and facility distances. & An axis that cannot be evaluated is shown as \ui{NOT MODELLED} and left out of the score. If the motor basket is partial and the evaluated axes come out low or medium, the motor verdict is \ui{NOT EVALUATED}, the number of evaluated axes is stated and the score is given as \ui{SCORE OF EVALUATED AXES}, a lower bound only (a missing evaluation is not a low risk); an axis that comes out high or critical still sets the verdict. Examples: in all three examples HRMA sized the wall, so the structural axis is not evaluated (for the hybrid the thermal axis too) and the motor design risk is \ui{NOT EVALUATED} (score of evaluated axes 2.00 / 5); the facility hazard is \ui{NOT EVALUATED} for the hybrid and the solid and \ui{HIGH} for the liquid. For liquid pairs the TNT equivalent is taken from 14 CFR Part 420, Appendix E, Table E-5 (10\,\% of the propellant mass for a test stand in the liquid example, 29.745~kg); a liquid pair not in the table uses 0.35, declared as an HRMA choice. In the hybrid and KNDX solid examples the explosive class is \ui{Not modelled (no sourced TNT equivalent)}. Without the required dimensions no safety verdict is produced. Regulatory compliance is not assessed. \\
-\ui{PERFORMANCE} & Advanced Performance (3D surface in hybrid and liquid; Mach contour and heat flux in solid) & Isp--$P_c$--O/F surface, Mach contour, heat flux. & No 3D performance surface in the solid: O/F is not a design variable. \\
-\ui{PRESSURE VESSEL} & Pressure Vessel (sizing, MAWP, burst pressure) & Status, design code (AIAA S-080, ASME VIII Div~1 or NASA-STD-5012C), required and used wall, MAWP, predicted burst pressure and margin, pressure ladder (MEOP or MDP, proof test = hydrostatic test, with NASA-STD-5012C also the qualification test, required burst), head thicknesses (ASME UG-32), temperature derating. & With the wall empty, the thickness meeting both the code minimum and a 1.2 margin against the required burst pressure is sized and stated in a warning. The burst pressure is the smaller of the Faupel thick-wall and the thin-wall plastic-limit relations; it is a model estimate, not a test. The material is the case material on the solid page and the chamber material on the hybrid page (\ui{COMPUTED}); if the result publishes no material, the panel default (Aluminum 6061-T6) is used and stated by name. On the liquid page the chamber is engine hardware: the code NASA-STD-5012C is selected; pressure, inner diameter, wall, temperature and material come from the engine's closeout layer (MDP); if the closeout is not published, the chamber values are shown with the reason. AIAA S-080 remains the code for propellant tanks and lines. \\
+\ui{PERFORMANCE} & Advanced Performance (3D surface in hybrid and liquid; Mach contour and heat flux in solid) & Isp--$P_c$--O/F surface, Mach contour, heat flux. & No 3D performance surface in the solid: O/F is not a design variable. The heat-flux reference planes (base and critical heat flux) are drawn only if the user enters values. \\
+\ui{PRESSURE VESSEL} & Pressure Vessel (sizing, MAWP, burst pressure) & Status, design code (AIAA S-080, ASME VIII Div~1 or NASA-STD-5012C), required and used wall, MAWP, predicted burst pressure and margin, pressure ladder (MEOP or MDP, proof test = hydrostatic test, with NASA-STD-5012C also the qualification test, required burst), head thicknesses (ASME UG-32), temperature derating. & The wall evaluated is the motor's wall and the heading says so (\ui{EVALUATED WALL --- the motor's wall}; examples: hybrid 5.47~mm, solid 2.00~mm, liquid outer shell 2.50~mm); the predicted burst pressure therefore comes from the same wall as on the \ui{SAFETY} tab. If the motor publishes no wall and the field is empty, a thickness meeting both the code minimum and a 1.2 margin against the required burst pressure is proposed; the heading then says \ui{PROPOSED WALL}. The burst pressure is the smaller of the Faupel thick-wall and the thin-wall plastic-limit relations; it is a model estimate, not a test. The material is the case material on the solid page and the chamber material on the hybrid page (\ui{COMPUTED}); if the result publishes no material, the panel default (Aluminum 6061-T6) is used and stated by name. On the liquid page the chamber is engine hardware: the code NASA-STD-5012C is selected; pressure, inner diameter, wall, temperature and material come from the engine's closeout layer (MDP); if the closeout is not published, the chamber values are shown with the reason. AIAA S-080 remains the code for propellant tanks and lines. \\
 \ui{FLOW} & Nozzle Flow (quasi-1D compressible) & Regime, pressure and Mach along the axis; the \ui{IDEAL} cards ($c^*$ efficiency and discharge coefficient 1: $C_F$, thrust, mass flow, $c^*$); effective $C_F$ and 1D thrust; the thrust, mass flow, $c^*$ and $C_F$ the motor delivers in a separate block. & With any of the six required fields empty the request is rejected. The effective $C_F$ is compared with the $C_F$ of the main result; the thrust cross-check is stated as well (Section~\ref{sec:uyg-hibrit}). \\
 \ui{VALIDATION} & User Data Validation (static-fire CSV) & Differences in total impulse, peak and average thrust, burn time; NRMSE. & Relative difference (prediction $-$ measurement)/measurement. The score is the larger of the impulse difference and NRMSE; if the server sends no band the card is not coloured. \\
-\ui{FEED SYSTEM} & Feed System (slosh, pressurant, water hammer) & Slosh frequency, pressurant mass, water-hammer peak pressure. & The fields are filled only from the motor's own result (they stay empty for a solid motor); the value used for an optional field left empty is declared under \kod{defaults\_\allowbreak{}applied}, and an empty required field rejects the request by name. The water-hammer map covers LOX, LH2, methane, MMH, UDMH, N\textsubscript{2}O\textsubscript{4} and N\textsubscript{2}O; no block is produced for H\textsubscript{2}O\textsubscript{2}. \\
+\ui{FEED SYSTEM} & Feed System (slosh, pressurant, water hammer) & Slosh frequency, pressurant mass, water-hammer peak pressure; on the \ui{Slosh} tab the slosh model per tank (Section~\ref{sec:calkanti}). & For a solid motor the panel shows \ui{There is no liquid propellant in a solid motor; slosh does not apply.} The fields are filled only from the motor's own result (they stay empty for a solid motor); the value used for an optional field left empty is declared under \kod{defaults\_\allowbreak{}applied}, and an empty required field rejects the request by name. The water-hammer map covers LOX, LH2, methane, MMH, UDMH, N\textsubscript{2}O\textsubscript{4} and N\textsubscript{2}O; no block is produced for H\textsubscript{2}O\textsubscript{2}. \\
 \ui{COMPARE} & Comparative Analysis & Saved configurations side by side, two designs overlaid. & Only relative changes above the threshold are marked. \\
 \ui{UNCERTAINTY} & Uncertainty Quantification (Monte Carlo) & Analysis level (the level name gives the sample count: \ui{Fast Screening (200 samples)}, \ui{Engineering (1000 samples)}, \ui{Extended (3000 samples)}) and seed; during the run a real progress counter (completed samples, measured time per sample, estimated time remaining) and \ui{Cancel Analysis}; run summary (sample count, failed samples, duration, sampler); sampled input distributions; for each output P50, the [P5, P95] band, the nominal value and $\sigma$; distribution plot and sensitivity tornado (Spearman rank correlation). & The band is only the spread produced by the sampled inputs: model-form uncertainty is not included and it is not a confidence interval for the real motor; the screen says so in the \ui{How to read the band} row. The nominal value is the number of the main result. If the form changes or the motor is recalculated during a run, the result is discarded and the reason is stated. An output insensitive to the sampled inputs gets no distribution: for the hybrid, thrust is a design target, and total impulse is not sampled at these levels and its nominal value is that of the main result. Correlations inside the noise floor are not ranked as effects. \\
-\ui{CORRELATION} & Experimental Correlation & Deviation of the model against the shipped static-fire database. & Checks the model, not the user's motor. \\
+\ui{CORRELATION} & Experimental Correlation & Deviation of the model against the shipped static-fire database. Solid rows are labelled with the propellant family (e.g. \ui{[KN-sugar]}, \ui{[AN/AP/Al/HTPB]}); records outside the model's scope are shown in a separate layer with their criterion. & Checks the model, not the user's motor. \\
 \end{longtable}
 
 \ekran{img/v3_0_6/hibrit_guverte_yapisal_en.png}{\ui{Structural Safety} panel of the hybrid example after the run: inputs, value-source badges and the verdict line. HRMA sized the wall, so the verdict is \ui{VERDICT WITHHELD}.}{fig:g-yapisal}
@@ -2923,7 +3164,7 @@ A panel result is read in this order:
 
 \ekran{img/v3_0_6/hibrit_guverte_basincli_kap_en.png}{Dock, \ui{PRESSURE VESSEL} tab.}{fig:g-kap}
 
-\ekran{img/v3_0_6/hibrit_guverte_besleme_en.png}{Dock, \ui{FEED SYSTEM} panel before the run: the fields of the \ui{Slosh} tab are filled from the motor's own result.}{fig:g-besleme}
+\ekran{img/v3_0_7/hibrit_guverte_besleme_en.png}{Dock, \ui{FEED SYSTEM} panel before the run: the fields of the \ui{Slosh} tab are filled from the motor's own result; the tank slosh model section starts below them.}{fig:g-besleme}
 
 \ekran{img/v3_0_6/hibrit_guverte_dogrulama_en.png}{Dock, \ui{VALIDATION} tab: static-fire CSV input.}{fig:g-dogrulama}
 
@@ -2954,24 +3195,24 @@ the case temperature solved by the motor is used.}{fig:g-kati-termal}
 \endfoot
 \bottomrule
 \endlastfoot
-\textbf{Chamber Pressure} & \texttt{ad\_\allowbreak{}f\_\allowbreak{}thermal\_\allowbreak{}chamber\_\allowbreak{}pressure} & bar &  & 40 \\*
+\textbf{Chamber Pressure} & \texttt{ad\_\allowbreak{}f\_\allowbreak{}thermal\_\allowbreak{}chamber\_\allowbreak{}pressure} & bar &  & (blank) \\*
 \multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Effect on the calculation:} Chamber pressure, bar. The thermal safety check uses it in the Bartz gas-side heat transfer (mass flux). Filled from the motor result after a calculation (when the result provides it), unless you edit it. \emph{If blank:} The request is not sent and the field is named.} \\ \midrule
-\textbf{Chamber Temperature} & \texttt{ad\_\allowbreak{}f\_\allowbreak{}thermal\_\allowbreak{}chamber\_\allowbreak{}temperature} & K &  & 3000 \\*
+\textbf{Chamber Temperature} & \texttt{ad\_\allowbreak{}f\_\allowbreak{}thermal\_\allowbreak{}chamber\_\allowbreak{}temperature} & K &  & (blank) \\*
 \multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Effect on the calculation:} Chamber (combustion) temperature, K. Sets the recovery temperature that drives the wall heat flux. Filled from the motor result after a calculation (when the result provides it), unless you edit it. \emph{If blank:} The request is not sent and the field is named.} \\ \midrule
-\textbf{Chamber Diameter} & \texttt{ad\_\allowbreak{}f\_\allowbreak{}thermal\_\allowbreak{}chamber\_\allowbreak{}diameter} & m &  & 0.1 \\*
+\textbf{Chamber Diameter} & \texttt{ad\_\allowbreak{}f\_\allowbreak{}thermal\_\allowbreak{}chamber\_\allowbreak{}diameter} & m &  & (blank) \\*
 \multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Effect on the calculation:} Chamber inner diameter, m. Sets the wetted area and mass flux of the thermal check. Filled from the motor result after a calculation (when the result provides it), unless you edit it. \emph{If blank:} The request is not sent and the field is named.} \\ \midrule
-\textbf{Chamber Length} & \texttt{ad\_\allowbreak{}f\_\allowbreak{}thermal\_\allowbreak{}chamber\_\allowbreak{}length} & m &  & 0.5 \\*
+\textbf{Chamber Length} & \texttt{ad\_\allowbreak{}f\_\allowbreak{}thermal\_\allowbreak{}chamber\_\allowbreak{}length} & m &  & (blank) \\*
 \multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Effect on the calculation:} Chamber length, m. Sets the heated (wetted) area of the thermal check. Filled from the motor result after a calculation (when the result provides it), unless you edit it. \emph{If blank:} The request is not sent and the field is named.} \\ \midrule
 \textbf{Burn Time} & \texttt{ad\_\allowbreak{}f\_\allowbreak{}thermal\_\allowbreak{}burn\_\allowbreak{}time} & s &  & (blank) \\*
 \multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Effect on the calculation:} Burn time, s (\textgreater{} 0). Sets the total heat energy, the heat-sink mass and the liner sizing of the thermal check; the steady bare-wall equilibrium temperature does not depend on it. Filled from the motor result after a calculation (solid: the solved burn; hybrid: the burn time input; liquid: Maximum Burn Duration on the liquid form), unless you edit it. \emph{If blank:} The request is not sent and this field is named; enter the burn time here, or set the motor's burn duration and recalculate (no duration is assumed).} \\ \midrule
-\textbf{Total Mass Flow} & \texttt{ad\_\allowbreak{}f\_\allowbreak{}thermal\_\allowbreak{}mdot\_\allowbreak{}total} & kg/s &  & 1 \\*
+\textbf{Total Mass Flow} & \texttt{ad\_\allowbreak{}f\_\allowbreak{}thermal\_\allowbreak{}mdot\_\allowbreak{}total} & kg/s &  & (blank) \\*
 \multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Effect on the calculation:} Total propellant mass flow, kg/s. Sets the gas mass flux in the Bartz correlation. Filled from the motor result after a calculation (when the result provides it), unless you edit it. \emph{If blank:} The request is not sent and the field is named.} \\ \midrule
-\textbf{Wall Thickness} & \texttt{ad\_\allowbreak{}f\_\allowbreak{}thermal\_\allowbreak{}wall\_\allowbreak{}thickness} & m &  & 0.005 \\*
+\textbf{Wall Thickness} & \texttt{ad\_\allowbreak{}f\_\allowbreak{}thermal\_\allowbreak{}wall\_\allowbreak{}thickness} & m &  & (blank) \\*
 \multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Effect on the calculation:} Thickness of the hot-gas wall, m: the wall the heat flux crosses. Sets the through-wall conduction and the heat-sink mass (changes the result). Filled from the motor result after a calculation, unless you edit it; on a two-layer regenerative liquid wall it is the liner thickness, not the liner + channel + closeout stack. Accepted: a positive value below the chamber radius. \emph{If blank:} The request is not sent and the field is named.} \\ \midrule
 \textbf{Wall Material} & \texttt{ad\_\allowbreak{}f\_\allowbreak{}thermal\_\allowbreak{}material} &  &  & Steel (generic) \\*
 \multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Effect on the calculation:} Material of the hot-gas wall. Supplies its conductivity, allowable temperature and melting point to the thermal check (changes the result and the limits shown). Filled from the motor result after a calculation, unless you edit it; on a two-layer regenerative liquid wall it is the liner material, while the closeout is judged in the engine layer verdicts. If the motor result gives no material, the field keeps its default (Steel, generic). Accepted: an entry of the list. Options: Steel (generic); Steel AISI 4130; Steel AISI 4340; Stainless 304; Stainless 316; 17-4PH (H900); Aluminum; Aluminum 6061-T6; Aluminum 7075-T6; Aluminum 2024-T3; Copper; CuCrZr (C18150); BeCu C17200; Inconel; Inconel 718; Inconel 625; Titanium Ti-6Al-4V; Titanium CP Grade 2; \textbackslash{}ldots.} \\ \midrule
 \textbf{Cooling Type} & \texttt{ad\_\allowbreak{}f\_\allowbreak{}thermal\_\allowbreak{}cooling\_\allowbreak{}type} &  &  & Natural (heat sink) \\*
-\multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Effect on the calculation:} Cooling type: natural (heat sink), forced convection or regenerative. Selects the coolant-side coefficient of the bare-wall check. Filled from the motor result after a calculation (the motor's cooling type, when it is one of these three), unless you edit it. Options: Natural (heat sink); Forced convection; Regenerative.} \\ \midrule
+\multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Effect on the calculation:} Cooling type: natural (heat sink), forced convection, regenerative or ablative liner. Natural, forced and regenerative select the coolant-side coefficient of the bare-wall check; ablative liner is evaluated with the liner (wall protection: ablative liner), the bare-wall bound uses natural convection outside and no cooling area budget is published. Filled from the motor result after a calculation (the motor's cooling type, when it is one of these four), unless you edit it. Options: Natural (heat sink); Forced convection; Regenerative; Ablative Liner.} \\ \midrule
 \textbf{Throat Diameter} & \texttt{ad\_\allowbreak{}f\_\allowbreak{}thermal\_\allowbreak{}throat\_\allowbreak{}diameter} & m &  & (blank) \\*
 \multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Effect on the calculation:} Throat diameter, m (\textgreater{} 0, at most 2 m: the input check band). Sets the throat area of the Bartz design station. Filled from the motor result after a calculation, unless you edit it. \emph{If blank:} Not sent; the thermal check derives the throat area from the mass flow and c*.} \\ \midrule
 \textbf{Characteristic velocity c*} & \texttt{ad\_\allowbreak{}f\_\allowbreak{}thermal\_\allowbreak{}c\_\allowbreak{}star} & m/s &  & (blank) \\*
@@ -3046,21 +3287,21 @@ the case temperature solved by the motor is used.}{fig:g-kati-termal}
 \endfoot
 \bottomrule
 \endlastfoot
-\textbf{Chamber Pressure} & \texttt{ad\_\allowbreak{}f\_\allowbreak{}cooling\_\allowbreak{}chamber\_\allowbreak{}pressure} & bar &  & 50 \\*
+\textbf{Chamber Pressure} & \texttt{ad\_\allowbreak{}f\_\allowbreak{}cooling\_\allowbreak{}chamber\_\allowbreak{}pressure} & bar &  & (blank) \\*
 \multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Effect on the calculation:} Chamber pressure, bar. Used in the gas-side heat flux along the channel march. Filled from the motor result after a calculation (when the result provides it), unless you edit it. \emph{If blank:} The request is not sent and the field is named.} \\ \midrule
-\textbf{Chamber Temperature} & \texttt{ad\_\allowbreak{}f\_\allowbreak{}cooling\_\allowbreak{}chamber\_\allowbreak{}temperature} & K &  & 3400 \\*
+\textbf{Chamber Temperature} & \texttt{ad\_\allowbreak{}f\_\allowbreak{}cooling\_\allowbreak{}chamber\_\allowbreak{}temperature} & K &  & (blank) \\*
 \multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Effect on the calculation:} Chamber temperature, K. Drives the gas-side heat flux. Filled from the motor result after a calculation (when the result provides it), unless you edit it. \emph{If blank:} The request is not sent and the field is named.} \\ \midrule
-\textbf{Throat Diameter} & \texttt{ad\_\allowbreak{}f\_\allowbreak{}cooling\_\allowbreak{}throat\_\allowbreak{}diameter} & m &  & 0.05 \\*
+\textbf{Throat Diameter} & \texttt{ad\_\allowbreak{}f\_\allowbreak{}cooling\_\allowbreak{}throat\_\allowbreak{}diameter} & m &  & (blank) \\*
 \multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Effect on the calculation:} Throat diameter, m. Sets the contour and the throat heat-flux peak. Filled from the motor result after a calculation (when the result provides it), unless you edit it. \emph{If blank:} The request is not sent and the field is named.} \\ \midrule
-\textbf{Expansion Ratio} & \texttt{ad\_\allowbreak{}f\_\allowbreak{}cooling\_\allowbreak{}expansion\_\allowbreak{}ratio} &  &  & 8 \\*
+\textbf{Expansion Ratio} & \texttt{ad\_\allowbreak{}f\_\allowbreak{}cooling\_\allowbreak{}expansion\_\allowbreak{}ratio} &  &  & (blank) \\*
 \multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Effect on the calculation:} Nozzle area ratio Ae/At. Sets the cooled nozzle length and contour. Filled from the motor result after a calculation (when the result provides it), unless you edit it. \emph{If blank:} The request is not sent and the field is named.} \\ \midrule
-\textbf{Gamma (frozen)} & \texttt{ad\_\allowbreak{}f\_\allowbreak{}cooling\_\allowbreak{}gamma} &  &  & 1.2 \\*
+\textbf{Gamma (frozen)} & \texttt{ad\_\allowbreak{}f\_\allowbreak{}cooling\_\allowbreak{}gamma} &  &  & (blank) \\*
 \multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Effect on the calculation:} Frozen ratio of specific heats \ensuremath{\gamma}. Enters the gas-side heat transfer. Filled from the motor result after a calculation (when the result provides it), unless you edit it. \emph{If blank:} The request is not sent and the field is named.} \\ \midrule
-\textbf{Molecular Weight} & \texttt{ad\_\allowbreak{}f\_\allowbreak{}cooling\_\allowbreak{}molecular\_\allowbreak{}weight} & g/mol &  & 22 \\*
+\textbf{Molecular Weight} & \texttt{ad\_\allowbreak{}f\_\allowbreak{}cooling\_\allowbreak{}molecular\_\allowbreak{}weight} & g/mol &  & (blank) \\*
 \multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Effect on the calculation:} Gas molecular weight, g/mol. Enters the gas properties of the heat transfer. Filled from the motor result after a calculation (when the result provides it), unless you edit it. \emph{If blank:} The request is not sent and the field is named.} \\ \midrule
 \textbf{Coolant} & \texttt{ad\_\allowbreak{}f\_\allowbreak{}cooling\_\allowbreak{}coolant} &  &  & -- select -- \\*
 \multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Effect on the calculation:} Coolant fluid. Selects the coolant property model. Filled from the motor result after a calculation (when the result provides it), unless you edit it. Options: -- select --; Water; RP-1 (kerosene); Methane (LCH4); Hydrogen (LH2). \emph{If blank:} Required -- the request is not sent and the field is named.} \\ \midrule
-\textbf{Coolant Mass Flow} & \texttt{ad\_\allowbreak{}f\_\allowbreak{}cooling\_\allowbreak{}coolant\_\allowbreak{}mdot} & kg/s &  & 2 \\*
+\textbf{Coolant Mass Flow} & \texttt{ad\_\allowbreak{}f\_\allowbreak{}cooling\_\allowbreak{}coolant\_\allowbreak{}mdot} & kg/s &  & (blank) \\*
 \multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Effect on the calculation:} Coolant mass flow, kg/s. Sets coolant velocity, heat pickup and pressure drop. Filled with the motor's fuel flow after a calculation, unless you edit it. \emph{If blank:} The request is not sent and the field is named.} \\ \midrule
 \textbf{Coolant Inlet T} & \texttt{ad\_\allowbreak{}f\_\allowbreak{}cooling\_\allowbreak{}coolant\_\allowbreak{}inlet\_\allowbreak{}temp} & K &  & (blank) \\*
 \multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Effect on the calculation:} Coolant inlet temperature, K. Starting temperature of the coolant march. Filled from the motor result after a calculation (when the result provides it), unless you edit it. \emph{If blank:} Required -- the request is not sent and the field is named.} \\ \midrule
@@ -3093,13 +3334,13 @@ the case temperature solved by the motor is used.}{fig:g-kati-termal}
 \endfoot
 \bottomrule
 \endlastfoot
-\textbf{Chamber Pressure} & \texttt{ad\_\allowbreak{}f\_\allowbreak{}structural\_\allowbreak{}chamber\_\allowbreak{}pressure} & bar &  & 40 \\*
+\textbf{Chamber Pressure} & \texttt{ad\_\allowbreak{}f\_\allowbreak{}structural\_\allowbreak{}chamber\_\allowbreak{}pressure} & bar &  & (blank) \\*
 \multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Effect on the calculation:} Chamber design pressure, bar. The wall stresses and safety factors (pressure vessel, buckling, fatigue) are computed at this pressure. Filled from the motor result after a calculation (when the result provides it), unless you edit it. \emph{If blank:} The request is not sent and the field is named.} \\ \midrule
-\textbf{Chamber Diameter} & \texttt{ad\_\allowbreak{}f\_\allowbreak{}structural\_\allowbreak{}chamber\_\allowbreak{}diameter} & m &  & 0.1 \\*
+\textbf{Chamber Diameter} & \texttt{ad\_\allowbreak{}f\_\allowbreak{}structural\_\allowbreak{}chamber\_\allowbreak{}diameter} & m &  & (blank) \\*
 \multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Effect on the calculation:} Chamber inner diameter, m. Sets the vessel radius in the stress and buckling checks. Filled from the motor result after a calculation (when the result provides it), unless you edit it. \emph{If blank:} The request is not sent and the field is named.} \\ \midrule
-\textbf{Chamber Length} & \texttt{ad\_\allowbreak{}f\_\allowbreak{}structural\_\allowbreak{}chamber\_\allowbreak{}length} & m &  & 0.5 \\*
+\textbf{Chamber Length} & \texttt{ad\_\allowbreak{}f\_\allowbreak{}structural\_\allowbreak{}chamber\_\allowbreak{}length} & m &  & (blank) \\*
 \multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Effect on the calculation:} Chamber cylinder length, m. Enters the structural model with the chamber geometry; changing it changes the structural result. Filled from the motor result after a calculation (when the result provides it), unless you edit it. \emph{If blank:} The request is not sent and the field is named.} \\ \midrule
-\textbf{Throat Diameter} & \texttt{ad\_\allowbreak{}f\_\allowbreak{}structural\_\allowbreak{}throat\_\allowbreak{}diameter} & m &  & 0.02 \\*
+\textbf{Throat Diameter} & \texttt{ad\_\allowbreak{}f\_\allowbreak{}structural\_\allowbreak{}throat\_\allowbreak{}diameter} & m &  & (blank) \\*
 \multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Effect on the calculation:} Nozzle throat diameter, m. Enters the structural model with the chamber geometry; changing it changes the structural result. Filled from the motor result after a calculation (when the result provides it), unless you edit it. \emph{If blank:} The request is not sent and the field is named.} \\ \midrule
 \textbf{Burn Time} & \texttt{ad\_\allowbreak{}f\_\allowbreak{}structural\_\allowbreak{}burn\_\allowbreak{}time} & s &  & (blank) \\*
 \multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Effect on the calculation:} Burn time, s. Informational here: the analysis validates it but does NOT use it (stresses are steady-state; fatigue counts pressurisation cycles) and says so under the result. Filled from the motor result after a calculation (when the result provides it), unless you edit it. \emph{If blank:} Not sent.} \\ \midrule
@@ -3132,9 +3373,9 @@ the case temperature solved by the motor is used.}{fig:g-kati-termal}
 \endfoot
 \bottomrule
 \endlastfoot
-\textbf{Chamber Pressure} & \texttt{ad\_\allowbreak{}f\_\allowbreak{}joint\_\allowbreak{}pressure\_\allowbreak{}bar} & bar &  & 40 \\*
+\textbf{Chamber Pressure} & \texttt{ad\_\allowbreak{}f\_\allowbreak{}joint\_\allowbreak{}pressure\_\allowbreak{}bar} & bar &  & (blank) \\*
 \multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Effect on the calculation:} Chamber pressure acting on the closure, bar (\ensuremath{\ge} 0). The analysis turns it into the separating force over the seal area. Filled with the motor's chamber pressure after a calculation, unless you edit it. \emph{If blank:} The request is not sent and the field is named.} \\ \midrule
-\textbf{Seal / Effective Diameter} & \texttt{ad\_\allowbreak{}f\_\allowbreak{}joint\_\allowbreak{}seal\_\allowbreak{}diameter\_\allowbreak{}mm} & mm &  & 100 \\*
+\textbf{Seal / Effective Diameter} & \texttt{ad\_\allowbreak{}f\_\allowbreak{}joint\_\allowbreak{}seal\_\allowbreak{}diameter\_\allowbreak{}mm} & mm &  & (blank) \\*
 \multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Effect on the calculation:} Seal / effective pressure diameter, mm. Area on which the pressure acts; must be positive and within the repository's chamber-diameter band. Filled with the motor's chamber inner diameter after a calculation, unless you edit it. \emph{If blank:} The request is not sent and the field is named.} \\ \midrule
 \textbf{Bolt Count} & \texttt{ad\_\allowbreak{}f\_\allowbreak{}joint\_\allowbreak{}bolt\_\allowbreak{}count} &  &  & 8 \\*
 \multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Effect on the calculation:} Number of bolts (\ensuremath{\ge} 1). The separating load is shared between them. Not filled from the motor result. \emph{If blank:} The request is not sent and the field is named.} \\ \midrule
@@ -3169,11 +3410,11 @@ the case temperature solved by the motor is used.}{fig:g-kati-termal}
 \endlastfoot
 \textbf{Motor Type} & \texttt{ad\_\allowbreak{}f\_\allowbreak{}safety\_\allowbreak{}motor\_\allowbreak{}type} &  &  & Hybrid \\*
 \multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Effect on the calculation:} Motor type: hybrid, liquid or solid. The hazard model (explosive equivalent, stored propellant) is selected by motor type. Set from the page's motor after a calculation. Options: Hybrid; Liquid; Solid.} \\ \midrule
-\textbf{Chamber Pressure} & \texttt{ad\_\allowbreak{}f\_\allowbreak{}safety\_\allowbreak{}chamber\_\allowbreak{}pressure} & bar &  & 40 \\*
+\textbf{Chamber Pressure} & \texttt{ad\_\allowbreak{}f\_\allowbreak{}safety\_\allowbreak{}chamber\_\allowbreak{}pressure} & bar &  & (blank) \\*
 \multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Effect on the calculation:} Chamber pressure, bar. Enters the pressure-vessel and stored-energy terms of the safety verdict. Filled from the motor result after a calculation (when the result provides it), unless you edit it. \emph{If blank:} The request is not sent and the field is named.} \\ \midrule
-\textbf{Chamber Temperature} & \texttt{ad\_\allowbreak{}f\_\allowbreak{}safety\_\allowbreak{}chamber\_\allowbreak{}temperature} & K &  & 3000 \\*
+\textbf{Chamber Temperature} & \texttt{ad\_\allowbreak{}f\_\allowbreak{}safety\_\allowbreak{}chamber\_\allowbreak{}temperature} & K &  & (blank) \\*
 \multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Effect on the calculation:} Chamber temperature, K. Enters the thermal part of the safety verdict. Filled from the motor result after a calculation (when the result provides it), unless you edit it. \emph{If blank:} The request is not sent and the field is named.} \\ \midrule
-\textbf{Thrust} & \texttt{ad\_\allowbreak{}f\_\allowbreak{}safety\_\allowbreak{}thrust} & N &  & 1000 \\*
+\textbf{Thrust} & \texttt{ad\_\allowbreak{}f\_\allowbreak{}safety\_\allowbreak{}thrust} & N &  & (blank) \\*
 \multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Effect on the calculation:} Thrust, N. Enters the safety verdict (changes the result). Filled from the motor result after a calculation (when the result provides it), unless you edit it. \emph{If blank:} The request is not sent and the field is named.} \\ \midrule
 \textbf{Burn Time} & \texttt{ad\_\allowbreak{}f\_\allowbreak{}safety\_\allowbreak{}burn\_\allowbreak{}time} & s &  & (blank) \\*
 \multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Effect on the calculation:} Burn time, s. Feeds the duration-dependent parts of the safety verdict. Filled from the motor result after a calculation (when the result provides it), unless you edit it. \emph{If blank:} Not sent; the endpoint withholds the duration-dependent parts by name (no duration is assumed).} \\ \midrule
@@ -3183,9 +3424,9 @@ the case temperature solved by the motor is used.}{fig:g-kati-termal}
 \multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Effect on the calculation:} Propellant class. Selects the hazard class used for the explosive equivalent. Set from the motor's own propellant after a calculation. Options: Composite (APCP/HTPB); Double base (NC/NG); Composite double base; Liquid bipropellant; Liquid monopropellant; Solid monopropellant (AP); Not modelled (no sourced TNT equivalent).} \\ \midrule
 \textbf{Facility Type} & \texttt{ad\_\allowbreak{}f\_\allowbreak{}safety\_\allowbreak{}facility\_\allowbreak{}type} &  &  & Test stand \\*
 \multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Effect on the calculation:} Facility: test stand, manufacturing, transport or launch site. Selects the facility rules of the safety verdict. Not filled from the motor result. Options: Test stand; Manufacturing; Transport; Launch site.} \\ \midrule
-\textbf{Chamber Diameter} & \texttt{ad\_\allowbreak{}f\_\allowbreak{}safety\_\allowbreak{}chamber\_\allowbreak{}diameter} & m &  & 0.1 \\*
+\textbf{Chamber Diameter} & \texttt{ad\_\allowbreak{}f\_\allowbreak{}safety\_\allowbreak{}chamber\_\allowbreak{}diameter} & m &  & (blank) \\*
 \multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Effect on the calculation:} Chamber inner diameter, m. Enters the pressure-vessel part of the safety verdict. Filled from the motor result after a calculation (when the result provides it), unless you edit it. \emph{If blank:} The request is not sent and the field is named.} \\ \midrule
-\textbf{Wall Thickness} & \texttt{ad\_\allowbreak{}f\_\allowbreak{}safety\_\allowbreak{}wall\_\allowbreak{}thickness} & m &  & 0.005 \\*
+\textbf{Wall Thickness} & \texttt{ad\_\allowbreak{}f\_\allowbreak{}safety\_\allowbreak{}wall\_\allowbreak{}thickness} & m &  & (blank) \\*
 \multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Effect on the calculation:} Wall thickness, m. Enters the pressure-vessel part of the safety verdict. Filled from the motor result after a calculation (when the result provides it), unless you edit it. \emph{If blank:} The request is not sent and the field is named.} \\ \midrule
 \textbf{Material} & \texttt{ad\_\allowbreak{}f\_\allowbreak{}safety\_\allowbreak{}material} &  &  & Steel AISI 4130 \\*
 \multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Effect on the calculation:} Wall material. Supplies the strength used by the pressure-vessel part of the verdict. Filled from the motor result after a calculation (when the result provides it), unless you edit it. Options: Steel AISI 4130; Steel AISI 4340; Carbon steel (A36); Stainless 304; Stainless 316; 17-4PH (H900); Aluminum 6061-T6; Aluminum 7075-T6; Aluminum 2024-T3; Titanium Ti-6Al-4V; Titanium CP Grade 2; Inconel 718; Inconel 625; CuCrZr (C18150); BeCu C17200; Magnesium AZ31B.} \\ \midrule
@@ -3212,33 +3453,33 @@ the case temperature solved by the motor is used.}{fig:g-kati-termal}
 \endfoot
 \bottomrule
 \endlastfoot
-\textbf{Chamber Pressure} & \texttt{ad\_\allowbreak{}f\_\allowbreak{}performance\_\allowbreak{}chamber\_\allowbreak{}pressure} & bar &  & 50 \\*
+\textbf{Chamber Pressure} & \texttt{ad\_\allowbreak{}f\_\allowbreak{}performance\_\allowbreak{}chamber\_\allowbreak{}pressure} & bar &  & (blank) \\*
 \multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Effect on the calculation:} Chamber pressure, bar. Used in all three figures (Isp surface design point, Mach contour, heat flux). Filled from the motor result after a calculation (when the result provides it), unless you edit it. \emph{If blank:} The request is not sent and the field is named.} \\ \midrule
-\textbf{Design O/F Ratio} & \texttt{ad\_\allowbreak{}f\_\allowbreak{}performance\_\allowbreak{}optimal\_\allowbreak{}of\_\allowbreak{}ratio} &  &  & 3.5 \\*
+\textbf{Design O/F Ratio} & \texttt{ad\_\allowbreak{}f\_\allowbreak{}performance\_\allowbreak{}optimal\_\allowbreak{}of\_\allowbreak{}ratio} &  &  & (blank) \\*
 \multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Effect on the calculation:} Oxidizer-to-fuel mass ratio of the design point. Used only by the 3D Isp surface (hybrid/liquid). Filled from the motor result after a calculation (when the result provides it), unless you edit it. \emph{If blank:} The request is not sent and the field is named.} \\ \midrule
-\textbf{Base Isp} & \texttt{ad\_\allowbreak{}f\_\allowbreak{}performance\_\allowbreak{}base\_\allowbreak{}isp} & s &  & 300 \\*
+\textbf{Base Isp} & \texttt{ad\_\allowbreak{}f\_\allowbreak{}performance\_\allowbreak{}base\_\allowbreak{}isp} & s &  & (blank) \\*
 \multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Effect on the calculation:} Design-point specific impulse, s. Used only by the 3D Isp surface (hybrid/liquid). Filled from the motor result after a calculation (when the result provides it), unless you edit it. \emph{If blank:} The request is not sent and the field is named.} \\ \midrule
-\textbf{Expansion Ratio} & \texttt{ad\_\allowbreak{}f\_\allowbreak{}performance\_\allowbreak{}expansion\_\allowbreak{}ratio} &  &  & 16 \\*
+\textbf{Expansion Ratio} & \texttt{ad\_\allowbreak{}f\_\allowbreak{}performance\_\allowbreak{}expansion\_\allowbreak{}ratio} &  &  & (blank) \\*
 \multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Effect on the calculation:} Nozzle area ratio Ae/At. Used by the nozzle Mach contour and the wall heat-flux figures. Filled from the motor result after a calculation (when the result provides it), unless you edit it. \emph{If blank:} The request is not sent and the field is named.} \\ \midrule
-\textbf{Throat Area} & \texttt{ad\_\allowbreak{}f\_\allowbreak{}performance\_\allowbreak{}throat\_\allowbreak{}area} & m\textsuperscript{2} &  & 0.001 \\*
+\textbf{Throat Area} & \texttt{ad\_\allowbreak{}f\_\allowbreak{}performance\_\allowbreak{}throat\_\allowbreak{}area} & m\textsuperscript{2} &  & (blank) \\*
 \multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Effect on the calculation:} Throat area, m\textsuperscript{2}. Used by the nozzle Mach contour and the wall heat-flux figures. Filled from the motor result after a calculation (when the result provides it), unless you edit it. \emph{If blank:} The request is not sent and the field is named.} \\ \midrule
-\textbf{Nozzle Length} & \texttt{ad\_\allowbreak{}f\_\allowbreak{}performance\_\allowbreak{}nozzle\_\allowbreak{}length} & m &  & 0.1 \\*
-\multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Effect on the calculation:} Divergent nozzle length, m. Used by the nozzle Mach contour and the wall heat-flux figures. Filled from the motor result after a calculation (the divergent length the solver published, design summary), unless you edit it. \emph{If blank:} The request is not sent and the field is named.} \\ \midrule
-\textbf{Chamber Length} & \texttt{ad\_\allowbreak{}f\_\allowbreak{}performance\_\allowbreak{}chamber\_\allowbreak{}length} & m &  & 0.5 \\*
+\textbf{Nozzle Length} & \texttt{ad\_\allowbreak{}f\_\allowbreak{}performance\_\allowbreak{}nozzle\_\allowbreak{}length} & m &  & (blank) \\*
+\multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Effect on the calculation:} Divergent nozzle length, m. Used by the nozzle Mach contour and the wall heat-flux figures. Filled from the motor result after a calculation (the divergent length the solver published, design summary), unless you edit it. \emph{If blank:} Not sent.} \\ \midrule
+\textbf{Chamber Length} & \texttt{ad\_\allowbreak{}f\_\allowbreak{}performance\_\allowbreak{}chamber\_\allowbreak{}length} & m &  & (blank) \\*
 \multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Effect on the calculation:} Chamber length, m. Used only by the wall heat-flux figure. Filled from the motor result after a calculation (when the result provides it), unless you edit it. \emph{If blank:} The request is not sent and the field is named.} \\ \midrule
 \textbf{Burn Time} & \texttt{ad\_\allowbreak{}f\_\allowbreak{}performance\_\allowbreak{}burn\_\allowbreak{}time} & s &  & (blank) \\*
 \multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Effect on the calculation:} Burn time, s. Used only by the wall heat-flux figure. Filled from the motor result after a calculation (when the result provides it), unless you edit it. \emph{If blank:} Not sent.} \\ \midrule
-\textbf{Base Heat Flux} & \texttt{ad\_\allowbreak{}f\_\allowbreak{}performance\_\allowbreak{}base\_\allowbreak{}heat\_\allowbreak{}flux} & W/m\textsuperscript{2} &  & 2000000 \\*
-\multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Effect on the calculation:} Reference wall heat flux, W/m\textsuperscript{2}. Used only by the wall heat-flux figure. Not filled from the motor result. \emph{If blank:} The request is not sent and the field is named.} \\ \midrule
-\textbf{Critical Heat Flux} & \texttt{ad\_\allowbreak{}f\_\allowbreak{}performance\_\allowbreak{}critical\_\allowbreak{}heat\_\allowbreak{}flux} & MW/m\textsuperscript{2} &  & 4 \\*
-\multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Effect on the calculation:} Critical heat-flux line, MW/m\textsuperscript{2}. Used only by the wall heat-flux figure. Not filled from the motor result. \emph{If blank:} The request is not sent and the field is named.} \\ \midrule
-\textbf{Chamber Temperature} & \texttt{ad\_\allowbreak{}f\_\allowbreak{}performance\_\allowbreak{}chamber\_\allowbreak{}temperature} & K &  & 3000 \\*
+\textbf{Base Heat Flux} & \texttt{ad\_\allowbreak{}f\_\allowbreak{}performance\_\allowbreak{}base\_\allowbreak{}heat\_\allowbreak{}flux} & W/m\textsuperscript{2} &  & (blank) \\*
+\multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Effect on the calculation:} Reference wall heat flux, W/m\textsuperscript{2} -- your own reference level, drawn as a plane on the wall heat-flux figure; it is not computed and does not change the computed flux. Not filled from the motor result and has no preset value. \emph{If blank:} Not sent, and no reference plane is drawn.} \\ \midrule
+\textbf{Critical Heat Flux} & \texttt{ad\_\allowbreak{}f\_\allowbreak{}performance\_\allowbreak{}critical\_\allowbreak{}heat\_\allowbreak{}flux} & MW/m\textsuperscript{2} &  & (blank) \\*
+\multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Effect on the calculation:} Critical heat-flux line, MW/m\textsuperscript{2} -- your own limit, drawn as a plane on the wall heat-flux figure; it is not computed. Not filled from the motor result and has no preset value. \emph{If blank:} Not sent, and no critical-flux plane is drawn.} \\ \midrule
+\textbf{Chamber Temperature} & \texttt{ad\_\allowbreak{}f\_\allowbreak{}performance\_\allowbreak{}chamber\_\allowbreak{}temperature} & K &  & (blank) \\*
 \multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Effect on the calculation:} Chamber temperature, K. Used only by the wall heat-flux figure. Filled from the motor result after a calculation (when the result provides it), unless you edit it. \emph{If blank:} The request is not sent and the field is named.} \\ \midrule
-\textbf{Gamma (frozen)} & \texttt{ad\_\allowbreak{}f\_\allowbreak{}performance\_\allowbreak{}gamma} &  &  & 1.2 \\*
+\textbf{Gamma (frozen)} & \texttt{ad\_\allowbreak{}f\_\allowbreak{}performance\_\allowbreak{}gamma} &  &  & (blank) \\*
 \multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Effect on the calculation:} Frozen ratio of specific heats \ensuremath{\gamma}. Used by the nozzle Mach contour and the wall heat-flux figures. Filled from the motor result after a calculation (when the result provides it), unless you edit it. \emph{If blank:} The request is not sent and the field is named.} \\ \midrule
-\textbf{Total Mass Flow} & \texttt{ad\_\allowbreak{}f\_\allowbreak{}performance\_\allowbreak{}mdot\_\allowbreak{}total} & kg/s &  & 1 \\*
-\multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Effect on the calculation:} Total mass flow, kg/s. Informational: sent with the request but none of the three figures changes with it (measured). Filled from the motor result after a calculation (when the result provides it), unless you edit it. \emph{If blank:} The request is not sent and the field is named.} \\ \midrule
-\textbf{Chamber Diameter} & \texttt{ad\_\allowbreak{}f\_\allowbreak{}performance\_\allowbreak{}chamber\_\allowbreak{}diameter} & m &  & 0.1 \\*
+\textbf{Total Mass Flow} & \texttt{ad\_\allowbreak{}f\_\allowbreak{}performance\_\allowbreak{}mdot\_\allowbreak{}total} & kg/s &  & (blank) \\*
+\multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Effect on the calculation:} Total mass flow, kg/s. Informational: sent with the request but none of the three figures changes with it (measured). Filled from the motor result after a calculation (when the result provides it), unless you edit it. \emph{If blank:} Not sent.} \\ \midrule
+\textbf{Chamber Diameter} & \texttt{ad\_\allowbreak{}f\_\allowbreak{}performance\_\allowbreak{}chamber\_\allowbreak{}diameter} & m &  & (blank) \\*
 \multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Effect on the calculation:} Chamber inner diameter, m. Used by the nozzle Mach contour and the wall heat-flux figures. Filled from the motor result after a calculation (when the result provides it), unless you edit it. \emph{If blank:} The request is not sent and the field is named.} \\ \midrule
 \end{longtable}}
 
@@ -3257,14 +3498,14 @@ the case temperature solved by the motor is used.}{fig:g-kati-termal}
 \endlastfoot
 \textbf{Design Code} & \texttt{ad\_\allowbreak{}f\_\allowbreak{}vessel\_\allowbreak{}code\_\allowbreak{}mode} &  &  & AIAA S-080 (flight hardware) \\*
 \multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Effect on the calculation:} Design code: AIAA S-080 (metallic pressure vessels: proof 1.5 × MEOP, burst 2.0 × MEOP), ASME VIII Div 1, or NASA-STD-5012C (liquid engine hardware: acceptance test 1.20 × MDP, qualification test 1.50 × MDP, burst 1.50 × MDP). The selected code's factors set the required thickness, the test pressures and the burst margin. Filled from the motor result only on the liquid page (NASA-STD-5012C, the same standard as the safety tab); otherwise AIAA S-080. Options: AIAA S-080 (flight hardware); ASME VIII Div 1 (ground/test); NASA-STD-5012C (liquid engine hardware).} \\ \midrule
-\textbf{MEOP} & \texttt{ad\_\allowbreak{}f\_\allowbreak{}vessel\_\allowbreak{}meop\_\allowbreak{}bar} & bar &  & 60 \\*
+\textbf{MEOP} & \texttt{ad\_\allowbreak{}f\_\allowbreak{}vessel\_\allowbreak{}meop\_\allowbreak{}bar} & bar &  & (blank) \\*
 \multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Effect on the calculation:} Maximum expected operating pressure (MEOP), bar. Design pressure of the vessel: drives required thickness and burst margins. Must be positive and finite. Filled after a calculation, unless you edit it: with the motor's chamber pressure; on a two-layer regenerative liquid wall with the closeout's maximum design pressure (MDP: the highest coolant pressure in the jacket). \emph{If blank:} The request is not sent and the field is named.} \\ \midrule
-\textbf{Inner Diameter} & \texttt{ad\_\allowbreak{}f\_\allowbreak{}vessel\_\allowbreak{}inner\_\allowbreak{}diameter\_\allowbreak{}mm} & mm &  & 150 \\*
+\textbf{Inner Diameter} & \texttt{ad\_\allowbreak{}f\_\allowbreak{}vessel\_\allowbreak{}inner\_\allowbreak{}diameter\_\allowbreak{}mm} & mm &  & (blank) \\*
 \multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Effect on the calculation:} Vessel inner diameter, mm. Sets the required wall and head thicknesses. Must be positive and finite. Filled after a calculation, unless you edit it: with the motor's chamber diameter; on a two-layer regenerative liquid wall with the inner diameter of the closeout, the layer that carries the coolant pressure (at the largest jacket radius, as the engine's closeout check). \emph{If blank:} The request is not sent and the field is named.} \\ \midrule
 \textbf{Wall Thickness (mm, blank = auto-size)} & \texttt{ad\_\allowbreak{}f\_\allowbreak{}vessel\_\allowbreak{}wall\_\allowbreak{}thickness\_\allowbreak{}mm} &  &  & (blank) \\*
-\multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Effect on the calculation:} Actual wall thickness, mm. Given: burst pressure and margins are computed for this wall (must be positive). On a two-layer regenerative liquid wall it is filled with the engine's closeout thickness, unless you edit it; otherwise it is not filled from the motor result. \emph{If blank:} Not sent and the wall is auto-sized (the result says so).} \\ \midrule
+\multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Effect on the calculation:} Actual wall thickness, mm. Given: burst pressure and margins are computed for this wall (must be positive). Filled after a calculation, unless you edit it: with the motor's wall (the same wall as the safety tab; on a two-layer regenerative liquid wall the closeout, the layer that carries the coolant pressure). \emph{If blank:} Not sent and this tab sizes its own proposed wall to the code minimum and the burst margin; the result then says it is a proposed wall, not the motor's wall.} \\ \midrule
 \textbf{Material} & \texttt{ad\_\allowbreak{}f\_\allowbreak{}vessel\_\allowbreak{}material} &  &  & Aluminum 6061-T6 \\*
-\multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Effect on the calculation:} Vessel material. Supplies the allowable stress (changes thickness, burst pressure and margins). Filled after a calculation, unless you edit it: on the solid page with the case material, on the hybrid page with the chamber material, on a two-layer regenerative liquid wall with the closeout material; otherwise the panel default stays. Options: Aluminum 6061-T6; Steel AISI 4130; Steel (generic); Stainless 304; Stainless 316; Titanium Ti-6Al-4V; Inconel 718.} \\ \midrule
+\multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Effect on the calculation:} Vessel material. Supplies the allowable stress (changes thickness, burst pressure and margins). Filled after a calculation, unless you edit it: on the solid page with the case material, on the hybrid page with the chamber material, on the liquid page with the chamber material (single wall) or the closeout material (two-layer regenerative wall). If the motor result publishes no material, the panel default stays and the field says so. Options: Aluminum 6061-T6; Steel AISI 4130; Steel (generic); Stainless 304; Stainless 316; Titanium Ti-6Al-4V; Inconel 718.} \\ \midrule
 \textbf{Design Temperature} & \texttt{ad\_\allowbreak{}f\_\allowbreak{}vessel\_\allowbreak{}temperature\_\allowbreak{}K} & K &  & 293.15 \\*
 \multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Effect on the calculation:} Design temperature, K. Derates the material allowable stress. Must be positive and within the repository's physical temperature band. On a two-layer regenerative liquid wall it is filled with the closeout temperature of the engine (the hottest coolant), unless you edit it; otherwise it is not filled from the motor result. \emph{If blank:} The request is not sent and the field is named.} \\ \midrule
 \textbf{Weld Joint Efficiency (UW-12)} & \texttt{ad\_\allowbreak{}f\_\allowbreak{}vessel\_\allowbreak{}weld\_\allowbreak{}efficiency} &  &  & 1.00 -- full radiography \\*
@@ -3339,6 +3580,18 @@ the case temperature solved by the motor is used.}{fig:g-kati-termal}
 \multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Effect on the calculation:} Ring baffle width as a fraction of the tank radius, w/R (0 \textless{} w/R \ensuremath{\le} 1). Sets the ring-baffle damping (Miles 1958). Liquid: filled with the width ratio of the tank's own ring baffle (oxidizer-tank slosh block). Hybrid: not filled. \emph{If blank:} Not sent; the endpoint returns the baffle width needed for its target damping (the hybrid motor's own slosh block runs the same way).} \\ \midrule
 \textbf{Baffle Depth d/R} & \texttt{feed\_\allowbreak{}slosh\_\allowbreak{}baffle\_\allowbreak{}depth\_\allowbreak{}ratio} &  &  & (blank) \\*
 \multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Effect on the calculation:} Baffle depth below the free surface as a fraction of the radius, d/R (\ensuremath{\ge} 0). Sets the ring-baffle damping (Miles 1958). Filled with the depth ratio the run's slosh block used (hybrid: the oxidizer-tank sloshing block; liquid: the tank's own ring baffle). \emph{If blank:} Not sent; the analysis uses d/R = 0.10 and lists it below the result as a defaulted field.} \\ \midrule
+\textbf{Axial acceleration g\_eff, lower} & \texttt{clk\_\allowbreak{}geff\_\allowbreak{}min} & m/s\textsuperscript{2} & \ensuremath{\ge}\,0 & (blank) \\*
+\multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Effect on the calculation:} Effective axial acceleration that restores the liquid surface, m/s\textsuperscript{2} (finite, \textgreater{} 0). The slosh frequency scales as \ensuremath{\surd}g\_eff; the slosh mass ratio, pendulum length and positions do not depend on it. With an upper value as well, the range is mapped with 11 equally spaced values. \emph{If blank:} Standard gravity g0 = 9.80665 m/s\textsuperscript{2} (1 g) is used and stated in the result.} \\ \midrule
+\textbf{Axial acceleration g\_eff, upper} & \texttt{clk\_\allowbreak{}geff\_\allowbreak{}max} & m/s\textsuperscript{2} & \ensuremath{\ge}\,0 & (blank) \\*
+\multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Effect on the calculation:} Upper end of a g\_eff range, m/s\textsuperscript{2} (finite, greater than the lower value). With a range the frequency map has 11 equally spaced g\_eff values, the loads are given at the upper value (they scale linearly with g\_eff), and the time table carries \ensuremath{\kappa}1 instead of \ensuremath{\omega}1 (the vehicle team computes \ensuremath{\omega}1 = \ensuremath{\surd}(\ensuremath{\kappa}1\ensuremath{\cdot}g\_eff) at its own acceleration). \emph{If blank:} A single g\_eff value is used.} \\ \midrule
+\textbf{Model method} & \texttt{clk\_\allowbreak{}yontem} &  &  & Automatic \\*
+\multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Effect on the calculation:} How the equivalent-model table is built. Automatic: an upright flat-bottom cylinder uses the closed form (Dodge 2000 Eq. (1.40), Table 3.2); any other axisymmetric tank uses the axisymmetric finite-element solution. Closed form on a headed tank applies the cylinder formula with the equivalent depth h\_eq = V/(\ensuremath{\pi}R\textsuperscript{2}) and declares it; rows with the free surface in a head are rejected. Numerical always uses the finite-element solution. Options: Automatic; Closed form (cylinder formula); Numerical (finite element). \emph{If blank:} Automatic.} \\ \midrule
+\textbf{Tank to replace} & \texttt{clk\_\allowbreak{}geo\_\allowbreak{}tank} &  &  & N\textsubscript{2}O tank \\*
+\multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Effect on the calculation:} Which of this motor's tanks the uploaded inner geometry replaces. Without an upload the motor's own flat-capped upright cylinder (diameter and length from the motor design) is used. Options: N\textsubscript{2}O tank.} \\ \midrule
+\textbf{Length unit of the file} & \texttt{clk\_\allowbreak{}geo\_\allowbreak{}unit} &  &  & Choose\ldots{} \\*
+\multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Effect on the calculation:} Length unit of the coordinates in the file: m, mm or in. Required; it is never guessed. If the unit line of the CSV or the STEP header declares a different unit, the file is rejected by name. Options: Choose\ldots{}; m; mm; in.} \\ \midrule
+\textbf{Nose direction (x,y,z)} & \texttt{clk\_\allowbreak{}geo\_\allowbreak{}up} &  &  & (blank) \\*
+\multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Effect on the calculation:} Direction in the file's coordinates that points to the vehicle nose: three numbers "x,y,z", not all zero. Required for 3D files (point cloud, mesh, STEP): it decides which end of the tank faces the nose and must lie within 60\ensuremath{^\circ} of the tank axis. Not used for an (r,z) profile. \emph{If blank:} With a 3D file: the file is rejected by name.} \\ \midrule
 \textbf{Architecture} & \texttt{feed\_\allowbreak{}pressurant\_\allowbreak{}mode} &  &  & Regulated \\*
 \multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Effect on the calculation:} Pressurisation architecture: regulated or blowdown. The analysis sizes the pressurant for this architecture; fields of the other mode are ignored. Not filled from the motor result. Options: Regulated; Blowdown.} \\ \midrule
 \textbf{Pressurant Gas} & \texttt{feed\_\allowbreak{}pressurant\_\allowbreak{}gas} &  &  & Helium \\*
@@ -3439,6 +3692,160 @@ the case temperature solved by the motor is used.}{fig:g-kati-termal}
 \end{longtable}}
 % <<OTO-SON:panel-girdiler>>
 
+\subsection{Tank slosh model (Feed System → Slosh)}\label{sec:calkanti}
+
+\paragraph{What it does.} For the two tanks of a liquid engine and the
+N\textsubscript{2}O tank of a hybrid motor it gives the free-surface oscillation
+of the liquid (slosh) as an equivalent mechanical model: pendulum and fixed-mass
+equivalent over the fill fraction, the fill history from the motor's propellant
+consumption, slosh loads, a ring baffle recommendation and hand-off files for
+the vehicle team. The table is built from the motor's own tank dimensions and
+the loaded liquid (Dodge 2000; NASA SP-8009). Positions are in the tank frame:
+$z$ is measured upwards from the tank bottom; the tank's place in the vehicle is
+entered in the 6-DOF panel (Section~\ref{sec:calkanti-6dof}). A solid motor has
+no liquid propellant; a single line is shown instead of the section.
+
+The section opens below the \ui{Slosh} tab of the \ui{FEED SYSTEM} panel after
+the motor has been calculated (Figure~\ref{fig:calkanti-form}). When the motor
+is recalculated, the previous tank-model result is cleared and the reason is
+stated.
+
+\ekran{img/v3_0_7/calkanti_form_en.png}{Tank slosh model form (liquid example):
+effective axial acceleration range, model method, \ui{Compute tank model} and the
+closed \ui{Tank geometry from a file (optional)} section.}{fig:calkanti-form}
+
+\paragraph{Inputs.} The fields are in Table~\ref{tab:p-besleme}.
+\begin{itemize}[leftmargin=1.4em]
+  \item \ui{Axial acceleration g\_eff, lower} and \ui{upper}
+  (m/s\textsuperscript{2}): the axial acceleration that restores the liquid
+  surface. The slosh frequency scales as $\sqrt{g_{eff}}$; the mass ratio,
+  pendulum length and positions do not depend on it. If both are empty, standard
+  gravity $g_0 = 9.80665$~m/s\textsuperscript{2} is used and stated at the head
+  of the result. With only the lower value a single $g_{eff}$ is used; with both
+  values the range is mapped with 11 equally spaced values and the loads are given
+  at the upper end.
+  \item \ui{Model method}: \ui{Automatic} uses the closed form (Dodge 2000
+  Eq. (1.40), Table 3.2) for an upright flat-bottom cylinder and the
+  axisymmetric finite-element solution for any other axisymmetric tank. When
+  \ui{Closed form (cylinder formula)} is applied to a headed tank with the
+  equivalent depth, this is declared; rows with the free surface in a head are
+  rejected. \ui{Numerical (finite element)} always uses the finite-element
+  solution.
+\end{itemize}
+
+\paragraph{How to read the result.} For each tank (Figure~\ref{fig:calkanti-sonuc}):
+\begin{itemize}[leftmargin=1.4em]
+  \item The method sentence and the cards: loaded liquid, liquid density, loaded
+  fill fraction, and at the loaded fill $f_1$ at 1~g, slosh mass $m_1$ and
+  pendulum length $L_1$. Example liquid engine, oxidizer tank: 225.825~kg LOX,
+  1141.16~kg/m\textsuperscript{3}, fill 0.9500, $f_1$ 1.3901~Hz, $m_1$
+  21.608~kg, $L_1$ 0.1286~m; fuel tank: 119.369~kg RP-1, $f_1$ 1.4616~Hz, $m_1$
+  11.422~kg. The 1~g frequency is the same number as the slosh frequency on the
+  motor card; if it differs for an uploaded geometry, both are shown side by
+  side with the reason for the difference.
+  \item \ui{Declarations behind these numbers}: the density taken constant over
+  the burn, how the tank drains (constant flow for a liquid engine; the motor's
+  blowdown solution for a self-pressurized N\textsubscript{2}O tank), and the
+  source of density, viscosity and tank geometry.
+  \item Charts: $f_1$ against fill fraction and $g_{eff}$ (a line for a single
+  $g_{eff}$, a heat map for a range); the equivalent model over the fill
+  fraction ($L_1$, $z_1$, hinge point $z_1 + L_1$, $m_1/m$ on a second axis);
+  the fill history from the motor's propellant consumption (with $f_1$ for a
+  single $g_{eff}$).
+  \item \ui{Equivalent-model table}: 29 fill rows (0.005--0.995); columns fill,
+  height, liquid mass, $m_1/m$, $L_1$, $z_1$, hinge point, $m_0/m$, $z_0$,
+  liquid centre of mass, frozen inertia about the centre of mass, $\Gamma_1$ and
+  row status (Figure~\ref{fig:calkanti-tablo}).
+  \item \ui{SP-8009 slosh loads, two amplitude levels}: the linear limit (wall
+  wave $\eta = 0.2R$) and the breaking upper bound ($\eta = L_1$, outside linear
+  theory); per fill fraction the lateral force $F_1$, the moment $M_1$ about the
+  liquid centre of mass, the dynamic wall pressure at the surface and the bottom
+  pressure. The load relations are for an upright cylinder; for another
+  geometry the load table says ``not computed''.
+  \item \ui{Ring-baffle recommendation (Miles, approximate)}: at the loaded fill,
+  for a target damping ratio, the baffle depth below the surface, the proposed
+  width and the damping at that width (×2 band). Because damping falls with
+  depth, further baffles are needed lower in the tank as the level drops; the
+  ring array that closes an instability window is in the 6-DOF section
+  (Section~\ref{sec:calkanti-6dof}).
+  \item \ui{Hand-off table for the vehicle team}: three files. The JSON hand-off
+  table carries the equivalent-model table, the time axis from the motor's
+  consumption and the identification lines; the fill CSV is the same table; the
+  time CSV is the time axis ($m_0$, $m_1$, $L_1$, hinge, damping, liquid centre
+  of mass and inertia). Positions are in the tank frame; the tank's station in
+  the vehicle is not known in the motor view, so it is not in the files. The
+  files are meant for the vehicle team's own stability and control tool.
+\end{itemize}
+
+\ekran{img/v3_0_7/calkanti_sonuc_liquid_en.png}{Tank model result, oxidizer tank of
+the example liquid engine: cards, declarations, sources and the fill--$g_{eff}$
+frequency chart.}{fig:calkanti-sonuc}
+
+\ekran{img/v3_0_7/calkanti_tablo_liquid_en.png}{Equivalent model table (29 fill
+rows; positions upwards from the tank bottom).}{fig:calkanti-tablo}
+
+\paragraph{Tank geometry input.} The motor's tank is a flat-capped upright
+cylinder (diameter and length from the motor design). The real inner geometry
+of the tank can be uploaded in \ui{Tank geometry from a file (optional)}
+(Figure~\ref{fig:calkanti-geo}):
+\begin{itemize}[leftmargin=1.4em]
+  \item \ui{Tank to replace}: for a liquid engine the oxidizer or the fuel tank,
+  for a hybrid motor the N\textsubscript{2}O tank.
+  \item \ui{Tank inner geometry file}: point cloud CSV (header \kod{x,y,z}),
+  XYZ, PLY or STL mesh, STEP solid (the tank's inner volume as one solid) or an
+  $(r,z)$ profile CSV from the bottom pole to the top pole. Size limit 32~MB
+  per upload, 16~MB for STEP.
+  \item \ui{Length unit of the file}: m, mm or in; required, never guessed. If
+  the unit line of the CSV or the STEP header declares another unit, the file
+  is rejected by name.
+  \item \ui{Nose direction (x,y,z)}: the direction in the file's coordinates
+  that points to the vehicle nose, three numbers not all zero. Required for 3D
+  files, and it must lie within 60° of the tank axis; not used for a profile
+  file.
+\end{itemize}
+The file is read and checked for axial symmetry and closure. A tank that is not
+axisymmetric is not solved in this version: the file is rejected by name with
+the measured deviation and its limit, and no approximate result is given
+(Figure~\ref{fig:calkanti-geo-ret}). An accepted file appears in the list by
+name, and \ui{Compute tank model} builds that tank's table with the
+finite-element solution; the tank geometry line states the file name and its
+SHA-256 digest. Because the load and baffle relations are for an upright
+cylinder, those two blocks say ``not computed'' for an uploaded geometry. The
+1~g frequency on the motor card belongs to the motor's own cylinder; the
+frequency of the uploaded geometry is shown next to it with the reason
+(Figure~\ref{fig:calkanti-geo-sonuc}). The uploaded geometry is also used in the
+6-DOF coupling.
+
+\ekran{img/v3_0_7/calkanti_geometri_yukleme_en.png}{Tank geometry upload (hybrid
+example, N\textsubscript{2}O tank): domed-cylinder point cloud, unit mm, nose
+direction 0,0,1; the accepted file and its dimensions.}{fig:calkanti-geo}
+
+\ekran{img/v3_0_7/calkanti_geometri_ret_en.png}{Named rejection of a tank file
+that is not axisymmetric: the measured largest and mean deviation with their
+limits.}{fig:calkanti-geo-ret}
+
+\ekran{img/v3_0_7/calkanti_sonuc_hybrid_geo_en.png}{Hybrid tank model with the
+uploaded geometry: axisymmetric finite-element method; the motor card's 1~g
+frequency and the uploaded geometry's frequency side by side with the
+reason.}{fig:calkanti-geo-sonuc}
+
+\paragraph{Limits and declarations.}
+\begin{itemize}[leftmargin=1.4em]
+  \item The model is linear, small-amplitude slosh; above a wave amplitude of
+  0.2 times the tank radius linear theory no longer holds (Dodge 2000, p.~33).
+  The load level above this limit is labelled ``outside linear theory''.
+  \item The liquid density is taken constant over the burn at its value at
+  ignition; for a hybrid motor in the 6-DOF coupling the density follows the
+  motor's blowdown solution over time.
+  \item The motor does not publish the viscosity of N\textsubscript{2}O or the
+  surface tension of either propellant: for a hybrid motor the wall damping is
+  not computed (taken as zero in the 6-DOF, the conservative side), and the Bond
+  number check says ``could not be computed''.
+  \item The control loop (TVC, autopilot) is not modelled. For a guided vehicle
+  this coupling is the main risk; the hand-off table is used in the vehicle
+  team's GNC tool.
+\end{itemize}
+
 \subsection{Panels in the result section}
 
 Some analyses run in their own panel in the result section rather than in the dock.
@@ -3455,7 +3862,7 @@ Tank Blowdown & Hybrid & Pressure, flow and thrust decay of a self-pressurised t
 Structural FEA & Hybrid, liquid & Stress field, mesh quality and convergence history on an axisymmetric wall section. \\
 Thermal FEA & Hybrid & Wall temperature field by transient conduction; peak wall temperature at the end of a finite burn. Answers a different question from the equilibrium temperature of the main chain. \\
 Grain Section FEA & Solid & Plane-strain stress and bore strain; the acceptance criterion is the bore-surface strain. For a case-bonded grain the thermal load of cure and cool-down shrinkage is applied as well; the case expands under pressure. The margin badge is green at 1 and above (when the acceptance criterion has converged) and red below 1. If the strain leaves the small-strain range no margin is printed and the exceeded capability is stated. \\
-Flight Dynamics --- 6-DOF & All three & Rigid-body flight, Barrowman $C_{N\alpha}$/CP, static margin, rail and wind. Linear small-$\alpha$ aerodynamics ($\alpha < 15°$). Thrust is corrected for altitude: $F(h) = F_{ref} + (p_{ref} - p_a)A_e$. The stability badge is one verdict; if the flight fails it names the end reason. The thrust badge gives the name of the selected thrust source and the flown impulse. The default body is never narrower than the motor envelope. \\
+Flight Dynamics --- 6-DOF & All three & Rigid-body flight, Barrowman $C_{N\alpha}$/CP, static margin, rail and wind. Linear small-$\alpha$ aerodynamics ($\alpha < 15°$). Thrust is corrected for altitude: $F(h) = F_{ref} + (p_{ref} - p_a)A_e$. The stability badge is one verdict; if the flight fails it names the end reason. The thrust badge gives the name of the selected thrust source and the flown impulse. The default body is never narrower than the motor envelope. For liquid and hybrid motors the flight is solved coupled with tank slosh if the tank location is entered (Section~\ref{sec:calkanti-6dof}). \\
 Injector Design & Hybrid, liquid & Standalone ``what if'' calculator; after every main calculation it is filled with that design's circuit and does not change the main design. \\
 Trajectory Analysis & All three & Point-mass ballistic flight; not 6-DOF. The load factor is the sensed acceleration (gravity excluded); the kinematic acceleration is given separately. For the hybrid the motor's flight curve is flown. For a vehicle that cannot lift off no chart is drawn and \ui{NO LIFTOFF} is shown. The assumptions (planar model, launch angle and its source) are in the provenance line. \\
 \bottomrule
@@ -3695,6 +4102,12 @@ liquid (bipropellant).}{fig:y-enj-sivi}
 \multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Effect on the calculation:} Where thrust comes from. Default: the page calculation (or the form values). Imported: a RASP .eng / RockSim .rse file is parsed and its thrust curve is flown; if the file holds several motors, the list next to it picks one. Its propellant mass, if given, is written to Propellant Mass for review. Options: Page result / form values (default); Time-Resolved panel curve (this calculation); Imported motor file (.eng/.rse).} \\ \midrule
 \textbf{Thrust source} & \texttt{sd\_\allowbreak{}motor\_\allowbreak{}select} &  &  &  \\*
 \multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Effect on the calculation:} Where thrust comes from. Default: the page calculation (or the form values). Imported: a RASP .eng / RockSim .rse file is parsed and its thrust curve is flown; if the file holds several motors, the list next to it picks one. Its propellant mass, if given, is written to Propellant Mass for review.} \\ \midrule
+\textbf{Tank location source} & \texttt{sd\_\allowbreak{}clk\_\allowbreak{}yer} &  &  & Sequential arrangement (declared) \\*
+\multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Effect on the calculation:} Where the tank positions come from. Sequential arrangement (default, declared): the tanks sit directly ahead of the motor without gaps, in the order you choose, inside this vehicle's body (the flight model's body rule; tank length is the inner length, wall and cap thickness ignored). Tank bottom stations: you give each tank's bottom station in metres from the nose. It sets the slosh arm \ensuremath{\xi} about the vehicle centre of gravity. Order or station not entered: the tank is not coupled. Options: Sequential arrangement (declared); Tank bottom stations (m from the nose).} \\ \midrule
+\textbf{Order from nose to tail} & \texttt{sd\_\allowbreak{}clk\_\allowbreak{}sira} &  &  & Not entered (slosh is not coupled) \\*
+\multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Effect on the calculation:} Order of the tanks from the nose to the tail for the sequential arrangement. It decides which tank is further from the centre of gravity, which changes the slosh moment arm. Not entered: the tanks are not coupled and the 6-DOF result is the rigid one. Each tank of the motor appears once. Options: Not entered (slosh is not coupled); N\textsubscript{2}O tank directly ahead of the motor.} \\ \midrule
+\textbf{N\textsubscript{2}O tank -- bottom station x} & \texttt{sd\_\allowbreak{}clk\_\allowbreak{}x\_\allowbreak{}n2o} & m & \ensuremath{\ge}\,0 & (blank) \\*
+\multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Effect on the calculation:} Station of the tank bottom (the tank end facing the tail) in metres from the nose, positive toward the tail. It sets the slosh moment arm \ensuremath{\xi} about the vehicle centre of gravity. Accepted: the tank top at or behind the nose cone, the bottom at or ahead of the body length, the tank no wider than the body, no overlap with another tank; otherwise the tank is not coupled and the reason is named. \emph{If blank:} This tank is not coupled.} \\ \midrule
 \end{longtable}}
 
 {\small
@@ -3735,6 +4148,80 @@ liquid (bipropellant).}{fig:y-enj-sivi}
 \multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Effect on the calculation:} Display only: draws the element edges (wireframe) over the temperature maps. The analysis is not re-run and no number changes.} \\ \midrule
 \end{longtable}}
 % <<OTO-SON:yan-panel-girdiler>>
+
+\subsection{Slosh coupling to 6-DOF stability}\label{sec:calkanti-6dof}
+
+The form \ui{Slosh --- where the tanks sit in the vehicle (optional)} in the
+\ui{Mass \& Balance} part of the Flight Dynamics (6-DOF) panel couples the tank
+slosh model to the 6-DOF flight (Table~\ref{tab:y-6dof}). The motor and the
+flight model do not publish where the tanks sit in the vehicle, so the location
+is asked from the user:
+
+\begin{itemize}[leftmargin=1.4em]
+  \item \ui{Tank location source}: \ui{Sequential arrangement (declared)} lines
+  up the tanks one behind the other with the flight model's airframe rule;
+  \ui{Tank bottom stations (m from the nose)} asks for the bottom station of each
+  tank.
+  \item \ui{Order from nose to tail}: in the sequential arrangement, which tank
+  is forward (liquid: \ui{Oxidizer forward, fuel aft} or \ui{Fuel forward,
+  oxidizer aft}; hybrid: \ui{N\textsubscript{2}O tank directly ahead of the
+  motor}). Default \ui{Not entered (slosh is not coupled)}.
+\end{itemize}
+
+Without a location the tanks are not coupled, the flight stays rigid and the
+panel says ``Tank location not entered; slosh is not coupled to the 6-DOF (no
+position is assumed).'' A tank geometry uploaded in the Feed System is used here
+too. The form is sent only when the page's own motor flies; an imported motor
+file or a manually entered thrust has no tank. For a solid motor a ``slosh does
+not apply'' line is shown instead of the form.
+
+\paragraph{Stability --- slosh subsection.} After the flight, the scope note
+stands at the top of the subsection: the vehicle is passive, the TVC and
+autopilot control loop is not modelled. Then come the coupling state (per tank
+coupled, or not coupled with a named reason, bottom station, loaded liquid),
+whether the tank masses close with the flight mass budget, the declarations and
+the following blocks:
+
+\begin{itemize}[leftmargin=1.4em]
+  \item \textbf{Overall verdict} (\ui{SLOSH STABILITY}): \ui{STABLE},
+  \ui{SLOSH-INDUCED INSTABILITY}, \ui{RIGID BODY UNSTABLE}, \ui{NO VERDICT} or
+  \ui{DOES NOT APPLY}, with a reason sentence. The verdict comes from scanning
+  the frozen-coefficient linear model over the burn at every sample of the
+  solution; a slosh window is an interval in which the coupled system is
+  unstable while the rigid body is stable. The verdict is a finding of the
+  linear scan; it does not say why the flight ended.
+  \item \textbf{Window table}: start and end of each window (with the type of
+  edge), the largest growth rate Re($\lambda$) and its time, the unstable mode and
+  tank, the mode frequency and its closeness to the body frequency, the smallest
+  damping $\zeta_{min}$ needed to close the window, the tank's actual damping and
+  the growth exponent $\int \mathrm{Re}(\lambda)\,dt$ (the amplitude grows at most
+  by a factor $e^{\text{exponent}}$; an approximate frozen-coefficient value).
+  \item The \textbf{four instants} table (lift-off, rail exit, maximum dynamic
+  pressure, burnout) is reporting only; it does not set the verdict.
+  \item \textbf{Scan coverage} and the growth-rate chart over the burn (coupled
+  and rigid; windows shaded). Intervals without a verdict (on the rail, the first
+  seconds where the frozen coefficients are not valid, an empty tank) are listed
+  with their reasons; those samples are not drawn.
+  \item \textbf{Linear limit}: if the wall wave amplitude exceeds $\eta/R = 0.2$,
+  the notice states the time of the first exceedance and the tank; after that
+  time the amplitude, force and moment traces and the whole-flight numbers of
+  the coupled run are outside the validity of the linear model and are marked as
+  such. The rigid run without slosh stands next to them with its own label; it
+  is not a performance prediction of the vehicle with slosh.
+  \item \textbf{Ring baffle recommendation}: the ring array that provides the
+  damping needed to close the window; two levels (nominal and conservative), per
+  tank the ring width, spacing, count and heights above the bottom, and the result
+  of rescanning with the recommended damping (does the window close, the remaining
+  window and its growth exponent). The Miles relation is approximate; the design
+  amplitude, the band and the ring spacing are HRMA choices and are stated in the
+  identification line.
+  \item Time-domain charts: slosh angle, wall wave amplitude (with the linear
+  limit line), lateral force and moment on the body, and the difference of
+  attitude and angle of attack from the rigid run.
+\end{itemize}
+
+For the flight on the Launch Site see Section~\ref{sec:saha}.
+
 
 \subsection{Analysis Center}
 
@@ -3803,8 +4290,9 @@ showing the solved flight path (6-DOF) on a 3D globe.
   \item Pick the site by clicking the globe or by typing \ui{LATITUDE} and
   \ui{LONGITUDE} and pressing \ui{Apply}.
   \item Choose the \ui{SOURCE}: \ui{Last motor calculated}, \ui{Saved project
-  (.hrma)} or \ui{Example vehicle}. With a saved project the vehicle is built
-  with the same calculation as the project's page. The airframe diameter and
+  (.hrma)}, \ui{Project file from this computer (.hrma)} or \ui{Example
+  vehicle}. With a saved project or a project file the vehicle is built with the
+  same calculation as the project's page (Section~\ref{sec:saha-dosya}). The airframe diameter and
   length come from the selected source: from the project's airframe definition
   if it has one, otherwise derived from the motor's outer envelope and
   propellant tanks (HRMA choice); the example vehicle has its own airframe. The
@@ -3813,10 +4301,16 @@ showing the solved flight path (6-DOF) on a 3D globe.
   An airframe field typed by the user is kept when the vehicle changes and is
   marked for review. If the propellant tanks do not fit in the airframe, the
   page states the required volume and the volume the airframe can hold.
-  \item Press \ui{Resolve site}, then \ui{Fly this site}.
+  \item Review the fin and parachute fields. Empty fin dimensions are sized by
+  the fin rule (Section~\ref{sec:saha-kanat}); with an empty parachute area the
+  descent is ballistic (Section~\ref{sec:saha-inis}).
+  \item Press \ui{Resolve site}, then \ui{Fly this site}. The flight is solved
+  with the 6-DOF ascent and the descent; the ascent and descent track is drawn on
+  the globe.
   \item Play the flight with the time bar; \ui{LIVE READOUT} gives altitude,
   speed and downrange at the selected time, \ui{FLIGHT SUMMARY} the apogee and
-  the downrange at the end of the solution.
+  the landing. The \ui{Mission tracking} button plays the flight in a detailed
+  tracking view (Section~\ref{sec:saha-izleme}).
 \end{enumerate}
 
 \subsection{Inputs}
@@ -3859,7 +4353,7 @@ under \kod{defaults\_\allowbreak{}applied}.
 \bottomrule
 \endlastfoot
 \textbf{SOURCE} & \texttt{ls-vehicle-source} &  &  & Last motor calculated \\*
-\multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Effect on the calculation:} Which vehicle is flown: the last motor calculated on a motor page (handed over through this browser's storage), a saved .hrma project (recalculated on the server, since a project stores only inputs) or the built-in example vehicle. Changing it disables the previous flight until you fly again. Options: Last motor calculated; Saved project (.hrma); Example vehicle.} \\ \midrule
+\multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Effect on the calculation:} Which vehicle is flown: the last motor calculated on a motor page (handed over through this browser's storage), a saved .hrma project (recalculated on the server, since a project stores only inputs), a .hrma project file chosen from this computer (read, checked and recalculated on the server; not saved) or the built-in example vehicle. Changing it disables the previous flight until you fly again. Options: Last motor calculated; Saved project (.hrma); Project file from this computer (.hrma); Example vehicle.} \\ \midrule
 \textbf{Project} & \texttt{ls-project} &  &  &  \\*
 \multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Effect on the calculation:} Saved project whose motor is flown; it is recalculated on the server from its stored inputs. Shown only when Source is a saved project.} \\ \midrule
 \textbf{THRUST} & \texttt{ls-v-thrust} & N &  & (blank) \\*
@@ -3878,10 +4372,16 @@ under \kod{defaults\_\allowbreak{}applied}.
 \multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Effect on the calculation:} Airframe dry mass (kg), EXCLUDING the flying inert mass shown above; the page adds the two as the vehicle dry mass of the flight. Avionics, wiring and the recovery system belong in this mass: the engine dry (flying inert) mass does not contain them. A value you type is kept and marked when the vehicle changes. Must be 0 or greater. \emph{If blank:} The example vehicle and a saved project with an airframe fill it; for an engine without an airframe it is left empty (no airframe mass can be derived from the engine) and must be entered. Empty or not a number: the flight is refused by name (no mass is assumed).} \\ \midrule
 \textbf{CD0 (SUBSONIC)} & \texttt{ls-a-cd0} &  &  & 0.45 \\*
 \multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Effect on the calculation:} Zero-lift drag coefficient (dimensionless); accepted 0--5. \emph{If blank:} Empty or not a number: not sent -- the solver applies its own declared default and names it under the result.} \\ \midrule
-\textbf{FINS} & \texttt{ls-a-fincount} &  &  & 4 \\*
-\multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Effect on the calculation:} Number of fins; must be a whole number \ensuremath{\ge} 0 (0 = no fins), otherwise the flight is refused. Fin root chord 0.20 m, tip chord 0.10 m and sweep 0.08 m are fixed on this page. \emph{If blank:} Empty: not sent -- the solver applies its own declared default and names it under the result.} \\ \midrule
-\textbf{FIN SPAN} & \texttt{ls-a-finspan} & m &  & 0.11 \\*
-\multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Effect on the calculation:} Fin span (m); must be \ensuremath{\ge} 0. \emph{If blank:} Empty or not a number: not sent -- the solver applies its own declared default and names it under the result.} \\ \midrule
+\textbf{FINS} & \texttt{ls-a-fincount} &  & \ensuremath{\ge}\,0 & 4 \\*
+\multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Effect on the calculation:} Number of fins; a whole number of 0 or more (0 = no fins: nothing is sized and the body flies without fins), otherwise the flight is refused by name. Together with the fin size it sets the fin normal force in the Barrowman static margin and therefore the stability verdict. \emph{If blank:} Empty: not sent -- the solver applies its own declared default, names it under the result and withholds the stability verdict.} \\ \midrule
+\textbf{FIN SPAN} & \texttt{ls-a-finspan} & m & \ensuremath{\ge}\,0 & (blank) \\*
+\multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Effect on the calculation:} Fin span (m): height of one fin from the body surface to its tip. It sets how much the fins move the centre of pressure aft, so it drives the static margin and the stability verdict. A value you enter is flown as entered; if the vehicle is then not stable, the smallest span that would be is suggested. Accepted: 0 or more. \emph{If blank:} Empty: the fin rule sizes it -- the smallest span that keeps the static margin, full and empty, above the stability threshold from Mach 0 to the highest Mach of the flight; the vehicle is flown with it and the value and its source are shown under the fins.} \\ \midrule
+\textbf{FIN ROOT CHORD} & \texttt{ls-a-finroot} & m & \ensuremath{\ge}\,0 & (blank) \\*
+\multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Effect on the calculation:} Fin root chord (m): length of the fin along the body where it is attached; the fins sit at the tail. With the span it sets the fin normal force and its centre of pressure in the Barrowman static margin. Accepted: 0 or more. \emph{If blank:} Empty: the fin rule gives it -- the example vehicle fin scaled with this body diameter (HRMA choice, shown under the fins); if that root chord is longer than the body behind the nose, the flight is refused by name.} \\ \midrule
+\textbf{FIN TIP CHORD} & \texttt{ls-a-fintip} & m & \ensuremath{\ge}\,0 & (blank) \\*
+\multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Effect on the calculation:} Fin tip chord (m): length of the fin at its outer edge. It changes the fin area and the fin centre of pressure in the Barrowman static margin. Accepted: 0 or more. \emph{If blank:} Empty: the fin rule gives it from the root chord with the example vehicle fin proportions (HRMA choice, shown under the fins).} \\ \midrule
+\textbf{FIN SWEEP} & \texttt{ls-a-finsweep} & m & \ensuremath{\ge}\,0 & (blank) \\*
+\multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Effect on the calculation:} Fin sweep (m): distance along the body from the leading edge of the root to the leading edge of the tip. It moves the fin centre of pressure aft and so changes the static margin. Accepted: 0 or more. \emph{If blank:} Empty: the fin rule gives it from the root chord with the example vehicle fin proportions (HRMA choice, shown under the fins).} \\ \midrule
 \textbf{WIND SPEED} & \texttt{ls-a-windspeed} & m/s & \ensuremath{\ge}\,0 & 0 \\*
 \multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Effect on the calculation:} Wind speed (m/s); must be \ensuremath{\ge} 0 and below the ISA sea-level speed of sound. Default 0 (no wind). \emph{If blank:} Empty or not a number: not sent -- the solver applies its own declared default and names it under the result.} \\ \midrule
 \textbf{WIND DIRECTION} & \texttt{ls-a-winddir} & deg & 0 -- 360 & 270 \\*
@@ -3890,6 +4390,12 @@ under \kod{defaults\_\allowbreak{}applied}.
 \multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Effect on the calculation:} Launch elevation above the horizon (degrees); accepted 0--90 (90 = vertical). The launch rail is fixed at 5 m on this page. \emph{If blank:} Empty or not a number: not sent -- the solver applies its own declared default and names it under the result.} \\ \midrule
 \textbf{AZIMUTH} & \texttt{ls-a-azim} & deg &  & 90 \\*
 \multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Effect on the calculation:} Launch azimuth (degrees from north); any finite number. \emph{If blank:} Empty or not a number: not sent -- the solver applies its own declared default and names it under the result.} \\ \midrule
+\textbf{PARACHUTE AREA} & \texttt{ls-a-chutearea} & m\textsuperscript{2} & \ensuremath{\ge}\,0 & (blank) \\*
+\multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Effect on the calculation:} Projected (canopy) area of the recovery parachute (m\textsuperscript{2}), the same input as the trajectory panel of the motor pages. When given, the descent is solved under the parachute with the 2-D trajectory solver's recovery model (body drag until the deploy delay after apogee, then the parachute drag) and the landing speed is shown. Accepted: greater than 0; otherwise the flight is refused by name. \emph{If blank:} Empty: no parachute -- the descent is a nose-first ballistic fall (HRMA choice).} \\ \midrule
+\textbf{PARACHUTE CD} & \texttt{ls-a-chutecd} &  & \ensuremath{\ge}\,0 & (blank) \\*
+\multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Effect on the calculation:} Parachute drag coefficient referenced to its projected area (dimensionless); it scales the parachute drag and so the descent and landing speed. Read only when a parachute area is given. Accepted: greater than 0. \emph{If blank:} Empty: the 2-D solver's default (Hoerner, hollow hemisphere, projected area) is used and shown as assumed under the result.} \\ \midrule
+\textbf{DEPLOY DELAY AFTER APOGEE} & \texttt{ls-a-chutedelay} & s & \ensuremath{\ge}\,0 & (blank) \\*
+\multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Effect on the calculation:} Time from apogee to canopy opening (s); during it the vehicle falls with its body drag. Read only when a parachute area is given. Accepted: 0 or more. \emph{If blank:} Empty: the 2-D solver's default delay is used and shown as assumed under the result.} \\ \midrule
 \textbf{SHORTCUTS (NOT A LIMIT -- ANY POINT IS SELECTABLE)} & \texttt{ls-presets} &  &  & -- \\*
 \multicolumn{5}{@{}p{\dimexpr\linewidth\relax}@{}}{\footnotesize \emph{Effect on the calculation:} Shortcut list of known sites: choosing one writes its latitude and longitude into the fields and moves the globe there. Not a limit -- any point can be picked on the globe. Options: --; Kennedy Space Center LC-39A; Cape Canaveral SLC-40; Vandenberg SLC-4E; Wallops Flight Facility Pad 0A; Guiana Space Centre ELA-3 (Kourou); Baikonur Site 1/5 (Gagarin Start); Esrange Space Center (Kiruna); Andoya Space; Rocket Lab LC-1 (Mahia); Tanegashima Yoshinobu LP-1; Satish Dhawan SC (Sriharikota); Jiuquan LC-43; Sinop (TR) - area reference, not a launch facility; Konya (TR) - area reference, not a launch facility; Mount Everest (high terrain) - terrain reference, not a launch site.} \\ \midrule
 \textbf{ls-online} & \texttt{ls-online} &  &  & unchecked \\*
@@ -3937,11 +4443,139 @@ under \kod{defaults\_\allowbreak{}applied}.
 
 \ekran{img/v3_0_6/firlatma_sahasi_ucus_en.png}{The saved example hybrid project is selected: vehicle identification and the airframe diameter and length derived from the motor. \ui{AIRFRAME DRY (KG)} is empty, so no flight starts; the line in the \ui{FLIGHT PATH} panel asks for the field by name.}{fig:saha-ucus}
 
+\subsection{Fin rule}\label{sec:saha-kanat}
+
+The fin root chord, tip chord, sweep and span are inputs
+(Table~\ref{tab:saha-2}). Dimensions left empty are built with the following
+rule and, after the flight, each is written below the fins with its value and
+source:
+
+\begin{itemize}[leftmargin=1.4em]
+  \item \textbf{Planform} (root, tip, sweep): the example vehicle's fin is
+  scaled with this body diameter (geometric similarity; HRMA choice). An entered
+  chord is kept and the missing ones are derived from it. If the root chord does
+  not fit on the body behind the nose, the flight is rejected by name.
+  \item \textbf{Span}: the smallest span that keeps the static margin at least
+  1.5 calibres throughout the flight (full and empty, from Mach 0 to the highest
+  Mach of the flight). Source: S.~Niskanen, \emph{OpenRocket technical
+  documentation} (2013), §2.4 --- the centre of pressure should be about 1--2
+  calibres behind the centre of gravity; the HRMA target is the middle of the
+  band. If 1.5 calibres cannot be met with spans up to 4 body diameters, the
+  smallest span that stays above 1 calibre is used and this is stated by name.
+  If neither can be met, the flight is rejected by name and is not flown with
+  another fin.
+  \item The threshold of the stability verdict is 1 calibre; a vehicle with a
+  margin between 1 and 1.5 calibres is stable.
+  \item With \ui{FINS} 0 there is no fin to size; the vehicle flies without
+  fins.
+\end{itemize}
+
+If you enter the span yourself, the value is flown as entered. If the vehicle
+is not stable with that span, the smallest span with which it would be stable by
+the same criterion is recommended and the recommendation is tested in a
+verification flight with the same inputs; the \ui{Use this fin span} button
+appears only if the verification flight is stable, and it fills the field. If
+the instability does not come from the fins (today's span already meets the
+criterion), no span is recommended and the reason is stated. The \ui{Fin rule
+basis} section shows the numbers of the rule.
+
+\subsection{Descent and parachute}\label{sec:saha-inis}
+
+The 6-DOF solver ends at apogee; the descent is solved with a separate model
+and the track is drawn to the ground. With \ui{PARACHUTE AREA} empty, the descent
+is a nose-first ballistic fall (HRMA choice). If a parachute area (projected
+area, m\textsuperscript{2}) is entered, the descent is solved with the recovery
+model of the trajectory panel on the motor pages: body drag from apogee until
+the deployment delay, then parachute drag. Both pages give the same descent for
+the same inputs. If the \ui{PARACHUTE CD} and the \ui{DEPLOY DELAY AFTER
+APOGEE} are empty, the planar solver's defaults (Cd: Hoerner 1965, hollow
+hemisphere) are used and stated as assumptions below the result. The status
+line states the type of descent and the landing speed.
+
+Burnout is the time at which the flown thrust ends: for a solid motor its
+thrust curve, for a liquid engine the entered burn time with constant thrust,
+for a self-pressurized N\textsubscript{2}O hybrid the tank blowdown curve. The
+event list takes the time and altitude from the solver's full-resolution event
+list.
+
+Earth rotation is in the solution: from the site latitude the Coriolis effect
+acts in the ascent and the descent, and the centrifugal effect in the local
+gravity (WGS84). The flight equations are flat-Earth (tangent plane at the
+pad); the drawn track is a first-order projection with the local radii of
+curvature, and its error grows with range.
+
+\subsection{Import from a project file}\label{sec:saha-dosya}
+
+With \ui{SOURCE} = \ui{Project file from this computer (.hrma)} a \kod{.hrma}
+file is chosen. The file is read on the server, passes the project store's
+schema and version migrations and is solved again with the calculation of the
+project's page; it is not saved and not written to disk. Only \kod{.hrma}
+files up to 1~MB are accepted; a corrupt or excessively nested file, or one
+carrying non-numbers (NaN, infinity), is rejected by name. If the file carries
+airframe and fin dimensions, the fields are filled from it.
+
+\subsection{Mission tracking}\label{sec:saha-izleme}
+
+After a flight, the \ui{Mission tracking} button in the top bar is enabled. The
+tracking view takes the place of the left and right panels:
+
+\begin{itemize}[leftmargin=1.4em]
+  \item \textbf{Left}: mission time (T+), the solver sample shown, telemetry
+  (flight phase, altitude above the site, horizontal range, speed, Mach, dynamic
+  pressure), the event timeline (passed events marked, future ones with T$-$)
+  and the landing note. No indicator is placed for quantities the solver does
+  not publish (acceleration and load factor, vehicle mass over time); this is
+  stated by name.
+  \item \textbf{Right}: play/pause, \ui{Restart}, speed factor (×1 real time,
+  ×2, ×5, ×10, ×20, ×50), the time strip with event marks and the camera modes
+  \ui{Follow rocket}, \ui{Ground track}, \ui{Free}. \ui{Close tracking} or Esc
+  closes the view.
+\end{itemize}
+
+The indicators show the last solver sample at or before the playback time; no
+value is produced between samples. If the vehicle is unstable, playback is off
+and the reason is given with the static margins.
+
+\subsection{Map packs}\label{sec:harita-paket}
+
+The \ui{MAP PACKS (OFFLINE DETAIL)} section of the left panel downloads
+close-range map detail (roads, buildings, water, place names) for the area
+around a launch site from OpenStreetMap data (Figure~\ref{fig:harita-liste}).
+The list carries fifteen packs: a 200 × 200~km box around each of twelve launch
+sites and the Sinop and Konya regions, and the 1668 × 712~km \ui{Türkiye and
+surroundings (region pack)}. Each row shows the pack name, its coverage, its size
+(site packs 4.3--233.7~MB, region pack 1628.2~MB), its licence (ODbL-1.0,
+© OpenStreetMap contributors) and its state; above the list the number of
+installed packs and the disk space they use are given.
+
+\ekran{img/v3_0_7/harita_paketleri_liste_en.png}{Map pack list (no pack
+installed).}{fig:harita-liste}
+
+The \ui{Download pack} button first opens a confirmation box
+(Figure~\ref{fig:harita-onay}): what will be downloaded, its size, its source
+(HRMA's own GitHub release) and its licence. The download starts only with
+\ui{Confirm and download}; \ui{Not now} closes the box and sends no request.
+The progress is the bytes the server writes to disk; a download can be
+cancelled. A pack is checked by size and SHA-256 digest before it is used; a
+mismatching or partial file is not installed. An installed pack works offline
+and is removed with a confirmed delete.
+
+\ekran{img/v3_0_7/harita_paketi_onay_en.png}{Explicit confirmation box before
+downloading (the Sinop area pack).}{fig:harita-onay}
+
+Inside the box of an installed pack, at close zoom (down to street level, zoom
+level 15) roads, buildings, water and place names are added to the globe;
+launch complexes and pads are named as a separate kind. While a pack is on
+screen the attribution (OpenStreetMap contributors, ODbL 1.0; Protomaps) appears
+in the notes box. Outside a pack's coverage, and with no pack installed, the
+globe looks as before. The globe needs WebGL.
+
 \subsection{Limits}
 
 \begin{itemize}[leftmargin=1.4em]
-  \item Earth rotation and the Coriolis effect are not modelled; the ground
-  track is a flat-Earth projection.
+  \item The flight equations are flat-Earth; Earth rotation (Coriolis and
+  centrifugal) is included, and the drawn track is a first-order projection
+  (Section~\ref{sec:saha-inis}).
   \item The path is a suborbital, ballistic flight; the vehicle does not enter
   orbit.
   \item \ui{Exaggerate altitude} is for readability only and is off by default
@@ -4101,6 +4735,17 @@ Nozzle regime: \ui{PERFECT EXPANSION}, \ui{UNDEREXPANDED}, \ui{OVEREXPANDED}, \u
   the winner, the request is rejected and the conflict is named.
 \end{enumerate}
 
+\subsection{Altitude inputs}\label{sec:irtifa}
+
+An altitude entered by the user (design altitude, test altitude, profile
+altitude, launch elevation, site elevation) is a \emph{geometric} altitude above
+sea level. The standard atmosphere table (US Standard Atmosphere 1976) is
+defined in geopotential altitude; the entered altitude is converted to
+geopotential with $H = h\,r_0/(r_0 + h)$ ($r_0$ = 6\,356\,766~m) before the table
+is read. The same altitude gives the same ambient pressure on every panel. The
+conversion leaves sea level unchanged; at 20~km the ambient pressure differs by
+1\,\% from a reading without the conversion, at 50~km by 5\,\%.
+
 \subsection{Messages of the hybrid form}
 
 \begin{table}[htbp]
@@ -4177,7 +4822,12 @@ numbers in \kod{docs/\allowbreak{}VALIDATION\_\allowbreak{}STATUS.md}):
 Liquid & Vacuum Isp & 14 & 0.9\,\% & Published engine data \\
 Liquid & Vacuum thrust & 4 & 0.2\,\% & 4/4 weak evidence \\
 Liquid & Sea-level Isp & 4 & 2.0\,\% & Small sample \\
-Solid & Burn rate & 27 & 0.5\,\% & 27/27 own fit data \\
+Solid & Burn rate & 27 & 0.5\,\% & KN-sugar; 27/27 own fit data \\
+Solid & Isp & 4 & 4.9\,\% & AN/AP/Al/HTPB; NASA-CR-158815 BATES firings \\
+Solid & Web burnout time & 4 & 4.2\,\% & AN/AP/Al/HTPB \\
+Solid & Average thrust & 4 & 13.5\,\% & AN/AP/Al/HTPB \\
+Solid & Average chamber pressure & 4 & 9.9\,\% & AN/AP/Al/HTPB \\
+Solid & Isp & 2 & 7.3\,\% & AN/HMX/AP/Al/HTPB; NASA-CR-158815 \\
 Hybrid & Characteristic velocity & 18 & 3.3\,\% & \\
 Hybrid & Specific impulse & 18 & 5.0\,\% & \\
 Hybrid & Final port diameter & 18 & 10.1\,\% & \\
@@ -4190,6 +4840,12 @@ Hybrid & Regression rate & 35 & 36.7\,\% & 17/35 own fit data \\
 The 0.9\,\% median error on the liquid side shows that Isp is reproduced when
 the true operating point and the published geometry are given; it does not show
 that the flight performance of an unknown motor is predicted with this error.
+Solid rows are separated by propellant family; the NASA BATES records run with
+the record's own throat, expansion ratio and density, with the motor's own
+efficiency defaults and two-phase loss estimate; the time is compared with the
+web burnout time definition. Records outside the model's scope (two KN-sugar
+motors with an in-motor triangular pressure profile) are published in a separate
+layer.
 Rows marked ``own fit data'' are scored against the data the coefficients were
 derived from; they are not independent validation. The scatter of the hybrid
 regression rate is a known property of hybrid motors.
@@ -4208,7 +4864,7 @@ regression rate is a known property of hybrid motors.
   rate exceeds the validity ceiling of the Level-1 Q* model (0.35~mm/s).
 \end{itemize}
 
-\subsection{Known limitations (3.0.6)}
+\subsection{Known limitations (3.0.7)}
 
 \begin{itemize}[leftmargin=1.4em]
   \item The liquid delivered Isp is a preliminary-design estimate; the losses of
@@ -4245,10 +4901,24 @@ regression rate is a known property of hybrid motors.
   (star, finocyl, slotted, wagon wheel) is not solved; a crack verdict is
   given only if the circular-port strain alone exceeds the capability,
   otherwise \ui{Not determined} is shown.
-  \item The liquid page designs at sea level. A fixed upper-stage nozzle that
-  separates at sea level (e.g. $\varepsilon$ 61, RL10 class) is refused by
-  name; the refusal states the largest expansion ratio that stays attached. A
-  vacuum or altitude design ambient is planned.
+  \item The design ambient of the liquid engine can be selected
+  (Section~\ref{sec:sivi-ortam}). A design away from sea level needs a CEA
+  solution; on the static-table path without one it is rejected by name. The
+  ground test note applies the separation criterion to the one-dimensional exit
+  pressure; the wall pressure distribution of a contoured nozzle is not solved.
+  \item For a solid motor the two-phase nozzle loss is applied only for an
+  aluminized composite, within the range of the correlation and in a
+  calculation without an entered nozzle or kinetic efficiency
+  (Section~\ref{sec:kati-dayanak}). For the KN-sugar family and a small throat
+  the loss cannot be calculated and is not included in the published values;
+  the combustion efficiency assumption is not verified.
+  \item Tank slosh is a linear equivalent mechanical model; a tank that is not
+  axisymmetric is not solved. In a liquid tank the density is constant over the
+  burn; the viscosity of N\textsubscript{2}O and the propellant surface tension
+  are not published, so for a hybrid motor the wall damping and the Bond number
+  check are not computed. The frozen-coefficient scan does not include the
+  bending of the trajectory by gravity in the frozen model (declared; it gives
+  the growth rate at most 3\,\% higher, the conservative side).
   \item Number boxes follow the operating system's decimal separator; the value
   is read correctly.
   \item The station march is not extended to thick walls; for a thick wall the
@@ -4264,7 +4934,8 @@ regression rate is a known property of hybrid motors.
 
 \subsection{Not in this version}
 
-A C++ solver core; 3D CFD, 3D FEA, reacting CFD, modal FEA; detailed CAD
+Vehicle guidance, navigation and control (GNC), thrust vector control (TVC)
+and the autopilot control loop; vehicle structural analysis. A C++ solver core; 3D CFD, 3D FEA, reacting CFD, modal FEA; detailed CAD
 (injector head and dome, flanges, bolt circle, O-ring grooves, regenerative
 channels, closed STL); turbopump, preburner, feed-line, valve and gimbal models
 and their CAD; exhaust plume visuals. The turbopump power balance on the cycle
@@ -4305,6 +4976,50 @@ The calculation says the request was not sent & A required field is empty or a l
 \end{longtable}
 
 To report a problem use the \ui{Report a bug} section of \ui{Settings}.
+
+% =====================================================================
+\section{Changes in Version 3.0.7}\label{sec:v307}
+
+3.0.7 is the release after 3.0.6. It contains the requests of the Roketsan
+engineers (slosh in the liquid and hybrid tank, its coupling to 6-DOF stability,
+tank geometry input), the repair of numbers that disagreed between tabs, an
+independent validation of the solid motor, the design ambient of the liquid
+engine, flight and map additions on the Launch Site, and the update window. The
+table below gives the changes visible to the user: panel or field, what was
+published before and what is published now, and why. The full list is in the
+\ui{Release Notes} window of the application and in \kod{CHANGELOG.md}.
+
+\begin{longtable}{@{}>{\raggedright\arraybackslash}p{3.0cm}>{\raggedright\arraybackslash}p{8.0cm}>{\raggedright\arraybackslash}p{4.6cm}@{}}
+\caption{Changes in 3.0.7 (as seen by the user)}\label{tab:v307}\\
+\toprule
+\textbf{Panel / field} & \textbf{Old → new} & \textbf{Why} \\
+\midrule\endfirsthead
+\toprule
+\textbf{Panel / field} & \textbf{Old → new} & \textbf{Why} \\
+\midrule\endhead
+\bottomrule\endlastfoot
+Tank slosh model & New: on the \ui{FEED SYSTEM} → \ui{Slosh} tab, an equivalent mechanical model per tank (29 fill rows), fill--$g_{eff}$ frequency map, fill history from the motor's consumption, SP-8009 loads at two amplitude levels, a ring baffle recommendation and hand-off files for the vehicle team (JSON and two CSV); for a solid motor a ``slosh does not apply'' line (Section~\ref{sec:calkanti}). & Handing tank slosh over to the vehicle team was requested. \\
+Tank geometry & New: the tank's inner geometry from a file (point cloud CSV, XYZ, PLY, STL, STEP or an $(r,z)$ profile); an axisymmetric tank with the finite-element solution; a tank that is not axisymmetric is rejected by name, with no approximate result. & Giving the real tank geometry as a point cloud was requested. \\
+6-DOF and slosh & New: if the tank location is entered in the 6-DOF panel, the liquid and hybrid flight is solved coupled with tank slosh; the stability verdict from a scan over the burn (window, damping needed, growth exponent), the linear-limit mark and the ring baffle array that closes the window (Section~\ref{sec:calkanti-6dof}). Without a tank location the flight is the same as in 3.0.6. The TVC and autopilot control loop is not modelled. & Coupling slosh to 6-DOF stability was requested. \\
+Slosh numbers and term & The first-mode root is used with its exact value (1.841184) instead of the four-digit 1.8412: slosh frequency and masses change in the fifth significant digit (at most 3.4·10\textsuperscript{$-$5} relative). The unsourced ``about one radius'' baffle spacing was removed; the linear amplitude limit 0.25 → 0.2~R (Dodge 2000). The Turkish panel term ``çalkalanma'' → ``çalkantı''. & The source's exact value; unsourced numbers. \\
+Liquid design ambient & New \ui{Design Ambient} input: sea level (default), altitude, ambient pressure, vacuum; the thrust is defined at that ambient (\ui{Target Engine Thrust (sea level)} → \ui{(at the design ambient)}), away from sea level the expansion ratio is required, and the result carries a ground test note (Section~\ref{sec:sivi-ortam}). The example liquid engine with $\varepsilon$ 61 is rejected by name at sea level and designed in vacuum (engine Isp 322.4~s; the flow separates at sea level). The numbers of a sea-level design are unchanged. & Vacuum and upper-stage engines could not be designed because they separate at sea level. \\
+Altitude reading & The liquid design altitude is a geometric altitude; it is converted to geopotential for the standard atmosphere and gives the same pressure as the trajectory solver (Section~\ref{sec:irtifa}). & The same altitude read two ways gave two ambient pressures (1\,\% at 20~km). \\
+Solid two-phase loss & For an aluminized composite the built-in two-phase nozzle loss estimate (NASA SP-8039) is applied in a calculation without an entered nozzle or kinetic efficiency; the solid page sends those fields, so the numbers on the page are the same as in 3.0.6; a two-phase loss factor you enter replaces the estimate (Section~\ref{sec:kati-dayanak}). & The propellant table's nozzle efficiency did not include this loss; a lumped efficiency input does, and the loss is not counted twice. \\
+Solid Performance Summary & The \ui{Basis of the delivered performance} note (source of the combustion, nozzle and kinetic efficiency, two-phase loss); \ui{Burn Time} → \ui{Burn Time (web burnout)} (same number, also in the technical PDF); for the KN-sugar family a warning that the two-phase loss is not included; with a test altitude away from sea level the \ui{at test ambient} cards and a \ui{Total Impulse at sea level} card. & The basis and the ambient of the delivered numbers were not on screen; the published time is not the action time. \\
+Solid safety limit & A burn that stopped at 500~bar or 1000~s was published as a result with zero burn time and zero Isp → named rejection. In Monte Carlo such samples count as failures, do not enter the statistics and are reported on a separate line (measured, aluminized composite, 450~bar, 200 samples: mean Isp 266.7 → 289.9~s, P5 0.0 → 284.4~s). & A run stopped at the limit gave a silent zero result. \\
+Solid validation table & Statistics separated by propellant family; six NASA BATES firings (NASA-CR-158815) in the database; two KN-sugar records with an in-motor triangular profile in the out-of-scope layer; comparison with the record's own throat, expansion ratio and density; time with the web burnout time. The \ui{CORRELATION} panel shows the family label and the out-of-scope layer. & Different propellant families were mixed in one row; the comparison did not use the hardware. \\
+Hybrid \ui{Altitude Profile} & The tab did not enter the calculation, and empty fields turned into 0~m / 10\,000~m / 10 points → profile table: thrust and Isp of the same nozzle along the altitude and a vacuum row; an empty field is rejected by name. & The tab did not compute what it showed. \\
+Hybrid form & \ui{Mass Flux} and \ui{Contraction Ratio} were shown only for the finite burn type → shown for every type (numbers unchanged). & The server read both fields for every type. \\
+Hybrid technical PDF & A nozzle whose thickness was set by the manufacturing minimum was counted as a ``verified'' safety factor → the PDF carries the on-screen \ui{STRUCTURAL MIN SF} card with its governing station; the stations HRMA sized and those at the manufacturing floor under their own names. & The PDF and the screen gave different safety factors. \\
+Analysis Dock & If the motor is not calculated or the last calculation failed, an analysis does not run: hidden definition values (chamber pressure 40--50~bar, chamber diameter 0.1~m and the like) were removed in seven tabs, the fields are empty and required. \ui{PRESSURE VESSEL} evaluates the motor's wall (burst pressure from the same wall as \ui{SAFETY}; the heading says whose wall it is). \ui{STRUCTURAL}: load basis at the head of the table, the required wall side by side with both definitions. \ui{THERMAL}: cooling type from the motor, no cooling budget on a protected wall, for a liquid engine the motor's heat load on a separate line with the reason for the difference. \ui{PERFORMANCE}: heat-flux reference planes only if entered. & The tabs gave numbers that disagreed with the motor or belonged to another motor. \\
+Launch Site fins & The fin planform was fixed (root 0.20, tip 0.10, sweep 0.08~m) and the span prefilled with 0.11~m → the four dimensions are inputs; empty ones are built with a sourced rule (static margin at least 1.5 calibres throughout the flight; Niskanen 2013 §2.4); the \ui{Use this fin span} recommendation uses the same rule (Section~\ref{sec:saha-kanat}). & The liquid and hybrid example vehicles flew unstable with the fixed fins. \\
+Launch Site flight & Only the ascent was drawn → descent ballistic or under parachute (the same model as the trajectory panel of the motor pages) and the ground track; burnout is the end of the flown thrust; the note ``Earth rotation and Coriolis are not modelled'' was wrong → Coriolis included, flat-Earth projection. & The flight ended at apogee; burnout was derived from the input time. \\
+Launch Site source and tracking & Selecting a saved project did not load the vehicle → it loads; new source \ui{Project file from this computer (.hrma)}; new \ui{Mission tracking} view (telemetry, event timeline, playback speed, camera modes). & The source selection raced; the flight was shown only as a line. \\
+Map packs & New: downloadable offline map packs on the Launch Site (OpenStreetMap; twelve launch sites, the Sinop and Konya regions and a Türkiye region pack), download with explicit consent, roads, buildings, water and place names at close zoom; overlapping tiles at close zoom on the globe were repaired (Section~\ref{sec:harita-paket}). & No city or ground detail appeared when zooming in. \\
+Update window & Nothing was on screen from the moment the application closed until the installation finished → the ``Updating HRMA'' window (stages, amount copied, elapsed time, failure reason). It appears for updates after 3.0.7 (Section~\ref{sec:guncelleme}). & The user could not see whether the installation was running. \\
+Hybrid gaseous N\textsubscript{2}O & With a gaseous feed the injector hole plan, pressure drop, exit velocity and the related warnings were computed with the liquid model → not published, with the reason; the injector plate mass without subtracting the hole volume (example 0.017927 → 0.018002~kg). & The liquid model's numbers do not hold for the gas phase. \\
+Small fixes & On the hybrid page the error message after each Calculate following a Trajectory run is gone; without a latitude the 6-DOF note says that Coriolis is outside the scope instead of ``lateral drift zero'', and a \ui{HORIZONTAL DISTANCE AT FLIGHT END} badge was added; small thrusts on the liquid performance dashboard with at least three significant digits (1.0~kN → 0.954~kN). & Misleading message and rounding. \\
+\end{longtable}
 
 % =====================================================================
 \section{Changes in Version 3.0.6}\label{sec:v306}
@@ -4701,6 +5416,12 @@ or panels.
 \texttt{chamber\_\allowbreak{}wall\_\allowbreak{}thickness} & \ref{tab:sivi-5} & Liquid page: 5. Combustion Chamber Design \\
 \texttt{char\_\allowbreak{}velocity} & \ref{tab:kati-1} & Solid page: 1. Propellant Properties \\
 \texttt{characteristic\_\allowbreak{}length} & \ref{tab:sivi-5} & Liquid page: 5. Combustion Chamber Design \\
+\texttt{clk\_\allowbreak{}geff\_\allowbreak{}max} & \ref{tab:p-besleme} & Dock: Feed System panel inputs (slosh, pressurant, water hammer) \\
+\texttt{clk\_\allowbreak{}geff\_\allowbreak{}min} & \ref{tab:p-besleme} & Dock: Feed System panel inputs (slosh, pressurant, water hammer) \\
+\texttt{clk\_\allowbreak{}geo\_\allowbreak{}tank} & \ref{tab:p-besleme} & Dock: Feed System panel inputs (slosh, pressurant, water hammer) \\
+\texttt{clk\_\allowbreak{}geo\_\allowbreak{}unit} & \ref{tab:p-besleme} & Dock: Feed System panel inputs (slosh, pressurant, water hammer) \\
+\texttt{clk\_\allowbreak{}geo\_\allowbreak{}up} & \ref{tab:p-besleme} & Dock: Feed System panel inputs (slosh, pressurant, water hammer) \\
+\texttt{clk\_\allowbreak{}yontem} & \ref{tab:p-besleme} & Dock: Feed System panel inputs (slosh, pressurant, water hammer) \\
 \texttt{closeout\_\allowbreak{}material} & \ref{tab:sivi-6} & Liquid page: 6. Nozzle and Cooling System \\
 \texttt{closeout\_\allowbreak{}thickness} & \ref{tab:sivi-6} & Liquid page: 6. Nozzle and Cooling System \\
 \texttt{closure\_\allowbreak{}bolt\_\allowbreak{}class} & \ref{tab:kati-3} & Solid page: 3. Combustion Chamber and Casing \\
@@ -4728,6 +5449,9 @@ or panels.
 \texttt{core\_\allowbreak{}diameter} & \ref{tab:kati-2} & Solid page: 2. Grain Geometry \\
 \texttt{data\_\allowbreak{}collection\_\allowbreak{}time} & \ref{tab:kati-8} & Solid page: 8. Test Stand Planning (not used in the motor calculation) \\
 \texttt{density} & \ref{tab:kati-1} & Solid page: 1. Propellant Properties \\
+\texttt{design\_\allowbreak{}ambient\_\allowbreak{}altitude\_\allowbreak{}m} & \ref{tab:sivi-3} & Liquid page: 3. Feed System / Engine Cycle \\
+\texttt{design\_\allowbreak{}ambient\_\allowbreak{}mode} & \ref{tab:sivi-3} & Liquid page: 3. Feed System / Engine Cycle \\
+\texttt{design\_\allowbreak{}ambient\_\allowbreak{}pressure\_\allowbreak{}bar} & \ref{tab:sivi-3} & Liquid page: 3. Feed System / Engine Cycle \\
 \texttt{discharge\_\allowbreak{}coeff} & \ref{tab:kati-5} & Solid page: 5. Efficiency and Empirical Coefficients \\
 \texttt{discharge\_\allowbreak{}coefficient} & \ref{tab:hib-enj} & Hybrid page: Injector Configuration \\
 \texttt{discharge\_\allowbreak{}coefficient} & \ref{tab:sivi-4} & Liquid page: 4. Injector System Parameters \\
@@ -4896,10 +5620,16 @@ or panels.
 \texttt{ls-a-bodydia} & \ref{tab:saha-2} & Launch Site: Vehicle to Fly \\
 \texttt{ls-a-bodylen} & \ref{tab:saha-2} & Launch Site: Vehicle to Fly \\
 \texttt{ls-a-cd0} & \ref{tab:saha-2} & Launch Site: Vehicle to Fly \\
+\texttt{ls-a-chutearea} & \ref{tab:saha-2} & Launch Site: Vehicle to Fly \\
+\texttt{ls-a-chutecd} & \ref{tab:saha-2} & Launch Site: Vehicle to Fly \\
+\texttt{ls-a-chutedelay} & \ref{tab:saha-2} & Launch Site: Vehicle to Fly \\
 \texttt{ls-a-drymass} & \ref{tab:saha-2} & Launch Site: Vehicle to Fly \\
 \texttt{ls-a-elev} & \ref{tab:saha-2} & Launch Site: Vehicle to Fly \\
 \texttt{ls-a-fincount} & \ref{tab:saha-2} & Launch Site: Vehicle to Fly \\
+\texttt{ls-a-finroot} & \ref{tab:saha-2} & Launch Site: Vehicle to Fly \\
 \texttt{ls-a-finspan} & \ref{tab:saha-2} & Launch Site: Vehicle to Fly \\
+\texttt{ls-a-finsweep} & \ref{tab:saha-2} & Launch Site: Vehicle to Fly \\
+\texttt{ls-a-fintip} & \ref{tab:saha-2} & Launch Site: Vehicle to Fly \\
 \texttt{ls-a-winddir} & \ref{tab:saha-2} & Launch Site: Vehicle to Fly \\
 \texttt{ls-a-windspeed} & \ref{tab:saha-2} & Launch Site: Vehicle to Fly \\
 \texttt{ls-exagg} & \ref{tab:saha-3} & Launch Site: Flight Path \\
@@ -4984,6 +5714,9 @@ or panels.
 \texttt{sd\_\allowbreak{}body\_\allowbreak{}l} & \ref{tab:y-6dof} & Flight Dynamics (6-DOF) panel inputs \\
 \texttt{sd\_\allowbreak{}burn} & \ref{tab:y-6dof} & Flight Dynamics (6-DOF) panel inputs \\
 \texttt{sd\_\allowbreak{}cd0} & \ref{tab:y-6dof} & Flight Dynamics (6-DOF) panel inputs \\
+\texttt{sd\_\allowbreak{}clk\_\allowbreak{}sira} & \ref{tab:y-6dof} & Flight Dynamics (6-DOF) panel inputs \\
+\texttt{sd\_\allowbreak{}clk\_\allowbreak{}x\_\allowbreak{}n2o} & \ref{tab:y-6dof} & Flight Dynamics (6-DOF) panel inputs \\
+\texttt{sd\_\allowbreak{}clk\_\allowbreak{}yer} & \ref{tab:y-6dof} & Flight Dynamics (6-DOF) panel inputs \\
 \texttt{sd\_\allowbreak{}dry\_\allowbreak{}m} & \ref{tab:y-6dof} & Flight Dynamics (6-DOF) panel inputs \\
 \texttt{sd\_\allowbreak{}elev} & \ref{tab:y-6dof} & Flight Dynamics (6-DOF) panel inputs \\
 \texttt{sd\_\allowbreak{}fin\_\allowbreak{}count} & \ref{tab:y-6dof} & Flight Dynamics (6-DOF) panel inputs \\
@@ -5130,7 +5863,7 @@ Thrust coefficient & $(F/A_t)/P_c$ exceeds the infinite-expansion vacuum $C_F$ f
 \vspace{1cm}
 \begin{center}
 \color{hrmagray}\small
-HRMA 3.0.6 --- Rocket Motor Preliminary Design and Analysis Software\\
+HRMA 3.0.7 --- Rocket Motor Preliminary Design and Analysis Software\\
 \href{https://github.com/berketez/HRMA}{github.com/berketez/HRMA}
 \end{center}
 

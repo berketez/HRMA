@@ -256,9 +256,16 @@ def test_kutle_akisi_ipucu_cozucunun_aki_tabani_ve_varsayilaniyla():
     assert 'Typical' not in _sozluk('en')['adv.tip.massFluxKgM']
 
 
-def test_irtifa_profili_ipuclari_sunucunun_okumadigini_soyler():
-    """Sunucu ``altitude_profile``ı okumaz (Python'da 0 kez geçer): bitiş
-    irtifası ve nokta sayısı ipuçları 'hesaplanır' iddia edemez."""
+def test_irtifa_profili_ipuclari_sunucunun_okudugunu_soyler():
+    """İpucu sunucunun davranışını söyler (formda gösterilen = hesaba giren).
+
+    V306'da sunucu ``altitude_profile``ı OKUMUYORDU ve bu bekçi ipucunun
+    "does not read it" demesini kilitliyordu. V307/SEKME-MOTOR (DİL-HİBRİT
+    §8.2) sekmeyi gösterdiğini yapar hâle getirdi: ``/calculate`` alanı okur
+    (adlı kapı) ve aynı lüle çözümünden İrtifa Profili tablosunu kurar
+    (hrma/analysis/altitude_performance.py). Bekçi aynı soruyu ters yönden
+    sorar: sunucu okuyorsa ipucu "okumaz" diyemez, tabloyu anmalıdır.
+    """
     py = []
     for kok, _, dosyalar in os.walk(os.path.join(KOK, 'hrma')):
         for d in dosyalar:
@@ -266,12 +273,11 @@ def test_irtifa_profili_ipuclari_sunucunun_okumadigini_soyler():
                 with open(os.path.join(kok, d), encoding='utf-8') as f:
                     if 'altitude_profile' in f.read():
                         py.append(d)
-    assert not py, ('sunucu altitude_profile okuyor (%s) — ipuçlarını '
-                    'yeniden yaz' % py)
+    assert 'app.py' in py and 'altitude_performance.py' in py, py
     en = _sozluk('en')
     for k in ('adv.tip.finalAltitudeM', 'adv.tip.numberPoints'):
-        assert 'does not read it' in en[k], (k, en[k])
-        assert 'calculated at' not in en[k]
+        assert 'does not read it' not in en[k], (k, en[k])
+        assert 'Altitude Profile table' in en[k], (k, en[k])
 
 
 def test_blowdown_ornek_rozeti_sozlukten():

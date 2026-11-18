@@ -786,6 +786,31 @@ def make_solid_factory(inputs, track_performance=False):
 
 # --- Sıvı --------------------------------------------------------------------
 
+def liquid_uq_isp(result):
+    """V307/GÜVERTE-ORTAM — sıvı belirsizlik çıktısının Isp'si: TASARIM
+    ORTAMININ Isp'si (itki çıktısı da o ortamın itkisidir).
+
+    ÖLÇÜLDÜ (docs/scofield/raw/OH/V307/guverte-ortam/olcum/ortam_once.json,
+    K2, nominal örnek): çıktı ``isp_sea_level`` okuyordu. 3.0.7'de deniz
+    seviyesi dışındaki tasarımda bu alan aynı lülenin GERÇEK deniz seviyesi
+    değeridir — vakum tasarımında (deniz seviyesinde yapışık, örnek sıvı
+    ε 12) çıktı 254,71 s (deniz seviyesi) basılıyordu, tasarımın kendi Isp'si
+    299,25 s (vakum); itki çıktısı ise 25 000 N vakum itkisiydi (iki ayrı
+    ortam yan yana). Nozul deniz seviyesinde ayrıksa (L3 ε 50) alan ``None``
+    ve çıktı listesinden SESSİZCE düşüyordu (yanıtta Isp kartı yok).
+
+    Kural: tasarım deniz seviyesindeyse (``design_ambient.is_sea_level`` True
+    ya da blok yok) AYNEN ``isp_sea_level`` okunur (deniz seviyesi tasarımı
+    bit-aynı); değilse ``isp_design_ambient`` (yanıtın başlık Isp'si). Ortamın
+    adı panelde, isteğin kendi tasarım ortamı alanlarından yazılır
+    (uncertainty_panel.js). Sayı türetilmez.
+    """
+    da = result.get('design_ambient') if isinstance(result, dict) else None
+    if isinstance(da, dict) and da.get('is_sea_level') is False:
+        return result.get('isp_design_ambient')
+    return result.get('isp_sea_level')
+
+
 def make_liquid_factory(inputs, track_performance=False):
     """/calculate_liquid kurucu bloğunu izleyen sıvı UQ fabrikası.
 
@@ -863,7 +888,7 @@ def make_liquid_factory(inputs, track_performance=False):
         result = engine.calculate_performance()
         _defteri_kaydet(factory, engine)
         resolved = {
-            'isp': result.get('isp_sea_level'),
+            'isp': liquid_uq_isp(result),
             'thrust': result.get('thrust'),
             'c_star': result.get('c_star'),
             'mdot_total': result.get('total_mass_flow'),

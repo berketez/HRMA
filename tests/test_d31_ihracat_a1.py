@@ -53,6 +53,12 @@ class TestP9B321GuvenlikBeslemesi:
     #: Sayfa yüklerinin ÖLÇÜLMÜŞ biçimleri (once_p9b321.json). Sayılar
     #: gerçek çözücü koşumlarından alınmıştır; buradaki iş biçimi
     #: (hangi alan hangi iç içe blokta) korumaktır.
+    #: V307/GÜVERTE-ISIL kalem 4: oda sıcaklığı PDF güvenlik bölümünde de
+    #: zorunlu (``PDF_SAFETY_REQUIRED_FIELDS`` = ucun kümesi; 3000 K
+    #: uydurulmuyor). Gerçek sayfalarda yerinde: sıvı ``analysis_results``
+    #: (çözücünün düz sözlüğü yayılır), katı ``analysis_results``
+    #: (``window.currentResults`` kökü), hibrit ``motor_data`` (app.js).
+    #: Değer eski örtük varsayılanın kendisi: belge metni bit-aynı.
     YUKLER = {
         'sivi': (
             {'motor_name': 'BEKCI-SIVI', 'motor_type': 'liquid',
@@ -61,7 +67,8 @@ class TestP9B321GuvenlikBeslemesi:
              'chamber_pressure': 30.0},
             {'openrocket': {'motor_summary': {'propellant_mass': 109.4}},
              'structural_analysis': {'chamber_structure': {
-                 'wall_thickness': 2.0, 'material_key': 'steel_4130'}}},
+                 'wall_thickness': 2.0, 'material_key': 'steel_4130'}},
+             'chamber_temperature': 3000.0},
         ),
         'kati': (
             {'motor_name': 'BEKCI-KATI', 'motor_type': 'solid',
@@ -71,7 +78,8 @@ class TestP9B321GuvenlikBeslemesi:
              'propellant_mass': 6.264252905747166},
             {'structural_analysis': {'case_analysis': {
                 'wall_thickness_mm': 2.9943015589182016,
-                'case_material': 'steel_4130'}}},
+                'case_material': 'steel_4130'}},
+             'chamber_temperature': 3000.0},
         ),
         'hibrit': (
             {'motor_name': 'BEKCI-HIBRIT',
@@ -79,7 +87,8 @@ class TestP9B321GuvenlikBeslemesi:
              'chamber_pressure': 20.0,
              'propellant_mass_total': 4.497560907804656,
              'chamber_wall_policy': {'wall_thickness_m': 0.009367779912125954,
-                                     'wall_thickness_mm': 9.367779912125954}},
+                                     'wall_thickness_mm': 9.367779912125954},
+             'chamber_temperature': 3000.0},
             {},
         ),
     }

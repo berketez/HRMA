@@ -111,12 +111,56 @@
             .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
     }
 
+    // ------------------------------------------------------------------
+    // V307/GÜVERTE-ORTAM — ORTAMA BAĞLI ÇIKTILARIN ADI ORTAMI SÖYLER
+    // ------------------------------------------------------------------
+    // Sıvı motorda tasarım ortamı deniz seviyesi değilse fabrikanın Isp
+    // çıktısı tasarım ortamının Isp'sidir (uq_adapters.liquid_uq_isp) ve
+    // itki çıktısı o ortamdaki itkidir (girdi). ÖLÇÜLDÜ (olcum/ortam_once.json
+    // K2): eskiden Isp çıktısı vakum tasarımında deniz seviyesi Isp'siydi ya
+    // da (deniz seviyesinde ayrılan nozulda) hiç yoktu, etiket iki hâlde de
+    // yalnız "Isp" diyordu. Ortam, bu sonucu üreten İSTEĞİN kendi tasarım
+    // ortamı alanlarından okunur (fabrika motoru bu alanlarla kurdu; deniz
+    // seviyesinde sayfa bu alanları göndermez → etiket bugünküyle aynı).
+    // Ortam okuyucusu tek kaynaktır (performance_panel.js
+    // window.HRMAIspAmbient).
+    const ORTAMA_BAGLI_CIKTILAR = ['isp', 'thrust'];
+    //: Ekrandaki sonucun tasarım ortamı (deniz seviyesinde null).
+    let ciktiOrtami = null;
+
+    function ciktiOrtaminiKur(gonderilen) {
+        const AMB = window.HRMAIspAmbient;
+        ciktiOrtami = (AMB && typeof AMB.describeInputs === 'function')
+            ? AMB.describeInputs(gonderilen) : null;
+        // Okuyucu yoksa ama istek deniz seviyesi dışında bir ortam taşıyorsa
+        // ortam yok sayılmaz: "beyan edilmedi" adıyla yazılır (fail-closed).
+        const kip = gonderilen && gonderilen.design_ambient_mode;
+        if (!ciktiOrtami && kip && kip !== 'sea_level') {
+            ciktiOrtami = { kind: 'undeclared', key: 'undeclared', p: null, h: null };
+        }
+    }
+
+    function ciktiOrtamiMetni() {
+        if (!ciktiOrtami) return '';
+        const AMB = window.HRMAIspAmbient;
+        return (AMB && typeof AMB.labelText === 'function')
+            ? AMB.labelText(ciktiOrtami)
+            : T('panel.ambient.undeclared', 'design ambient not declared by the result');
+    }
+
     function labelFor(key) {
         const pair = OUTPUT_LABEL_KEYS[key];
-        if (pair) return T(pair[1], pair[0]);
-        return key.replace(/_/g, ' ').replace(/\b\w/g, function (c) {
-            return c.toUpperCase();
-        });
+        let ad;
+        if (pair) ad = T(pair[1], pair[0]);
+        else {
+            ad = key.replace(/_/g, ' ').replace(/\b\w/g, function (c) {
+                return c.toUpperCase();
+            });
+        }
+        if (ciktiOrtami && ORTAMA_BAGLI_CIKTILAR.indexOf(key) !== -1) {
+            ad += ' · ' + ciktiOrtamiMetni();
+        }
+        return ad;
     }
 
     // Sayı büyüklüğüne uyumlu biçim (Isp ~200 ile It ~1e5 aynı kartta)
@@ -611,6 +655,8 @@
             });
             return;
         }
+        // V307/GÜVERTE-ORTAM: çıktı adları bu sonucu üreten isteğin ortamıyla.
+        ciktiOrtaminiKur(gonderilen);
         finish(data, document.getElementById('uq_run'), root);
         if (lastData === data) {
             gosterilenGirdi = gonderilen;
@@ -1395,6 +1441,10 @@
         _render: render,
         _collectInputs: collectInputs,
         _labelFor: labelFor,
+        // V307/GÜVERTE-ORTAM — çıktı adlarının ortamını istek girdisinden kur
+        // (bekçiler `_render` öncesi çağırır; koşu yolu sonucuGoster'de).
+        _setOutputAmbientFromInputs: ciktiOrtaminiKur,
+        get outputAmbient() { return ciktiOrtami; },
         _fmtVal: fmtVal,
         _augmentSection: augmentSection,
         _conditionalityHtml: conditionalityHtml,

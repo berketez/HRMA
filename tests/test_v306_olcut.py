@@ -235,6 +235,57 @@ def test_hizli_alt_kume_her_sistemden_bir_vaka():
     assert kati["kayit_kiyasi"][0]["kayit_yolu"]["adaptor_durumu"] == "ok"
 
 
+def test_sivi_l4_rl10_adimi_vakum_tasariminda_yayimlanir(vakalar, kayitlar,
+                                                         bantlar):
+    """V307/SIVI-ORTAM (kalem 5): RL10 adımı 3.0.6'da adlı ret bekliyordu
+    (tasarım ortamı sabit deniz seviyesiydi, ε 61 orada ayrılır). Vakum
+    tasarım ortamıyla tasarım YAYIMLANIR; yayımlanmış RL10A-3-3A vakum
+    Isp'siyle sapma mevcut hücre tavanının (ikinci bant tanımı yok)
+    içindedir ve deniz seviyesi durumu adıyla izlenir. Eşik değişmedi.
+    """
+    vaka = next(v for v in vakalar if v["kimlik"] == "sivi_L4")
+    adim = next(a for a in vaka["adimlar"] if a["ad"] == "rl10_kiyas_motoru")
+    assert adim["govde"]["design_ambient_mode"] == "vacuum"
+    assert adim["govde"]["nozzle_expansion_ratio"] == 61
+    assert adim["beklenen"] == {"http_durum": 200}
+    assert adim["turetilmis"] and adim["turetme_notu"]
+    kiyas = vaka["kayit_kiyasi"][0]
+    assert kiyas["kayit"] == "liq-rl10a33a-nominal-spec"
+    # Tasarım itkisi kaydın yayımlanmış vakum itkisidir.
+    assert adim["govde"]["thrust"] == kayitlar[kiyas["kayit"]]["measured"][
+        "thrust_vac_n"]
+    sonuc, govde = ok.adim_kos(ok._istemci(), adim)
+    assert sonuc["hukum"] == ok.GECTI, sonuc["nedenler"]
+    izl = sonuc["izlenen"]
+    assert izl["itki_vak_N"] == pytest.approx(izl["itki_N"], rel=1e-12)
+    assert izl["isp_tasarim_ortami_s"] == pytest.approx(izl["isp_vak_s"],
+                                                        rel=1e-12)
+    assert izl["tasarim_ortami_basinci_bar"] == 0.0
+    # Deniz seviyesi (yer testi): ayrık, sayı yok; 3.0.6 reddinin sayısı.
+    assert izl["ds_durumu"] == "separated" and izl["isp_ds_s"] is None
+    assert izl["ds_yapisik_en_buyuk_eps"] == pytest.approx(10.07, abs=0.005)
+    # Yayımlanmış motorla kıyas (yalnız vaka yolu; kayıt yolu ayrı bekçide).
+    k = ok.kayit_kiyasi({"kayit": kiyas["kayit"],
+                         "vaka_yolu": kiyas["vaka_yolu"]},
+                        {"rl10_kiyas_motoru": govde}, kayitlar, bantlar)
+    assert k["hukum"] == ok.GECTI, k["nedenler"]
+    satir = {r["taban"]: r for r in k["vaka_yolu"]["satirlar"]}
+    assert satir["isp_vac"]["durum"] == "nokta"
+    assert satir["isp_vac"]["hukum"] == ok.GECTI
+    assert satir["isp_vac"]["bant_kaynagi"].startswith(
+        "tests/test_correlation_guards.py")
+    assert satir["thrust_vac"]["durum"] == "dongusel_skor_disi"
+    # Ters yön: vakum kipi çıkarılırsa aynı gövde yine adlı ret alır
+    # (deniz seviyesi tasarım kuralı gevşemedi).
+    ds_adim = copy.deepcopy(adim)
+    ds_adim["govde"].pop("design_ambient_mode")
+    ds_adim["beklenen"] = {"http_durum": 422, "gecersiz_alan": {
+        "field": "nozzle_expansion_ratio",
+        "reason": "fixed_nozzle_separated_at_design_ambient"}}
+    ds_sonuc, _ = ok.adim_kos(ok._istemci(), ds_adim)
+    assert ds_sonuc["hukum"] == ok.GECTI, ds_sonuc["nedenler"]
+
+
 def test_hizli_alt_kume_kati_surec_ici_bit_ayni():
     sonuc, nedenler = _uctan_uca(["kati_L1"], tekrar=2)
     assert sonuc["tekrar"]["kati_L1"]["bit_ayni"], sonuc["tekrar"]

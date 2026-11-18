@@ -70,6 +70,9 @@ from hrma.constants import (  # merkezi USSA 1976 tablosu
 # seçicisi (isa_temperature / isa_pressure ve trajectory_analysis._atm_full
 # aynı işlevi okur).
 from hrma.constants import _isa_layer
+# V307/KIRMIZI-C: USSA 1976 geopotansiyel dönüşüm yarıçapı r0 TEK TANIM
+# (V307/SIVI-ORTAM); bu modülde ``R_GEOPOTENTIAL`` adıyla okunur.
+from hrma.constants import ISA_GEOPOTENTIAL_EARTH_RADIUS_M
 # ÖH D17 (P4B3-13 + OH-D16-11): kalkış eşiği ve itki eğrisi sözleşmesi
 # kardeş düzlemsel çözücüde TANIMLIDIR ve BURADAN İTHAL EDİLİR — aynı
 # soruya iki modülde iki farklı cevap üreten ikinci kopya yazılmaz.
@@ -101,7 +104,9 @@ R_EARTH = 6_371_000.0  # m
 # yükseklik tanımı). Kardeş trajectory_analysis._atm_full aynı değeri kullanır
 # (self.R_geopotential) — iki modül aynı atmosferi versin diye burada da aynı
 # sabit kullanılmalı (F165; sayısal etki 47 km'de ~0.4 m, tutarlılık meselesi).
-R_GEOPOTENTIAL = 6_356_766.0  # m
+# Değer artık merkezden (``hrma.constants.ISA_GEOPOTENTIAL_EARTH_RADIUS_M``,
+# 6 356 766,0 m — eski yerel literalle bit-aynı); kardeş çözücü de oradan okur.
+R_GEOPOTENTIAL = ISA_GEOPOTENTIAL_EARTH_RADIUS_M  # m
 # Dünya dönüş açısal hızı (Coriolis ivmesi için). launch_site.py:OMEGA_EARTH
 # ile AYNI değer (IERS Konvansiyonları 2010, ω_E = 7.292115e-5 rad/s);
 # modüller arası zorunlu bağımlılık yaratmamak için burada yerel tanımlı
@@ -737,6 +742,16 @@ def _mk_warning(code, severity='warning', **params):
     return {'code': code, 'params': params, 'severity': severity}
 
 
+#: Kararlılık hükmünün statik marj eşiği [kalibre]: dolu ve boş marj bunun
+#: ÜSTÜNDE olmalı (``stable`` / ``stability_verdict_code``). V307/FS-UÇUŞ:
+#: Fırlatma Sahası kanat önerisi aynı eşiği okur (tek tanım, kural #11).
+#: Kaynak (V307/FS-UÇUŞ-2 A2): Niskanen, OpenRocket tech. doc. 2013 §2.4
+#: s.12, "1-2 kalibre" kuralının alt ucu (launch_site_flight künyesi).
+#: Yeri bilerek burada: formal/registry.json Lean çapaları (satır 307/479/482)
+#: kaymasın diye çapalardan sonra.
+STATIC_MARGIN_MIN_CAL = 1.0
+
+
 def stability_verdict_code(stable, sm_full, sm_empty, max_alpha_deg):
     """``stable`` hükmünün ADLI karşılığı (V306/UÇUŞ-2, tek kural).
 
@@ -749,7 +764,7 @@ def stability_verdict_code(stable, sm_full, sm_empty, max_alpha_deg):
     """
     if stable is None:
         return 'not_evaluated'
-    if not (sm_full > 1.0 and sm_empty > 1.0):
+    if not (sm_full > STATIC_MARGIN_MIN_CAL and sm_empty > STATIC_MARGIN_MIN_CAL):
         return 'static_margin_at_or_below_1_cal'
     if not (max_alpha_deg is not None
             and max_alpha_deg < ALPHA_LINEAR_LIMIT_DEG):
@@ -796,7 +811,8 @@ class SixDOFTrajectory:
                  launch_elevation_deg=90.0, launch_azimuth_deg=0.0,
                  latitude_deg=None, coriolis=True, launch_altitude=0.0,
                  nozzle_exit_area=None, thrust_reference_pressure=None,
-                 rail_length=None, roll_damping=0.05, components=None):
+                 rail_length=None, roll_damping=0.05, components=None,
+                 slosh_tanks=None):
         """
         Args:
             aero: BarrowmanAero örneği
@@ -841,6 +857,12 @@ class SixDOFTrajectory:
                         gövde ince-silindir düzeltmesiyle kurulur (bkz.
                         _inertia). None → tekdüze narin-gövde modeli
                         (geriye dönük birebir aynı sonuç).
+            slosh_tanks: V307/K2 — tank çalkantısı bağlama (CALKANTI §B,
+                        sözleşme ``six_dof_slosh.SloshBaglama``):
+                        [{"tank_id", "x_tank_taban_m", "tablo": SloshTablo,
+                          "m_t": {"t": [...], "m": [...]} | None,
+                          "zeta_ek": float | None}]. None/[] → çalkantı yok,
+                        durum vektörü 13, sonuç bugünkü 6-DOF ile BİT-AYNI.
         """
         # B7 — SONLU-DEĞER KAPISI, çözücüye girmeden önce (fail-closed).
         # Kütle bölen olarak kullanılır (a = F/m), bu yüzden pozitiflik de
@@ -1060,6 +1082,16 @@ class SixDOFTrajectory:
                     comps.append((m_i, x_i, bool(c.get('propellant', False))))
             if comps:
                 self.components = comps
+
+        # V307/K2 — ÇALKANTI BAĞLAMA (CALKANTI §B). Tank listesi boşsa
+        # (katı motor, ya da kullanıcı çalkantıyı kapattı) ``_slosh`` None
+        # kalır: durum vektörü 13, ``_derivatives`` ve ``solve`` bugünkü
+        # satırları aynen koşar (§C-c bit-aynılık). Doğrulama ve kapılar
+        # ``six_dof_slosh.SloshBaglama`` içinde (adlı ret, fail-closed).
+        self._slosh = None
+        if slosh_tanks:
+            from hrma.analysis.six_dof_slosh import SloshBaglama
+            self._slosh = SloshBaglama(slosh_tanks, self)
 
     # ---- zamana bağlı büyüklükler ----
 
@@ -1382,11 +1414,20 @@ class SixDOFTrajectory:
             q_dot = np.zeros(4)
             w_dot = np.zeros(3)
             a_i = F_i / m
+            # V307/K2: rayda gövde denklemleri DEĞİŞMEZ; çalkantı (B-3) ile
+            # ω = ω̇ = 0 ve izdüşürülmüş ivmeyle ilerler (CALKANTI §B.3.5).
+            if self._slosh is not None:
+                slosh_turev = self._slosh.ray_turevi(t, y, C_bi, a_i, g, x_cg)
         else:
             q_dot = _quat_derivative(q, w_b)
             I = np.array([I_x, I_t, I_t])
             w_dot = (M_b - np.cross(w_b, I * w_b)) / I
             a_i = F_i / m
+            # V307/K2: çalkantı düzeltmesi PERTÜRBASYON biçiminde (CALKANTI
+            # §B.3.4), Coriolis'ten ÖNCE; m1 = 0'da a_i ve w_dot bit-aynı.
+            if self._slosh is not None:
+                a_i, w_dot, slosh_turev = self._slosh.serbest_ucus(
+                    t, y, C_bi, F_i, M_b, w_b, I, m, g, x_cg, a_i, w_dot)
             # Coriolis fiktif ivmesi F_i/m SONRASI eklenir; YALNIZ serbest
             # uçuşta (rayda kısıt karşılar, v≈0). v_rel = atalet hızı v
             # (rüzgâr değil). Merkezkaç/taşıma hızı eklenmez.
@@ -1394,6 +1435,8 @@ class SixDOFTrajectory:
                 a_i = a_i + _coriolis_acceleration(
                     v, self._cos_lat, self._sin_lat)
 
+        if self._slosh is not None:
+            return np.concatenate([v, a_i, q_dot, w_dot, slosh_turev])
         return np.concatenate([v, a_i, q_dot, w_dot])
 
     def solve(self, t_max=400.0, max_step=0.1):
@@ -1414,6 +1457,12 @@ class SixDOFTrajectory:
         self._r0 = np.zeros(3)
         y0 = np.concatenate([
             self._r0, np.zeros(3), self.q0, np.zeros(3)])
+        # V307/K2: tank başına çalkantı durumları (η, η̇) YALNIZ bağlıysa
+        # eklenir (13 + 4·n_t); başlangıç rampadaki statik denge (§B.3.5).
+        if self._slosh is not None:
+            _z0, _slosh_bas_beyan = self._slosh.baslangic_durumu(
+                _quat_to_dcm(self.q0), self.g_surface)
+            y0 = np.concatenate([y0, _z0])
 
         def hit_ground(t, y):
             return y[2] + 1e-6 if t < 1.0 else y[2]
@@ -1654,7 +1703,8 @@ class SixDOFTrajectory:
             'x_cg_empty': float(self.x_cg_empty),
             'x_cg_source': self.x_cg_source,
             'x_cg_is_estimate': bool(self.x_cg_is_estimate),
-            'stable': bool(sm_full > 1.0 and sm_empty > 1.0 and
+            'stable': bool(sm_full > STATIC_MARGIN_MIN_CAL
+                           and sm_empty > STATIC_MARGIN_MIN_CAL and
                            max_alpha < ALPHA_LINEAR_LIMIT_DEG),
             'cn_alpha': float(self.aero.cn_alpha),
             'x_cp': float(self.aero.x_cp),
@@ -1844,6 +1894,14 @@ class SixDOFTrajectory:
                 'gets no stability verdict: how the flight ended is the '
                 'verdict.'),
         }
+        # V307/K2 — çalkantı çıktıları (CALKANTI §B.3.3, §B.5): zaman alanı,
+        # dört anda özdeğer/Hurwitz/ζ_min ve tek durumlu hüküm, rijit
+        # karşılaştırma. Çalkantı bağlı değilse hiçbir anahtar eklenmez.
+        if self._slosh is not None:
+            from hrma.analysis import six_dof_slosh as _sds
+            out.update(_sds.cozum_ciktilari(self, sol.t, sol.y, out,
+                                            t_max, max_step))
+            out['slosh_stability']['baslangic_beyan'] = _slosh_bas_beyan
         out['warnings'] = solve_warnings
         return out
 

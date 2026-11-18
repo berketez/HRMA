@@ -31,7 +31,10 @@ APP_PY = pathlib.Path(flask_app.root_path) / 'app.py'
 #: ``/analyze_safety``ın ZORUNLU alanları sağlanmış en küçük geçerli gövde.
 SAFETY = {'motor_type': 'hybrid', 'chamber_pressure': 20.0,
           'propellant_mass': 50.0, 'chamber_diameter': 0.1,
-          'wall_thickness': 0.005}
+          'wall_thickness': 0.005,
+          # V307/GÜVERTE-ISIL kalem 4: oda sıcaklığı zorunlu (3000 K varsayılanı
+          # kalktı); eski örtük değer açık yazıldı, sayılar bit-aynı.
+          'chamber_temperature': 3000.0}
 
 UQ = {'motor_type': 'hybrid', 'level': 'fast'}
 UQ_INPUTS = {'thrust': 1000.0, 'chamber_pressure': 20.0,

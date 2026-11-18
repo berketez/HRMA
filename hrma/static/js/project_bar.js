@@ -372,8 +372,16 @@
             }
         } else if (motorType === 'liquid') {
             put('thrust_N', cr.thrust);
-            put('isp_s', cr.isp_sea_level);
-            if ('isp_s' in out) out.isp_basis = 'sea_level';
+            // V307/SIVI-ORTAM: tasarım ortamı deniz seviyesi değilse özetin
+            // Isp'si o ortamın Isp'sidir (itki de o ortamın itkisi); taban
+            // 'design_point' diye yazılır. Deniz seviyesi tasarımı eskisi gibi.
+            if (cr.design_ambient && cr.design_ambient.is_sea_level === false) {
+                put('isp_s', cr.isp_design_ambient);
+                if ('isp_s' in out) out.isp_basis = 'design_point';
+            } else {
+                put('isp_s', cr.isp_sea_level);
+                if ('isp_s' in out) out.isp_basis = 'sea_level';
+            }
             put('isp_vacuum_s', cr.isp_vacuum);
             put('chamber_pressure_bar', cr.chamber_pressure);
             // ÖH D37 · A1b dil-cozucu-nesri · CW-D4 — SIVI SATIRINDA It.

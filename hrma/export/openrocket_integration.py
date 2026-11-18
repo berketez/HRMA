@@ -12,7 +12,8 @@ import json
 from typing import Dict, List, Tuple, Optional
 from datetime import datetime
 
-from hrma.constants import G_0, M_AIR, R_STAR_ICAO, isa_pressure, isa_temperature
+from hrma.constants import (G_0, M_AIR, R_STAR_ICAO, isa_pressure_geometric,
+                            isa_temperature_geometric)
 from hrma.utils.input_guard import finite_number, finite_positive
 
 # ---------------------------------------------------------------------------
@@ -553,10 +554,15 @@ def _finite_number(value) -> Optional[float]:
 
 
 def _air_density(altitude_m: float) -> float:
-    """ISA hava yoğunluğu [kg/m^3] — basınç/sıcaklık tek kaynaktan (constants)."""
+    """ISA hava yoğunluğu [kg/m^3] — basınç/sıcaklık tek kaynaktan (constants).
+
+    ``altitude_m`` uçuş profilinin GEOMETRİK irtifasıdır; USSA 1976 tablosuna
+    geopotansiyele çevrilerek verilir (V307/İRTİFA-TEK, yörünge çözücüsüyle
+    aynı okuma).
+    """
     h = float(max(0.0, altitude_m))
-    T = isa_temperature(h)
-    p = isa_pressure(h)
+    T = isa_temperature_geometric(h)
+    p = isa_pressure_geometric(h)
     return float(p * M_AIR / (R_STAR_ICAO * T))
 
 
@@ -2081,6 +2087,77 @@ class OpenRocketExporter:
             return None
         return m / hacim_m3
 
+    @staticmethod
+    def design_ambient_declaration(motor_data: Dict) -> Optional[Dict]:
+        """V307/GÜVERTE-ORTAM — .eng itkisinin tanımlandığı ortam (makine-okur).
+
+        ÖLÇÜLDÜ (docs/scofield/raw/OH/V307/guverte-ortam/olcum/
+        ortam_once.json K4): sıvı motorun tasarım ortamı vakum ya da irtifa
+        olduğunda dosya o ortamın itkisini (girilen itki; vakum tasarımında
+        vakum itkisi) sabit itki olarak yazıyor ve hiçbir satırında ortam
+        geçmiyordu. RASP motor satırında ortam alanı yoktur; OpenRocket ya da
+        başka bir uçuş programı bu itkiyi deniz seviyesindeki rampadan kullanır
+        ve itkiyi deniz seviyesindekinden büyük alır (aynı lülede
+        F(p_a) = F_vak - p_a*A_e; tasarım basıncı deniz seviyesinin altında).
+
+        Yalnız SIVI yanıtın ``design_ambient`` bloğu okunur (``mode`` alanı
+        yalnız sıvı bloğunda var) ve yalnız ``is_sea_level`` False ise kayıt
+        döner; deniz seviyesi tasarımında ``None`` (dosya bugünküyle aynı).
+        Sayılar yanıttandır: ortam basıncı/irtifası ve aynı lülenin deniz
+        seviyesi durumu (``design_ambient.sea_level``); hiçbiri hesaplanmaz.
+        """
+        da = (motor_data or {}).get('design_ambient')
+        if not isinstance(da, dict) or da.get('is_sea_level') is not False \
+                or not isinstance(da.get('mode'), str):
+            return None
+        ds = da.get('sea_level') if isinstance(da.get('sea_level'), dict) else {}
+        return {
+            'mode': da.get('mode'),
+            'pressure_bar': _finite_number(da.get('pressure_bar')),
+            'altitude_m': _finite_number(da.get('altitude_m')),
+            'sea_level_status': ds.get('status'),
+            'sea_level_thrust_N': _finite_number(ds.get('thrust_N')),
+        }
+
+    @classmethod
+    def _design_ambient_lines(cls, motor_data: Dict) -> List[str]:
+        """``design_ambient_declaration``ın .eng yorum satırları (ASCII)."""
+        k = cls.design_ambient_declaration(motor_data)
+        if k is None:
+            return []
+        p = k['pressure_bar']
+        h = k['altitude_m']
+        if k['mode'] == 'vacuum':
+            ortam = 'vacuum (0 bar)'
+        elif h is not None and p is not None:
+            ortam = (f'{h:.0f} m altitude, standard-atmosphere pressure '
+                     f'{p:.4f} bar')
+        elif p is not None:
+            ortam = f'{p:.4f} bar ambient pressure'
+        else:
+            ortam = 'not sea level (ambient pressure not published)'
+        satirlar = [
+            f'; design ambient: {ortam} - the thrust and the total impulse '
+            'in this file are the values at that ambient pressure, NOT at '
+            'sea level',
+            '; WARNING: flown from a sea-level launch pad this constant '
+            'thrust overstates the thrust of the engine; use the sea-level '
+            'state below for a ground launch',
+        ]
+        if k['sea_level_status'] == 'separated':
+            satirlar.append('; sea level, same nozzle: the flow separates '
+                            '(Summerfield criterion), no sea-level thrust is '
+                            'published for this design')
+        elif k['sea_level_status'] == 'attached' \
+                and k['sea_level_thrust_N'] is not None:
+            satirlar.append(f'; sea level, same nozzle: thrust '
+                            f'{k["sea_level_thrust_N"]:.1f} N (attached '
+                            f'flow; not written to this file)')
+        else:
+            satirlar.append('; sea level, same nozzle: state not evaluated '
+                            'by the solver')
+        return satirlar
+
     def _create_eng_file(self, designation: str, diameter: float, length: float,
                         prop_mass: float, total_impulse: float,
                         thrust_curve: List[Tuple[float, float]], motor_data: Dict,
@@ -2375,6 +2452,9 @@ class OpenRocketExporter:
             _avg, avg_src = self.resolve_average_thrust(motor_data)
             lines.append('; constant thrust level: '
                          + AVERAGE_THRUST_SOURCE_LABELS.get(avg_src, avg_src))
+        # V307/GÜVERTE-ORTAM: itkinin TANIMLANDIĞI ortam (sıvı tasarım ortamı
+        # deniz seviyesi değilse). Deniz seviyesi tasarımında satır yok.
+        lines.extend(self._design_ambient_lines(motor_data))
         impulse_src = resolved.get('total_impulse_source')
         if impulse_src:
             lines.append(f"; total impulse ({total_impulse:.1f} N-s, sets the "

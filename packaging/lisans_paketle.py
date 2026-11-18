@@ -30,6 +30,11 @@ FAIL-CLOSED denetimler (biri tutmazsa çıkış kodu 1, paket ÜRETİLMEZ)
   dağıtım ``THIRD_PARTY_NOTICES.txt`` içinde ``Distribution: <ad>`` satırıyla
   beyan edilmiş: yeni bir copyleft bağımlılık bildirimsiz pakete giremez.
 - Bildirimin ``licenses/<dosya>`` diye andığı her metin pakette var.
+- V307/FS-HARİTA: ``hrma/static/map/*_manifest.json`` içinde üst düzeyde
+  ``license`` beyan eden her ÜÇÜNCÜ TARAF VERİ manifestinin işaret ettiği
+  veri dosyası bildirimde ``Data: hrma/static/map/<dosya>`` satırıyla beyan
+  edilmiş; bildirimin andığı her ``Data:`` yolu kaynak ağaçta var. Atıf
+  isteyen (CC BY) yeni bir veri dosyası bildirimsiz pakete giremez.
 """
 
 import argparse
@@ -126,6 +131,98 @@ def bildirimdeki_metinler(metin):
     return set(re.findall(r'licenses/([A-Za-z0-9_.\-]+\.txt)', metin))
 
 
+#: Üçüncü taraf veri manifestlerinin dizini (depo köküne göre) ve adı.
+VERI_DIZINI = ('hrma', 'static', 'map')
+VERI_MANIFEST_DESENI = '*_manifest.json'
+
+
+def bildirimdeki_veriler(metin):
+    return set(re.findall(r'^Data:\s*(\S+)\s*$', metin, flags=re.M))
+
+
+def lisansli_veri_dosyalari(kaynak):
+    """Üst düzeyde ``license`` beyan eden veri manifestlerinin dosyaları.
+
+    Dönüş: {depo-göreli yol: manifest adı}. Manifest okunamazsa ya da
+    lisanslı olup dosya adı taşımıyorsa HATA (fail-closed): beyanı
+    ölçülemeyen veri pakete sessizce girmez.
+    """
+    import json
+    dizin = kaynak.joinpath(*VERI_DIZINI)
+    cikti = {}
+    if not dizin.is_dir():
+        return cikti
+    for man in sorted(dizin.glob(VERI_MANIFEST_DESENI)):
+        try:
+            m = json.loads(man.read_text(encoding='utf-8'))
+        except (OSError, ValueError) as hata:
+            raise LisansHatasi('veri manifesti okunamadı: %s (%s)' % (man.name, hata))
+        if not isinstance(m, dict) or not m.get('license'):
+            continue
+        dosyalar = [v.get('file') for v in m.values()
+                    if isinstance(v, dict) and isinstance(v.get('file'), str)]
+        if not dosyalar:
+            raise LisansHatasi('lisanslı veri manifesti dosya adı taşımıyor: %s' % man.name)
+        for ad in dosyalar:
+            if '/' in ad or '\\' in ad or ad.startswith('.'):
+                raise LisansHatasi('veri manifestinde geçersiz dosya adı: %s (%r)' % (man.name, ad))
+            cikti['/'.join(VERI_DIZINI + (ad,))] = man.name
+    return cikti
+
+
+def veri_bildirimlerini_denetle(kaynak, bildirim):
+    """Lisanslı her veri dosyası bildirimde ``Data:`` ile beyanlı mı?"""
+    beyanli = bildirimdeki_veriler(bildirim)
+    gereken = lisansli_veri_dosyalari(kaynak)
+    beyansiz = sorted('%s (%s)' % (yol, man) for yol, man in gereken.items()
+                      if yol not in beyanli)
+    if beyansiz:
+        raise LisansHatasi('lisanslı veri dosyası bildirimde beyan edilmemiş (%s '
+                           'içine "Data: <yol>" bölümü ekleyin): %s'
+                           % (BILDIRIM_ADI, '; '.join(beyansiz)))
+    yok = sorted(y for y in beyanli if not kaynak.joinpath(*y.split('/')).is_file())
+    if yok:
+        raise LisansHatasi('bildirimin andığı veri dosyası kaynak ağaçta yok: %s'
+                           % ', '.join(yok))
+    return sorted(gereken)
+
+
+#: V307/FS-HARİTA-VERİ: indirilebilir harita paketlerinin listesi (kurucuda yalnız liste
+#: bulunur; paketler ayrı dosyadır). Listede anılan her lisans, bildirimde bu listenin
+#: ``Data:`` bölümünde ``Pack-Licence: <lisans>`` satırıyla beyanlı olmalıdır.
+HARITA_PAKET_LISTESI = ('hrma', 'static', 'map', 'harita_paketleri.json')
+
+
+def harita_paketi_bildirimlerini_denetle(kaynak, bildirim):
+    """Harita paketi listesindeki her bileşen lisansı bildirimde beyanlı mı? (fail-closed)"""
+    import json
+    yol = kaynak.joinpath(*HARITA_PAKET_LISTESI)
+    if not yol.is_file():
+        return []
+    try:
+        m = json.loads(yol.read_text(encoding='utf-8'))
+        lisanslar = sorted({b['license'] for p in m['packs'] for b in p['components']})
+    except (OSError, ValueError, KeyError, TypeError) as hata:
+        raise LisansHatasi('harita paketi listesi okunamadı: %s (%s)' % (yol.name, hata))
+    if not lisanslar:
+        raise LisansHatasi('harita paketi listesi lisans taşımıyor: %s' % yol.name)
+    rel = '/'.join(HARITA_PAKET_LISTESI)
+    bolum = None
+    for parca in re.split(r'^== ', bildirim, flags=re.M):
+        if re.search(r'^Data:\s*%s\s*$' % re.escape(rel), parca, flags=re.M):
+            bolum = parca
+            break
+    if bolum is None:
+        raise LisansHatasi('harita paketi listesi bildirimde beyan edilmemiş (%s içine '
+                           '"Data: %s" bölümü ekleyin)' % (BILDIRIM_ADI, rel))
+    beyanli = set(re.findall(r'^Pack-Licence:\s*(\S+)\s*$', bolum, flags=re.M))
+    eksik = [l for l in lisanslar if l not in beyanli]
+    if eksik:
+        raise LisansHatasi('harita paketi lisansı bildirimde beyan edilmemiş ("Pack-Licence: '
+                           '<lisans>" satırı ekleyin): %s' % ', '.join(eksik))
+    return lisanslar
+
+
 def paketle(kaynak, app, libs):
     lisans = kaynak / 'LICENSE'
     if not lisans.is_file():
@@ -147,6 +244,9 @@ def paketle(kaynak, app, libs):
     if eksik_metin:
         raise LisansHatasi('bildirimin andığı lisans metni packaging/licenses/ '
                            'altında yok: %s' % ', '.join(eksik_metin))
+
+    veri_bildirimlerini_denetle(kaynak, bildirim)
+    harita_paketi_bildirimlerini_denetle(kaynak, bildirim)
 
     kayitlar = dagitimlari_tara(libs)
     adlar = {normalize(k['ad']): k for k in kayitlar}

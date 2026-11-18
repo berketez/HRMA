@@ -180,6 +180,29 @@ ALAN_GENISLIGI = {
     ('solid.html', 'throat_diameter'): 286,
     ('solid.html', 'exit_diameter'): 286,
     ('solid.html', 'expansion_ratio'): 286,
+    # V307/KIRMIZI-A (16 Kas): 3.0.7 kulvarlarının yeni yer tutuculu alanları —
+    # Python Playwright (chromium 1208, headless, WebGL kapalı), 1440x900, en +
+    # tr (iki dilde aynı); iç genişlik = clientWidth − yatay dolgu; alan
+    # sayfanın kendi denetimiyle görünür kılındı (sıvı: tasarım ortamı
+    # seçicisi 'altitude' / 'pressure'). Kalibrasyon: aynı formdaki
+    # chamber_diameter aynı yöntemle tablodaki 286'yı verdi. 1280x800'de sıvı
+    # ikisi 248, Fırlatma Sahası alanları 106/238 (değişmez). Fırlatma Sahası
+    # girdileri 13 px yazı tipiyle çiziliyor (7,8 px/karakter); tablonun 8,4
+    # px/karakter bütçesi orada daha temkinli kalır. Ölçüm:
+    # docs/scofield/raw/OH/V307/kirmizi-a/olc_alan_genisligi.py + alan_genisligi.json.
+    # SIVI-ORTAM (2e5bb68fd): tasarım irtifası / tasarım ortam basıncı.
+    ('liquid.html', 'design_ambient_altitude_m'): 286,
+    ('liquid.html', 'design_ambient_pressure_bar'): 286,
+    # FS-UÇUŞ-2 (0ed65709a): kanat geometrisi kuralı ('rule' / 'kural') ve
+    # paraşütlü iniş ('—'; motor sayfalarının yörünge panelindeki aynı üç
+    # paraşüt girdisi).
+    ('launch_site.html', 'ls-a-finspan'): 106,
+    ('launch_site.html', 'ls-a-finroot'): 106,
+    ('launch_site.html', 'ls-a-fintip'): 106,
+    ('launch_site.html', 'ls-a-finsweep'): 238,
+    ('launch_site.html', 'ls-a-chutearea'): 106,
+    ('launch_site.html', 'ls-a-chutecd'): 106,
+    ('launch_site.html', 'ls-a-chutedelay'): 238,
 }
 
 #: Çeviri anahtarı ARANMAYAN yer tutucular ve GEREKÇESİ.
@@ -402,10 +425,23 @@ def test_muafiyet_kumesi_beklenen_boyutta():
     v3.0.1 port kulvarı (20 Eki): tavan 17 -> 18. Yeni ``residual_web_thickness``
     alanının yer tutucusu salt sayı örneği ``0``dır (boş alan = 0 mm, beyanlı
     idealizasyon; açıklaması alanın İPUCU metninde). Dil taşımaz, muaf sınıftadır.
+
+    V307/KIRMIZI-A (16 Kas): tavan 18 -> 21. V307/FS-UÇUŞ-2 (0ed65709a, A4)
+    Fırlatma Sahası araç formuna paraşütlü inişin üç girdisini ekledi:
+    ``ls-a-chutearea``, ``ls-a-chutecd``, ``ls-a-chutedelay``; yer tutucuları
+    uzun tire ``—`` ("boş bırakılabilir"). Bunlar motor sayfalarının yörünge
+    panelindeki AYNI üç girdidir ve oradaki karşılıkları (solid.html /
+    advanced.html ``parachute_area``, ``parachute_cd``,
+    ``parachute_deploy_delay``) bu kümede zaten aynı gerekçeyle duruyor. Boş
+    bırakılınca ne olduğu her birinin İPUCU metninde (EN+TR, i18n_launch_site.js
+    ``site.help.chute*``: alan boşsa paraşüt yok, balistik iniş; Cd ve gecikme
+    boşsa 2B çözücünün varsayılanı sonuçta beyanlı). Dil taşımaz (kardeş bekçi
+    ``test_muafiyet_gercekten_dilsiz`` üçünü de ölçer). Küme yeniden 18'e
+    inmek için bu üç alanın tireyi bırakması gerekir; tablo bunu yakalar.
     """
     tire = [k for k in MUAFLAR if k['metin'] == UZUN_TIRE]
     sayi = [k for k in MUAFLAR if SAYI_ORNEGI.match(k['metin'])]
     assert len(tire) + len(sayi) == len(MUAFLAR)
-    assert len(MUAFLAR) <= 18, (
-        'muafiyet kümesi büyümüş (%d > 18): yeni muafiyet eklenmişse '
+    assert len(MUAFLAR) <= 21, (
+        'muafiyet kümesi büyümüş (%d > 21): yeni muafiyet eklenmişse '
         'gerekçesi bu dosyaya yazılmalı' % len(MUAFLAR))

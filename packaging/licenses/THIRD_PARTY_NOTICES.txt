@@ -84,3 +84,40 @@ Library Exception) and libquadmath (LGPL-2.1); Shapely carries GEOS
 (LGPL-2.1); Pillow carries its image codecs. Each wheel ships these notices
 and licence texts in its own dist-info directory (see
 licenses/PYTHON_PACKAGES.txt).
+
+== GeoNames gazetteer (place names, close-range map labels) ==
+Data: hrma/static/map/places_detail.json
+Licence: Creative Commons Attribution 4.0 International (CC BY 4.0),
+  https://creativecommons.org/licenses/by/4.0/
+Attribution: GeoNames (www.geonames.org), CC BY 4.0. The map shows this
+  attribution on screen whenever a GeoNames place name is displayed.
+Source: https://download.geonames.org/export/dump/cities5000.zip
+  (downloaded 2026-11-09T14:28:57Z, archive sha256
+  550ec920954e46b7d2ff004354857383db49db4b07d848a0de80cb07b13117dd)
+Changes: reduced to name, latitude, longitude, population, country code and
+  feature code; coordinates rounded to 5 decimals; rows ordered by population.
+  Names are GeoNames' own (local or common) names; no translation is added.
+  The data is provided "as is" without warranty of accuracy, timeliness or
+  completeness (GeoNames readme).
+
+== OpenStreetMap map packs (optional download, launch site globe) ==
+Data: hrma/static/map/harita_paketleri.json
+Pack-Licence: ODbL-1.0
+Licence: Open Data Commons Open Database License 1.0 (ODbL 1.0),
+  https://opendatacommons.org/licenses/odbl/1-0/
+Attribution: (c) OpenStreetMap contributors. The map shows this attribution on
+  screen whenever map pack data is drawn.
+Source: Protomaps Basemap planet build 20261115 (version 4.15.2, OpenStreetMap
+  replication time 2026-11-15T04:00:00Z), https://build.protomaps.com/; tile
+  schema and build tooling by the Protomaps project (github.com/protomaps/basemaps;
+  the project states "BSD and ODbL licenses"). Low zoom levels (z0-z5) also carry
+  Natural Earth data (public domain).
+What ships: the installer contains only the pack list (file names, sizes, sha256).
+  The packs themselves are separate files that the user may choose to download
+  from the HRMA GitHub release named in that list.
+Changes: each pack is a region extract (100 km around a launch site) of the
+  source build, z0-z15; the 'landcover' layer (Daylight landcover, derived from
+  ESA WorldCover; present only at z0-z7) is removed because it is not
+  OpenStreetMap data; all other tiles are byte-identical to the source build.
+  The packs are a derivative database and are offered under ODbL 1.0: the pack
+  files are published as release assets of the HRMA repository.

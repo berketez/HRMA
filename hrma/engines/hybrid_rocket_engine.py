@@ -6682,6 +6682,10 @@ class HybridRocketEngine:
             _tank_m0_buhar = (float(tb.tank.vapor_mass)
                               if getattr(tb, 'tank', None) is not None
                               else None)
+            # V307/ÇALKANTI-KARARLILIK: ateşleme anındaki tank sıcaklığı
+            # (sıvı yoğunluğu serisinin t = 0 noktası).
+            _tank_T0 = (float(tb.tank.T)
+                        if getattr(tb, 'tank', None) is not None else None)
             if _yuruyussuz_uq:
                 return {
                     'status': 'NOT_MODELLED',
@@ -6739,6 +6743,18 @@ class HybridRocketEngine:
         _tank_m_son = (float(tb.tank.liquid_mass) + float(tb.tank.vapor_mass)
                        if getattr(tb, 'tank', None) is not None else None)
         _yayin = blowdown_published_series(sol, tb.dt, _tank_m0, _tank_m_son)
+        # V307/ÇALKANTI-MOTOR: tankın SIVI kütlesi serisi (adım sınırları;
+        # çalkantı bağlantısının m_t'si). Tankın KENDİ adım kaydından.
+        _sivi_seri = tank_liquid_mass_series(
+            getattr(getattr(tb, 'tank', None), '_history', None), tb.dt,
+            _tank_m0_sivi, sol.get('end_event'), len(sol['time']),
+            _yayin['time_s'][-1])
+        # V307/ÇALKANTI-KARARLILIK: aynı sınırlarda sıvı yoğunluğu ρ_l(T)
+        # (çalkantı bağlantısının doluluğu hacimden kursun diye).
+        _sivi_yogunluk = (tank_liquid_density_series(
+            getattr(getattr(tb, 'tank', None), '_history', None), _tank_T0,
+            getattr(getattr(getattr(tb, 'tank', None), 'props', None),
+                    'use_coolprop', True)) if _sivi_seri else None)
         _kaynak = _yayin['source_index']
         _m_yayin = len(_kaynak)
         # ~TANK_BLOWDOWN_MAX_POINTS noktaya seyreltme (port_history deseni):
@@ -7042,6 +7058,15 @@ class HybridRocketEngine:
                     if _yayin['oxidizer_tank_delivered_kg'] is not None
                     else None),
                 'last_step_fraction': _yayin['last_step_fraction'],
+                # V307/ÇALKANTI-MOTOR: sıvı kütlesi serisi (yeni anahtarlar;
+                # künyesi TANK_LIQUID_MASS_SERIES_BASIS).
+                'liquid_mass_time_s': (_sivi_seri[0] if _sivi_seri
+                                       else None),
+                'liquid_mass_kg': (_sivi_seri[1] if _sivi_seri else None),
+                'liquid_mass_basis': TANK_LIQUID_MASS_SERIES_BASIS,
+                # V307/ÇALKANTI-KARARLILIK: aynı sınırlarda sıvı yoğunluğu.
+                'liquid_density_kg_m3': _sivi_yogunluk,
+                'liquid_density_basis': TANK_LIQUID_DENSITY_SERIES_BASIS,
                 'basis': (
                     'tank_initial_kg is the N2O the tank holds at ignition '
                     '(liquid plus ullage vapour, solver tank object), '
@@ -8429,8 +8454,8 @@ class HybridRocketEngine:
         tank için iki farklı hacim OLAMAZ; blowdown koşamadıysa aynı
         boyutlandırma formülü beyanla uygulanır), sıvı kütlesi çözücünün
         m_ox'u, tank çapı beyanlı L/D tasarım oranından. g_eff SABİT 1 g'dir
-        ve öyle beyan edilir — uçuş ivmesiyle (g_eff = T/m) bağlaşım
-        yörünge bağlamasına bırakılmıştır (NOT_MODELLED notu blokta).
+        ve öyle beyan edilir — uçuş ivmesiyle (g_eff(t)) bağlaşım
+        6-DOF panelinin çalkantı alt bölümündedir (g_eff_basis notu).
         """
         basis = (
             'linear free-surface slosh of the oxidizer liquid in an upright '
@@ -8554,12 +8579,12 @@ class HybridRocketEngine:
             'g_eff_m_s2': float(self.g0),
             'g_eff_basis': (
                 'constant standard 1-g axial acceleration (ground / hover '
-                'condition). NOT_MODELLED: coupling g_eff to the flight '
-                'acceleration profile (g_eff = T/m during boost, which '
-                'raises the slosh frequency as sqrt(g_eff)) is not wired '
-                'to the trajectory yet — that is the follow-on work item; '
-                'the fill_sweep inside the slosh result covers the '
-                'draining-level dependence at 1 g only.'),
+                'condition): this motor card is evaluated at 1 g. Coupling '
+                'to the flight acceleration (g_eff(t) = the axial specific '
+                'force during boost, which raises the slosh frequency as '
+                'sqrt(g_eff)) is in the 6-DOF panel, Stability: slosh '
+                'subsection, once the tank location is entered; the '
+                'fill_sweep here covers the draining level at 1 g only.'),
             'slosh': slosh,
         }
         if rho_kunyesi is not None:   # yalnız kullanıcı tank kipi (H1)
@@ -13307,6 +13332,110 @@ def blowdown_published_series(sol, dt, tank_mass_initial_kg=None,
         'oxidizer_euler_kg': euler_ox,
         'basis': BLOWDOWN_PUBLICATION_BASIS,
     }
+
+
+#: V307/ÇALKANTI-MOTOR — tank SIVI kütlesi serisinin künyesi (yalnız
+#: ``oxidizer_inventory.liquid_mass_*``; bloğun öbür alanları değişmedi).
+TANK_LIQUID_MASS_SERIES_BASIS = (
+    'Liquid N2O left in the tank at the step boundaries of THIS blowdown '
+    'solution, read from the tank model of this run step by step (the '
+    'equilibrium liquid/vapour split of N2OTankBlowdown, Whitmore & Chandler '
+    '2011): t = 0 is the ignition state (tank_initial_liquid_kg), t = '
+    '(k+1)*dt the state after step k; when the liquid runs out inside the '
+    'last step that boundary is the end of the shortened step (the end of '
+    'the published burn) and the liquid there is 0. The liquid falls faster '
+    'than the oxidiser flow alone: part of it evaporates to keep the ullage '
+    'at saturation pressure, so liquid left differs from tank_initial_liquid_kg '
+    'minus the oxidiser delivered. Vapour is not liquid and is not in this '
+    'series. Consumer: the slosh connection of the 6-DOF tank list '
+    '(hrma/analysis/slosh_motor_baglanti.py).')
+
+
+def tank_liquid_mass_series(history, dt, m_liquid_0, end_event,
+                            n_samples, end_time_s,
+                            max_points=TANK_BLOWDOWN_MAX_POINTS):
+    """Tankın sıvı kütlesi adım sınırlarında: ``(zaman_s, kütle_kg)``.
+
+    V307/ÇALKANTI-MOTOR (CALKANTI §A.2): çalkantı bağlantısı tankın SIVI
+    kütlesini ister. Çözücünün tank nesnesi her adımın sonundaki durumu
+    (``N2OTankBlowdown._pack_state``: ``m_liquid``) kaydeder; seri buradan
+    okunur, yeniden türetilmez. ``m_liquid_0 − ∫ṁ_ox dt`` KULLANILMAZ:
+    sıvının bir kısmı ullage'ı doyma basıncında tutmak için buharlaşır
+    (ölçüldü, örnek hibrit: sıvı 12,502 kg biterken teslim edilen
+    oksitleyici 11,328 kg).
+
+    Zaman ekseni yayımlanan serinin (``blowdown_published_series``) adım
+    sınırlarıdır: 0, dt, 2dt, … Sıvı son adımın içinde bittiyse
+    (``end_event == 'oxidizer_depleted'`` ve tank her örnek için bir kez
+    ilerledi) son sınır kısaltılmış adımın sonudur (``end_time_s``) ve
+    sıvı orada 0'dır. Yanma başka sebeple bittiyse (ör. ``web_exhausted``)
+    tank son örnekte ilerletilmemiştir; seri tankın son ilerlediği sınırda
+    biter (dışdeğerleme yok). Kayıt yoksa ``None``.
+    """
+    if not history or m_liquid_0 is None:
+        return None
+    zaman = [0.0]
+    kutle = [float(m_liquid_0)]
+    for k, durum in enumerate(history):
+        zaman.append((k + 1) * float(dt))
+        kutle.append(float(durum['m_liquid']))
+    if (end_event == 'oxidizer_depleted' and len(history) == int(n_samples)
+            and end_time_s is not None and float(end_time_s) > zaman[-2]):
+        zaman[-1] = float(end_time_s)
+    stride = max(1, len(zaman) // int(max_points))
+    secilen = list(range(0, len(zaman), stride))
+    if secilen[-1] != len(zaman) - 1:
+        secilen.append(len(zaman) - 1)
+    return ([zaman[i] for i in secilen], [kutle[i] for i in secilen])
+
+
+#: V307/ÇALKANTI-KARARLILIK — tank SIVI yoğunluğu serisinin künyesi (yalnız
+#: ``oxidizer_inventory.liquid_density_kg_m3``).
+TANK_LIQUID_DENSITY_SERIES_BASIS = (
+    'Saturated-liquid density of the N2O in the tank at the same step '
+    'boundaries as liquid_mass_kg (time axis liquid_mass_time_s): rho_l(T) '
+    'of the tank temperature recorded by the tank model of THIS run at each '
+    'boundary, evaluated with the same saturation model the tank uses '
+    '(hrma.analysis.tank_blowdown.N2OSaturation). The tank cools as it '
+    'empties, so the liquid becomes denser during the burn; liquid volume = '
+    'liquid_mass_kg / liquid_density_kg_m3. null where the saturation model '
+    'has no liquid state at the recorded temperature. Consumer: the slosh '
+    'connection of the 6-DOF tank list (hrma/analysis/slosh_motor_baglanti.py).')
+
+
+def tank_liquid_density_series(history, T_0, use_coolprop=True,
+                               max_points=TANK_BLOWDOWN_MAX_POINTS):
+    """Tank sıvısının doyma yoğunluğu ρ_l(T) adım sınırlarında [kg/m³].
+
+    V307/ÇALKANTI-KARARLILIK (CALKANTI §A.2, karar 16 Kas): kendinden
+    basınçlı N₂O tankı boşalırken soğur ve sıvı yoğunlaşır (örnek hibrit:
+    293,15 → 273,64 K, 785,1 → 904,6 kg/m³). Çalkantı doluluğu hacimden
+    kurulur: V_sıvı = m_sıvı/ρ_l(T). Sınırlar ve seyreltme
+    :func:`tank_liquid_mass_series` ile AYNIDIR (t = 0 ateşleme durumu
+    ``T_0``; sonra her adımın sonundaki tank sıcaklığı
+    ``N2OTankBlowdown._pack_state['T']``). Yoğunluk tankın kullandığı doyma
+    modelinin AYRI bir örneğinden okunur (tankın kenetleme defteri
+    değişmesin). Doyma modelinin sıvı hâli vermediği sıcaklıkta ``None``.
+    Kayıt yoksa ``None``.
+    """
+    if not history or T_0 is None:
+        return None
+    from hrma.analysis.tank_blowdown import N2OSaturation
+    ozellik = N2OSaturation(use_coolprop=use_coolprop)
+    sicaklik = [float(T_0)] + [float(durum['T']) for durum in history]
+    stride = max(1, len(sicaklik) // int(max_points))
+    secilen = list(range(0, len(sicaklik), stride))
+    if secilen[-1] != len(sicaklik) - 1:
+        secilen.append(len(sicaklik) - 1)
+    out = []
+    for i in secilen:
+        try:
+            rho = float(ozellik.rho_l(sicaklik[i]))
+        except (ValueError, ArithmeticError):
+            rho = None
+        out.append(rho if rho is not None and np.isfinite(rho) and rho > 0.0
+                   else None)
+    return out
 
 
 #: V306/HİBRİT-ÇAPRAZ (kalem 1) — teslim büyüklüklerinin kaynağı.

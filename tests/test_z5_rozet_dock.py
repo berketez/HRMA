@@ -861,6 +861,22 @@ URUN_KATLI_ALANLARI = [
     ("blowdown_panel.js", 3, ('style',)),
     ("blowdown_panel.js", 4, ()),
     ("cfd_panel.js", 1, ('class', 'style')),
+    # V307/ÇALKANTI-ARAYÜZ (16 Kas): Besleme → Çalkantı tank modeli
+    # bölümünün üç katlısı — dosyadan tank geometrisi girdileri, 29 satırlık
+    # eşdeğer model tablosu, SP-8009 yük tablosu (düzey başına bir kaynak
+    # yeri). Hepsi varsayılan KAPALI; ikinci iddia ayrıca ölçer.
+    ("calkanti_panel.js", 1, ('style',)),
+    ("calkanti_panel.js", 2, ('style',)),
+    ("calkanti_panel.js", 3, ('style',)),
+    # V307/SEKME-GÜVERTE (NK3-K-2, 16 Kas): yapısal sekmede ucun İngilizce
+    # "basınçlı eksenel gerilme neden tam sıfır olabilir" gerekçesi kapalı
+    # "Teknik ayrıntı" kutusunda (hd-teknik-ayrinti; makine alan adı ve
+    # paragraf görünür metinden indi). Varsayılan KAPALI.
+    ("structural_panel.js", 1, ('class', 'style')),
+    # V307/FS-HARİTA-KÜRE (16 Kas): Fırlatma Sahası "Harita paketleri" paneli
+    # (<details id="ls-packs" class="ls-basis">; indirme onayı + ilerleme).
+    # Varsayılan KAPALI.
+    ("launch_site.html", 1, ('class', 'id')),
     ("fea_panel.js", 1, ('id', 'style')),
     ("fea_panel.js", 2, ('id', 'style')),
     ("fea_panel.js", 3, ('id', 'style')),

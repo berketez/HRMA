@@ -258,9 +258,13 @@
     // bir etiket listesi tutmak iki listenin ayrışmasını davet ederdi.
     const FIELDS = [
         ['motor_type', 'Motor Type', 'hybrid', MOTOR_TYPES, 'common.f.motorType', 'panel.safety.help.motor_type'],
-        ['chamber_pressure', 'Chamber Pressure (bar)', 40, 1, 'common.f.chamberPressureBar', 'panel.safety.help.chamber_pressure'],
-        ['chamber_temperature', 'Chamber Temperature (K)', 3000, 10, 'common.f.chamberTemperatureK', 'panel.safety.help.chamber_temperature'],
-        ['thrust', 'Thrust (N)', 1000, 50, 'common.f.thrustN', 'panel.safety.help.thrust'],
+        // V307/SEKME-GÜVERTE (NK3-H-7 ailesi): motordan gelen büyüklüklerin
+        // tanım değeri BOŞ (eskiden gizli bir motor: 40 bar, 3000 K, 1000 N, Ø 0,1 m, 5 mm cidar). Son hesap
+        // başarısızken (sonuç düşürüldü) alanlar tanım değerine döner; boş
+        // zorunlu alan isteği durdurur ve adıyla söylenir (`required`).
+        ['chamber_pressure', 'Chamber Pressure (bar)', '', 1, 'common.f.chamberPressureBar', 'panel.safety.help.chamber_pressure'],
+        ['chamber_temperature', 'Chamber Temperature (K)', '', 10, 'common.f.chamberTemperatureK', 'panel.safety.help.chamber_temperature'],
+        ['thrust', 'Thrust (N)', '', 50, 'common.f.thrustN', 'panel.safety.help.thrust'],
         // ÖH D36 / onemli2-sivi a2 — SÜRE VE KÜTLE UYDURULMAZ.
         // ÖLÇÜLDÜ (docs/scofield/raw/OH/D36/onemli2-sivi/a2/once.json K2):
         // süre verilmeyen sıvı motorda çözücü `burn_time` ve itici kütlesi
@@ -282,8 +286,8 @@
         ['propellant_mass', 'Propellant Mass (kg)', '', 0.5, 'common.f.propellantMassKg', 'panel.safety.help.propellant_mass'],
         ['propellant_type', 'Propellant Type', 'composite', PROPELLANT_OPTIONS, 'common.f.propellantType', 'panel.safety.help.propellant_type'],
         ['facility_type', 'Facility Type', 'test_stand', FACILITIES, 'common.f.facilityType', 'panel.safety.help.facility_type'],
-        ['chamber_diameter', 'Chamber Diameter (m)', 0.1, 0.005, 'common.f.chamberDiameterM', 'panel.safety.help.chamber_diameter'],
-        ['wall_thickness', 'Wall Thickness (m)', 0.005, 0.001, 'common.f.wallThicknessM', 'panel.safety.help.wall_thickness'],
+        ['chamber_diameter', 'Chamber Diameter (m)', '', 0.005, 'common.f.chamberDiameterM', 'panel.safety.help.chamber_diameter'],
+        ['wall_thickness', 'Wall Thickness (m)', '', 0.001, 'common.f.wallThicknessM', 'panel.safety.help.wall_thickness'],
         ['material', 'Material', 'steel_4130', MATERIALS, 'common.f.material', 'panel.safety.help.material'],
         // ISI ZİNCİRİ ÇİFTİ (OH-Z3-01). Varsayılanı BOŞ DİZE: güvertenin
         // zorunlu-alan sözleşmesinde (analysis_dock::requiredFieldInfo)
@@ -595,7 +599,11 @@
                 material: String(el.material || el.material_key || '—'),
                 t: nb(el.thickness_mm, 2), d: nb(el.inner_diameter_mm, 1),
                 p: nb(el.load_pressure_bar, 1) },
-                'chamber wall (single wall, as entered) — {material}, {t} '
+                // V307/SEKME-GÜVERTE (NK3-H-1): "as entered" (girildiği gibi)
+                // cidar HRMA'nın boyutlandırdığı motor cidarıyken de
+                // basılıyordu; kimin cidarı olduğunu BASINÇLI KAP sekmesi
+                // başlığında söyler, burada iddia edilmez.
+                'chamber wall (single wall) — {material}, {t} '
                 + 'mm, inner diameter {d} mm; load: chamber pressure {p} bar');
         }
         rows.push([fieldLabelUser('evaluated_layer',
@@ -2262,6 +2270,8 @@
         endpoint: '/analyze_safety',
         motorTypes: ['hybrid', 'liquid', 'solid'],
         fields: FIELDS,
+        required: ['chamber_pressure', 'chamber_temperature', 'thrust',
+                   'chamber_diameter', 'wall_thickness'],
         fromResults: function (r) {
             const m = U.motorDict(r);
             const motorType = window.AnalysisDock.getMotorType();

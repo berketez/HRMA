@@ -1194,7 +1194,8 @@ class PDFReportGenerator:
             '• ' + _c('Maximum Thrust: ' + self._fmt_unit(thrust, 'N')),
             '• ' + _c('Specific Impulse: ' + self._fmt_unit(isp, 's'))
             + _c(_isp_adi_ozet),
-            '• ' + _c('Burn Time: ' + burn_line),
+            '• ' + _c(self._burn_time_label(motor_data, analysis_results)
+                      + ': ' + burn_line),
             '• ' + _c('Total Impulse: ' + impulse_line),
             _c(burn_source_line),
             _c(methodology_line)))
@@ -1617,7 +1618,45 @@ class PDFReportGenerator:
     #: ad değişirse belge de değişir (tek yer). V306/SIVI-DEFTER (K5):
     #: başlık Isp kartı "Motor Isp — toplam itici tüketimine göre (deniz
     #: seviyesi)" oldu; anahtar ``liq.msg.engine_isp_sl``.
+    #: V307/SEKME-MOTOR (KATI-DOĞRULAMA D4): katı motorun yayımladığı
+    #: yanma süresi ET TÜKENME süresidir (anlık tutuşma, eş zamanlı
+    #: tükeniş). Ekran kartıyla AYNI ad ve aynı tanım cümlesi
+    #: (i18n_pages.js solid.msg.burn_time_web / solid.tip.burn_time_web);
+    #: hibrit/sıvıda süre başka bir tanımdır (girdi süresi), ad değişmez.
+    SOLID_BURN_TIME_LABEL = 'Burn Time (web burnout)'
+    SOLID_BURN_TIME_NOTE = (
+        'Web burnout time: from ignition until the propellant web is '
+        'consumed, with instantaneous ignition and simultaneous burnout of '
+        'the whole web (the ignition rise and the tail-off are not '
+        'modelled; the curve drops to zero at burnout). Average thrust = '
+        'total impulse / this time. Test records usually give the action '
+        'time (from the 5 % thrust threshold, AEDC-TR-74-83 definition), '
+        'which includes the ignition rise and the tail-off and is therefore '
+        'usually a few percent longer: compare the two only on the same '
+        'definition.')
+
+    @classmethod
+    def _burn_time_label(cls, motor_data, analysis_results) -> str:
+        """Yanma süresi satırının adı: katıda 'web burnout', diğerlerinde aynı."""
+        kimlik = resolve_report_identity(motor_data or {}, analysis_results)
+        tip = (kimlik.get('motor_type') or ('',))[0].strip().lower()
+        return cls.SOLID_BURN_TIME_LABEL if tip == 'solid' else 'Burn Time'
+
     LIQUID_HEADLINE_ISP_KEY = 'liq.msg.engine_isp_sl'
+    #: V307/SIVI-ORTAM — tasarım ortamı deniz seviyesi DEĞİLSE başlık Isp'si
+    #: o ortamın Isp'sidir; ekran kartının adı (liquid.html) aynı anahtardır.
+    LIQUID_HEADLINE_ISP_DESIGN_AMBIENT_KEY = 'liq.msg.engine_isp_design_ambient'
+
+    @staticmethod
+    def _liquid_design_ambient_off_sea_level(motor_data,
+                                             analysis_results) -> bool:
+        """Sonuç ``design_ambient.is_sea_level == False`` taşıyor mu?"""
+        for kaynak in (analysis_results, motor_data):
+            blok = (kaynak or {}).get('design_ambient') if isinstance(
+                kaynak, dict) else None
+            if isinstance(blok, dict) and blok.get('is_sea_level') is False:
+                return True
+        return False
 
     @classmethod
     def _screen_isp_name(cls, motor_data, analysis_results) -> Optional[str]:
@@ -1627,6 +1666,10 @@ class PDFReportGenerator:
         if tip != 'liquid':
             return None
         from hrma.export.rapor_sozluk import metin
+        if cls._liquid_design_ambient_off_sea_level(motor_data,
+                                                    analysis_results):
+            return metin(cls.LIQUID_HEADLINE_ISP_DESIGN_AMBIENT_KEY,
+                         rapor_sozluk.etkin_dil())
         return metin(cls.LIQUID_HEADLINE_ISP_KEY, rapor_sozluk.etkin_dil())
 
     #: Çözücünün KAYIPSIZ (izentropik) çıkış hızını yayımladığı yollar —
@@ -2124,11 +2167,17 @@ class PDFReportGenerator:
             {'known': bool, 'sized': [hedefe boyutlandırılan istasyonlar],
              'verified_min': float|None, 'verified_stations': [kapsanan],
              'inherited_unearned': [cidardan miras alan istasyonlar],
-             'target': float|None, 'allowance': float|None}
+             'target': float|None, 'allowance': float|None,
+             'floor_governed': [(ekran adı, SF)] imalat tabanının
+             belirlediği HRMA kesitleri, 'deficient': [(ekran adı, SF)]
+             HRMA kesiti ama hedefin
+             altına düşmüş ölçüm (V307/SEKME-MOTOR; ikisi de doğrulanmış
+             minimuma girmez, kendi adıyla basılır)}
         """
         basis = {'known': False, 'sized': [], 'verified_min': None,
                  'verified_stations': [], 'inherited_unearned': [],
-                 'target': None, 'allowance': None, 'schema': None}
+                 'target': None, 'allowance': None, 'schema': None,
+                 'floor_governed': [], 'deficient': []}
         if not isinstance(structural_raw, dict) or not structural_raw:
             return basis
 
@@ -2145,6 +2194,35 @@ class PDFReportGenerator:
         # doğrulanmış" diye sayıyordu (P9B3-01).
         station_flags = safety.get('safety_factor_is_tautological')
         station_flags = station_flags if isinstance(station_flags, dict) else {}
+
+        # V307/SEKME-MOTOR (NK3-H-2) — ÇÖZÜCÜNÜN KENDİ KOVALARI.
+        # ÖLÇÜLDÜ (mühendis turu L1, hibrit 300 N / 20 bar, cidar boş;
+        # docs/scofield/raw/OH/V307/sekme-motor/olcum/pdf/L1_tr_once.txt):
+        # PDF "En Düşük Emniyet Katsayısı (doğrulanmış istasyonlar) 5,12"
+        # basıyordu, ekran "KAZANILMIŞ asgari EK yayımlanmadı · belirleyen
+        # istasyon uç kapak 4,00". Kök: ``safety_factor_is_tautological``
+        # haritası P5B1-17'den beri KESKİN anlamdadır ("sayı hedefin geri
+        # okunması mı?"). Lüle cidarını HRMA seçti, ama imalat asgari
+        # kalınlığı belirlediği için sayısı (5,12) hedefin ÜSTÜNDE ve
+        # haritada False; rapor katmanı False'u "doğrulandı" sanıyordu.
+        # Çözücü o istasyonu ``stations_governed_by_minimum_thickness``
+        # kovasına koyar ve kazanılmış SAYMAZ (``verified_stations`` boş,
+        # ``minimum_earned_safety_factor`` None). Kovalar yayımlanmışsa
+        # sınıflandırma ÇÖZÜCÜNÜNKİDİR (ekran kartının okuduğu alanlar);
+        # yoksa (eski yük) eski bayrak yolu aynen çalışır.
+        buckets = None
+        if isinstance(safety.get('verified_stations'), list):
+            def _kova(ad):
+                deger = safety.get(ad)
+                return set(deger) if isinstance(deger, list) else set()
+            buckets = {
+                'verified': _kova('verified_stations'),
+                'readback': _kova('stations_reading_back_target'),
+                'floor': _kova('stations_governed_by_minimum_thickness'),
+                'measured': _kova('verdict_scope'),
+            }
+        floor_rows = []
+        deficient_rows = []
 
         def _is_sized(station, block_name):
             if station in station_flags:
@@ -2163,7 +2241,29 @@ class PDFReportGenerator:
         verified_labels = []
         for station, value in factors.items():
             source = cls._SF_STATION_SOURCES.get(station)
-            sized = _is_sized(station, source[0] if source else None)
+            if buckets is None:
+                sized = _is_sized(station, source[0] if source else None)
+            elif station in buckets['verified']:
+                sized = False
+            elif station in buckets['readback']:
+                sized = True
+            elif station in buckets['floor'] or station in buckets['measured']:
+                # HRMA'nın seçtiği cidar, ama sayı hedefin geri okunması
+                # DEĞİL: imalat tabanı belirledi (hedefin üstünde) ya da
+                # boyutlandırmanın kapsamadığı bir yük hedefin altına çekti
+                # (ölçüm). Kullanıcı doğrulaması da değil -> doğrulanmış
+                # minimuma GİRMEZ; kendi adıyla ayrı satırda basılır.
+                known_any = True
+                number = finite_number(value)
+                if number is not None:
+                    (floor_rows if station in buckets['floor']
+                     else deficient_rows).append(
+                        (cls._SF_SCREEN_STATION_NAMES.get(station,
+                                                          str(station)),
+                         number))
+                continue
+            else:
+                sized = None
             if sized is None:
                 # Ne istasyon bayrağı ne blok beyanı var -> İDDİA EDİLMEZ.
                 # (Eskiden haritada olmayan istasyon koşulsuz "doğrulanmış"
@@ -2239,6 +2339,8 @@ class PDFReportGenerator:
         basis['verified_min'] = min(verified) if verified else None
         basis['verified_stations'] = verified_labels
         basis['inherited_unearned'] = inherited_labels
+        basis['floor_governed'] = floor_rows
+        basis['deficient'] = deficient_rows
         target = chamber.get('design_safety_factor_target')
         if target is None:
             target = (structural_raw.get('material_properties') or {}).get('safety_factor')
@@ -2254,6 +2356,79 @@ class PDFReportGenerator:
         except (TypeError, ValueError):
             basis['allowance'] = None
         return basis
+
+    #: Ekran kartının istasyon adları (app.js ``sfIstasyonAdi``; sözlük
+    #: anahtarları ``app.sfst.*``). Künye ekranla AYNI İngilizce metinden
+    #: kurulur, böylece TR belge ekranın Türkçesini taşır (aynı İngilizceye
+    #: iki Türkçe yok).
+    _SF_SCREEN_STATION_NAMES = {
+        'nozzle': 'nozzle',
+        'end_cap': 'end cap',
+        'chamber_hoop': 'chamber hoop stress',
+        'chamber_von_mises': 'chamber von Mises stress',
+        'buckling_axial': 'axial buckling',
+    }
+
+    @classmethod
+    def _structural_headline(cls, structural_raw: Dict) -> Optional[Dict]:
+        """Performans Özeti kartının yapısal manşeti — PDF'te AYNEN.
+
+        V307/SEKME-MOTOR (NK3-H-2). Ekran kartı (app.js
+        ``displayPerformanceMetrics``) büyük sayıyı
+        ``safety_analysis.minimum_safety_factor``dan basar ve künyesine
+        belirleyen istasyonu, hedefi geri okuyan istasyonları, kazanılmış
+        asgariyi ve hükmün dayandığı sayıyı yazar. PDF bu manşeti hiç
+        taşımıyordu; aynı alanlar, aynı kurallar, aynı İngilizce cümleler.
+        Alan yoksa None (satır basılmaz; sayı türetilmez).
+        """
+        if not isinstance(structural_raw, dict):
+            return None
+        safety = structural_raw.get('safety_analysis')
+        if not isinstance(safety, dict):
+            return None
+        enkucuk = finite_number(safety.get('minimum_safety_factor'))
+        if enkucuk is None:
+            return None
+
+        def _adlar(liste):
+            return [cls._SF_SCREEN_STATION_NAMES.get(k, str(k)) for k in liste]
+
+        bind = safety.get('binding_safety_factors')
+        bind = bind if isinstance(bind, list) else []
+        readback = safety.get('stations_reading_back_target')
+        readback = readback if isinstance(readback, list) else None
+        okur = safety.get('binding_safety_factor_reads_back_target')
+        if not isinstance(okur, bool):
+            okur = bool(readback and bind
+                        and any(k in readback for k in bind))
+        cumleler = []
+        if bind:
+            cumleler.append('Governing station(s): %s'
+                            % ', '.join(_adlar(bind)))
+        if okur and readback:
+            cumleler.append('Stations reading back the design target: %s'
+                            % ', '.join(_adlar(readback)))
+        elif (readback is None
+              and safety.get('binding_safety_factor_is_tautological') is True):
+            cumleler.append(
+                'The governing safety factor reads back the design target')
+        kazanilmis = safety.get('minimum_earned_safety_factor')
+        if finite_number(kazanilmis) is not None:
+            cumleler.append('Minimum earned safety factor: %s'
+                            % cls._fmt(kazanilmis, '{:.2f}'))
+        elif 'minimum_earned_safety_factor' in safety and kazanilmis is None:
+            cumleler.append(
+                'Large number = smallest safety factor across stations; '
+                'no EARNED (verified) minimum safety factor is published')
+        hukum = safety.get('verdict_safety_factor')
+        if finite_number(hukum) is not None:
+            if abs(float(hukum) - enkucuk) > abs(enkucuk) * 1e-9:
+                cumleler.append('Safety factor the verdict rests on: %s'
+                                % cls._fmt(hukum, '{:.2f}'))
+        elif 'verdict_safety_factor' in safety and hukum is None:
+            cumleler.append(
+                'Safety factor the verdict rests on: not published')
+        return {'minimum': enkucuk, 'sentences': cumleler}
 
     # ------------------------------------------------------------------
     # ÖH D33-3 / ihracat-pdf a1 · OH-D33-15 — GERİ ÇEKİLEN EMNİYET
@@ -2336,6 +2511,7 @@ class PDFReportGenerator:
             self._resolve_performance('exit_velocity', performance,
                                       motor_data),
             analysis_results, motor_data)
+        _bt_adi = self._burn_time_label(motor_data, analysis_results)
         perf_data = [
             ['Parameter', 'Value', 'Unit'],
             ['Maximum Thrust', _perf('thrust'), 'N'],
@@ -2345,7 +2521,7 @@ class PDFReportGenerator:
              if _ev_etiketi != 'Exit Velocity' else _ev_etiketi,
              _perf('exit_velocity'), 'm/s'],
             ['Mass Flow Rate', _perf('mass_flow_rate', '{:.3f}'), 'kg/s'],
-            ['Burn Time', _perf('burn_time'), 's'],
+            [_bt_adi, _perf('burn_time'), 's'],
             ['Total Impulse', _perf('total_impulse'), 'N⋅s']
         ]
         
@@ -2391,6 +2567,13 @@ class PDFReportGenerator:
         if _burn_missing_note is not None:
             story.append(Spacer(1, 0.05 * inch))
             story.append(_burn_missing_note)
+        elif _bt_adi == self.SOLID_BURN_TIME_LABEL:
+            story.append(Spacer(1, 0.05 * inch))
+            # Not etiketi TEKRARLAMAZ: "Burn Time (web burnout): <sayı>"
+            # biçimini özet ⟷ tablo bekçisi (P16B4-08) okur; tanım cümlesi
+            # kendi başlığıyla ("Web burnout time: …") başlar.
+            story.append(Paragraph(self.SOLID_BURN_TIME_NOTE,
+                                   self.styles['Normal']))
         if _pc_perf_red:
             story.append(Spacer(1, 0.1 * inch))
             story.append(Paragraph(_pc_perf_red, self.styles['Normal']))
@@ -2506,6 +2689,20 @@ class PDFReportGenerator:
             #      olduğu açıkça yazılarak basılır.
             design_note = None
             scope_note = None
+            # V307/SEKME-MOTOR (NK3-H-2): ekranın Performans Özeti kartı
+            # ("Yapısal Asgari EK") — aynı alan, aynı sayı, aynı künye.
+            # Künye tablonun hemen altında (headline_note).
+            headline = (self._structural_headline(structural_raw)
+                        if basis['schema'] == 'stations' else None)
+            headline_note = None
+            if headline is not None:
+                structural_data.append([
+                    'Structural Min SF',
+                    self._fmt(headline['minimum'], '{:.2f}'), '-'])
+                if headline['sentences']:
+                    headline_note = ('<b>Structural Min SF:</b> '
+                                     + '. '.join(headline['sentences'])
+                                     + '.')
             if not basis['known']:
                 _add_structural_row('Minimum Safety Factor (all modes)',
                                     'min_safety_factor')
@@ -2563,6 +2760,38 @@ class PDFReportGenerator:
                         'verification of a wall you built. Supply the as-built '
                         'thickness to obtain a verified safety factor.'
                         % ' and '.join(basis['sized']))
+                elif basis['floor_governed'] or basis['deficient']:
+                    # V307/SEKME-MOTOR (NK3-H-2): "Every station therefore
+                    # returns that target back" burada YANLIŞ olurdu — en
+                    # az bir HRMA kesitinin sayısı hedefin geri okunması
+                    # değil (imalat tabanı ya da hedefin altına düşmüş
+                    # ölçüm; satırları ve notları aşağıda, kendi adlarıyla).
+                    design_note = (
+                        '<b>Design basis: SIZING mode — no verified safety '
+                        'margin.</b>')
+                    if basis['sized']:
+                        design_note += (
+                            ' %s were SIZED to the design safety factor '
+                            'target%s, so the factors they report are that '
+                            'target read back (the solver marks them as the '
+                            'design target read back, not a measurement), not '
+                            'a verification of a wall you built.'
+                            % (' and '.join(basis['sized']),
+                               '' if basis['target'] is None
+                               else ' (%s)' % self._fmt(basis['target'], '{:g}')))
+                        if basis['allowance'] is not None:
+                            design_note += (
+                                ' The chamber wall carries a %s manufacturing '
+                                'allowance on that target.'
+                                % (self._fmt(basis['allowance'], '{:g}') + '×'))
+                    if basis['inherited_unearned']:
+                        design_note += (
+                            ' %s is solved on that same wall, so it is not a '
+                            'verification either.'
+                            % ' and '.join(basis['inherited_unearned']))
+                    design_note += (
+                        ' Enter the as-built wall / throat / head thicknesses '
+                        'to obtain verified safety factors.')
                 else:
                     # Hibrit metni SÖZCÜĞÜ SÖZCÜĞÜNE korunur (bekçiler bu
                     # cümleyi satır satır arıyor).
@@ -2576,6 +2805,31 @@ class PDFReportGenerator:
                         'are design inputs read back, not verifications. Enter the '
                         'as-built wall / throat / head thicknesses to obtain verified '
                         'safety factors.' % allowance)
+
+            # V307/SEKME-MOTOR (NK3-H-2): HRMA'nın seçtiği ama sayısı hedefin
+            # geri okunması OLMAYAN kesitler kendi adlarıyla (eskiden imalat
+            # tabanındaki lüle "doğrulanmış istasyon" sayılıyordu).
+            station_notes = []
+            for ad, deger in basis['floor_governed']:
+                structural_data.append([
+                    'Safety Factor, %s (manufacturing minimum thickness '
+                    'governs)' % ad, self._fmt(deger, '{:.2f}'), '-'])
+                station_notes.append(
+                    '<b>%s:</b> the manufacturing minimum thickness, not the '
+                    'design target, set this wall, so its safety factor is '
+                    'above the target and does not change with it. HRMA chose '
+                    'this thickness: it is not a verification of a wall you '
+                    'built and it does not enter a verified minimum.' % ad)
+            for ad, deger in basis['deficient']:
+                structural_data.append([
+                    'Safety Factor, %s (HRMA-sized wall, below the design '
+                    'target)' % ad, self._fmt(deger, '{:.2f}'), '-'])
+                station_notes.append(
+                    '<b>%s:</b> HRMA sized this wall to the design target, but '
+                    'a load the sizing does not cover pulled its safety factor '
+                    'below the target. It is a measurement on the drawn wall, '
+                    'not the target read back, and not a verification of a '
+                    'wall you built.' % ad)
 
             _add_structural_row('Von Mises Stress', 'von_mises_stress_MPa', unit='MPa')
             _add_structural_row('Hoop Stress (total)', 'hoop_stress_MPa', unit='MPa')
@@ -2611,6 +2865,10 @@ class PDFReportGenerator:
                 ]))
                 story.append(structural_table)
 
+            if headline_note:
+                story.append(Spacer(1, 0.1 * inch))
+                story.append(Paragraph(headline_note, self.styles['Normal']))
+
             if stress_basis_note:
                 story.append(Spacer(1, 0.1 * inch))
                 story.append(Paragraph(stress_basis_note,
@@ -2629,6 +2887,10 @@ class PDFReportGenerator:
             if design_note:
                 story.append(Spacer(1, 0.1 * inch))
                 story.append(Paragraph(design_note, self.styles['Normal']))
+
+            for note in station_notes:
+                story.append(Spacer(1, 0.1 * inch))
+                story.append(Paragraph(note, self.styles['Normal']))
 
             # Çözücünün KENDİ künyesi (P9B3-06). Katı/sıvı blokları emniyet
             # katsayısının neyi cevapladığını kendi cümleleriyle yayımlıyor;
@@ -3236,6 +3498,9 @@ class PDFReportGenerator:
             'c_star': 'Characteristic velocity c*',
             'isp_vacuum': 'Vacuum specific impulse',
             'isp_sea_level': 'Sea-level specific impulse',
+            # V307/SIVI-ORTAM: ekran satırıyla aynı ad (liq.cea.
+            # q_isp_design_ambient); deniz seviyesi dışındaki tasarımda.
+            'isp_design_ambient': 'Specific impulse at the design ambient',
             'chamber_temperature': 'Chamber temperature T_c',
             'molecular_weight': 'Molecular weight',
             'gamma': 'gamma',
@@ -3776,6 +4041,73 @@ class PDFReportGenerator:
          'kg/s', '{:.4f}'),
     )
 
+    #: V307/GÜVERTE-ORTAM — tasarım ortamı deniz seviyesi DEĞİLSE film
+    #: bloğunun Isp satırları. ÖLÇÜLDÜ (docs/scofield/raw/OH/V307/
+    #: guverte-ortam/olcum/ortam_once.json K3): çözücü bu tasarımda zincirin
+    #: tasarım ortamı değerlerini ``*_design_ambient_s`` adlarıyla yayımlıyor
+    #: (vakum, L3 ε 50: çekirdek 327,07 s, teslim 322,08 s), rapor yalnız
+    #: deniz seviyesi satırlarını basıyordu ve nozul deniz seviyesinde
+    #: ayrıkken onlar nedensiz "not published" kalıyordu. Satırlar deniz
+    #: seviyesi satırlarının ÖNÜNE eklenir; deniz seviyesi tasarımında blokta
+    #: bu alanlar yoktur ve tablo bugünküyle aynıdır.
+    LIQUID_FILM_DESIGN_AMBIENT_ROWS = (
+        ('performance.isp_core_design_ambient_s', 'Core Isp (design ambient)',
+         's', '{:.2f}'),
+        ('performance.isp_delivered_design_ambient_s',
+         'Delivered Isp (design ambient, film charged)', 's', '{:.2f}'),
+    )
+    #: Tasarım ortamının basıncı (yanıtın ``design_ambient.pressure_bar``ı):
+    #: tasarım ortamı satırlarının hangi ortamın sayısı olduğunu söyler.
+    LIQUID_FILM_DESIGN_AMBIENT_PRESSURE_ROW = (
+        'Design ambient pressure', 'bar', '{:.4f}')
+    #: Deniz seviyesi adlı film satırları (değer yoksa nedeni yazılır).
+    LIQUID_FILM_SEA_LEVEL_PATHS = ('performance.isp_core_sea_level_s',
+                                   'performance.isp_delivered_sea_level_s')
+    #: Nozul deniz seviyesinde ayrıkken (``design_ambient.sea_level.
+    #: flow_separated``) deniz seviyesi satırının hücresi: çözücü orada bağlı
+    #: akış sayısı yayımlamaz (Summerfield ölçütü), boş hücre basılmaz.
+    LIQUID_FILM_SEA_LEVEL_SEPARATED_TEXT = (
+        'not published: the nozzle flow separates at sea level')
+
+    def _liquid_film_rows(self, analysis_results: Dict, film: Dict) -> List:
+        """Film tablosunun gövde satırları ([etiket, hücre, birim]).
+
+        Deniz seviyesi tasarımında ``LIQUID_FILM_ROWS`` aynen basılır.
+        Tasarım ortamı deniz seviyesi DEĞİLSE (``design_ambient.is_sea_level``
+        False) deniz seviyesi satırlarının önüne tasarım ortamı basıncı ve
+        iki tasarım ortamı Isp satırı girer; deniz seviyesi satırı değer
+        taşımıyorsa ve nozul orada ayrıksa hücre nedenini söyler.
+        """
+        ar = analysis_results or {}
+        da = ar.get('design_ambient')
+        da = da if isinstance(da, dict) else {}
+        dis_ortam = da.get('is_sea_level') is False
+        ds_blok = da.get('sea_level') if isinstance(da.get('sea_level'),
+                                                    dict) else {}
+        ds_ayrik = ds_blok.get('flow_separated') is True
+        satirlar = []
+        for yol, etiket, birim, bicim in self.LIQUID_FILM_ROWS:
+            if dis_ortam and yol == self.LIQUID_FILM_SEA_LEVEL_PATHS[0]:
+                b_etiket, b_birim, b_bicim = (
+                    self.LIQUID_FILM_DESIGN_AMBIENT_PRESSURE_ROW)
+                satirlar.append([b_etiket,
+                                 self._hucre(da.get('pressure_bar'), b_bicim),
+                                 b_birim])
+                for t_yol, t_etiket, t_birim, t_bicim in (
+                        self.LIQUID_FILM_DESIGN_AMBIENT_ROWS):
+                    satirlar.append([t_etiket,
+                                     self._hucre(self._yol_oku(film, t_yol),
+                                                 t_bicim),
+                                     t_birim])
+            deger = self._yol_oku(film, yol)
+            if (dis_ortam and ds_ayrik and deger is None
+                    and yol in self.LIQUID_FILM_SEA_LEVEL_PATHS):
+                hucre = self.LIQUID_FILM_SEA_LEVEL_SEPARATED_TEXT
+            else:
+                hucre = self._hucre(deger, bicim)
+            satirlar.append([etiket, hucre, birim])
+        return satirlar
+
     #: Sıvı enjektör satırları (``injection_system`` altında).
     LIQUID_INJECTOR_ROWS = (
         ('injector_type', 'Injector type', '-', None),
@@ -3988,10 +4320,9 @@ class PDFReportGenerator:
             story.append(Spacer(1, 0.1 * inch))
             story.append(Paragraph('Film Cooling', self.styles['Heading3']))
             frows = [['Quantity', 'Value', 'Unit']]
-            for yol, etiket, birim, bicim in self.LIQUID_FILM_ROWS:
-                frows.append([etiket,
-                              self._hucre(self._yol_oku(film, yol), bicim),
-                              birim])
+            # V307/GÜVERTE-ORTAM: satırlar tasarım ortamına göre (deniz
+            # seviyesinde LIQUID_FILM_ROWS aynen).
+            frows.extend(self._liquid_film_rows(ar, film))
             story.append(self._simple_table(frows, [3.0 * inch, 1.3 * inch,
                                                     0.8 * inch]))
             for deger in (film.get('film_cooling_percent_source'),

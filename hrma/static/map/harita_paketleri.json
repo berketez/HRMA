@@ -1,0 +1,442 @@
+{
+ "schema": "hrma.map_packs/1",
+ "release_tag": "harita-paketleri-v1",
+ "note": "Files are published as assets of the HRMA GitHub release named by release_tag; the application downloads only the files listed here and verifies size and sha256 before use.",
+ "packs": [
+  {
+   "id": "ksc_lc39a",
+   "kind": "site",
+   "name_key": "site.mapPackName.ksc_lc39a",
+   "bbox": [
+    -81.627535,
+    27.710089,
+    -79.581065,
+    29.506711
+   ],
+   "zoom_max": 15,
+   "radius_km": 100.0,
+   "components": [
+    {
+     "kind": "vector",
+     "file": "hrma-harita-ksc_lc39a-v1.pmtiles",
+     "size_bytes": 164678968,
+     "sha256": "05a7f3913b3c3466508037a3d32b6cba321eab6abaf7ae3a434b5b036a63c4d8",
+     "license": "ODbL-1.0",
+     "attribution": "© OpenStreetMap contributors (ODbL 1.0); Protomaps Basemap schema; Natural Earth (public domain)"
+    }
+   ],
+   "source": {
+    "build": "20261115.pmtiles",
+    "version": "4.15.2",
+    "osm_replication_time": "2026-11-15T04:00:00Z",
+    "etag": "\"7fec872c142562ded7dffae739e8f032-520\""
+   }
+  },
+  {
+   "id": "ccsfs_slc40",
+   "kind": "site",
+   "name_key": "site.mapPackName.ccsfs_slc40",
+   "bbox": [
+    -81.599983,
+    27.663589,
+    -79.554417,
+    29.460211
+   ],
+   "zoom_max": 15,
+   "radius_km": 100.0,
+   "components": [
+    {
+     "kind": "vector",
+     "file": "hrma-harita-ccsfs_slc40-v1.pmtiles",
+     "size_bytes": 164084667,
+     "sha256": "a3844194a06eb6b5c7592079c8251c7393d5edfd75e7c4908fb032e93244d43b",
+     "license": "ODbL-1.0",
+     "attribution": "© OpenStreetMap contributors (ODbL 1.0); Protomaps Basemap schema; Natural Earth (public domain)"
+    }
+   ],
+   "source": {
+    "build": "20261115.pmtiles",
+    "version": "4.15.2",
+    "osm_replication_time": "2026-11-15T04:00:00Z",
+    "etag": "\"7fec872c142562ded7dffae739e8f032-520\""
+   }
+  },
+  {
+   "id": "vandenberg_slc4e",
+   "kind": "site",
+   "name_key": "site.mapPackName.vandenberg_slc4e",
+   "bbox": [
+    -121.702349,
+    33.733789,
+    -119.518851,
+    35.530411
+   ],
+   "zoom_max": 15,
+   "radius_km": 100.0,
+   "components": [
+    {
+     "kind": "vector",
+     "file": "hrma-harita-vandenberg_slc4e-v1.pmtiles",
+     "size_bytes": 37076350,
+     "sha256": "bb43f434349821221a721ab426b1337fc26d2f0dd6106db182a03a732fe12ca0",
+     "license": "ODbL-1.0",
+     "attribution": "© OpenStreetMap contributors (ODbL 1.0); Protomaps Basemap schema; Natural Earth (public domain)"
+    }
+   ],
+   "source": {
+    "build": "20261115.pmtiles",
+    "version": "4.15.2",
+    "osm_replication_time": "2026-11-15T04:00:00Z",
+    "etag": "\"7fec872c142562ded7dffae739e8f032-520\""
+   }
+  },
+  {
+   "id": "wallops_0a",
+   "kind": "site",
+   "name_key": "site.mapPackName.wallops_0a",
+   "bbox": [
+    -76.625499,
+    36.935389,
+    -74.350701,
+    38.732011
+   ],
+   "zoom_max": 15,
+   "radius_km": 100.0,
+   "components": [
+    {
+     "kind": "vector",
+     "file": "hrma-harita-wallops_0a-v1.pmtiles",
+     "size_bytes": 78467502,
+     "sha256": "f5e63904d916492df43be14aeb4c6f2a1cd56f09dbd33265e402240f4fb327fa",
+     "license": "ODbL-1.0",
+     "attribution": "© OpenStreetMap contributors (ODbL 1.0); Protomaps Basemap schema; Natural Earth (public domain)"
+    }
+   ],
+   "source": {
+    "build": "20261115.pmtiles",
+    "version": "4.15.2",
+    "osm_replication_time": "2026-11-15T04:00:00Z",
+    "etag": "\"7fec872c142562ded7dffae739e8f032-520\""
+   }
+  },
+  {
+   "id": "kourou_ela3",
+   "kind": "site",
+   "name_key": "site.mapPackName.kourou_ela3",
+   "bbox": [
+    -53.67038,
+    4.340689,
+    -51.86622,
+    6.137311
+   ],
+   "zoom_max": 15,
+   "radius_km": 100.0,
+   "components": [
+    {
+     "kind": "vector",
+     "file": "hrma-harita-kourou_ela3-v1.pmtiles",
+     "size_bytes": 14942912,
+     "sha256": "2512fa60c6463909b71a6e8c48be7561e652408255323dbf297c0eebe1f59b68",
+     "license": "ODbL-1.0",
+     "attribution": "© OpenStreetMap contributors (ODbL 1.0); Protomaps Basemap schema; Natural Earth (public domain)"
+    }
+   ],
+   "source": {
+    "build": "20261115.pmtiles",
+    "version": "4.15.2",
+    "osm_replication_time": "2026-11-15T04:00:00Z",
+    "etag": "\"7fec872c142562ded7dffae739e8f032-520\""
+   }
+  },
+  {
+   "id": "baikonur_1_5",
+   "kind": "site",
+   "name_key": "site.mapPackName.baikonur_1_5",
+   "bbox": [
+    62.050896,
+    45.021689,
+    64.633504,
+    46.818311
+   ],
+   "zoom_max": 15,
+   "radius_km": 100.0,
+   "components": [
+    {
+     "kind": "vector",
+     "file": "hrma-harita-baikonur_1_5-v1.pmtiles",
+     "size_bytes": 6463509,
+     "sha256": "2972e0675aa5403f2cc35a4f9f8d74a0831bb154549ca0231e51dbe1cc5761a4",
+     "license": "ODbL-1.0",
+     "attribution": "© OpenStreetMap contributors (ODbL 1.0); Protomaps Basemap schema; Natural Earth (public domain)"
+    }
+   ],
+   "source": {
+    "build": "20261115.pmtiles",
+    "version": "4.15.2",
+    "osm_replication_time": "2026-11-15T04:00:00Z",
+    "etag": "\"7fec872c142562ded7dffae739e8f032-520\""
+   }
+  },
+  {
+   "id": "esrange",
+   "kind": "site",
+   "name_key": "site.mapPackName.esrange",
+   "bbox": [
+    18.717307,
+    66.994789,
+    23.491293,
+    68.791411
+   ],
+   "zoom_max": 15,
+   "radius_km": 100.0,
+   "components": [
+    {
+     "kind": "vector",
+     "file": "hrma-harita-esrange-v1.pmtiles",
+     "size_bytes": 233667200,
+     "sha256": "ea3ab3067d82041f3ba544f8459d7b592f4874cc59c1be17bcfd86e8b172f041",
+     "license": "ODbL-1.0",
+     "attribution": "© OpenStreetMap contributors (ODbL 1.0); Protomaps Basemap schema; Natural Earth (public domain)"
+    }
+   ],
+   "source": {
+    "build": "20261115.pmtiles",
+    "version": "4.15.2",
+    "osm_replication_time": "2026-11-15T04:00:00Z",
+    "etag": "\"7fec872c142562ded7dffae739e8f032-520\""
+   }
+  },
+  {
+   "id": "andoya",
+   "kind": "site",
+   "name_key": "site.mapPackName.andoya",
+   "bbox": [
+    13.48012,
+    68.395789,
+    18.56148,
+    70.192411
+   ],
+   "zoom_max": 15,
+   "radius_km": 100.0,
+   "components": [
+    {
+     "kind": "vector",
+     "file": "hrma-harita-andoya-v1.pmtiles",
+     "size_bytes": 127961506,
+     "sha256": "ab6be3bd5548faa37787bb890c807ed33f945b9810358aadd76c07447117778f",
+     "license": "ODbL-1.0",
+     "attribution": "© OpenStreetMap contributors (ODbL 1.0); Protomaps Basemap schema; Natural Earth (public domain)"
+    }
+   ],
+   "source": {
+    "build": "20261115.pmtiles",
+    "version": "4.15.2",
+    "osm_replication_time": "2026-11-15T04:00:00Z",
+    "etag": "\"7fec872c142562ded7dffae739e8f032-520\""
+   }
+  },
+  {
+   "id": "mahia_lc1",
+   "kind": "site",
+   "name_key": "site.mapPackName.mahia_lc1",
+   "bbox": [
+    176.704786,
+    -40.160011,
+    179.025214,
+    -38.363389
+   ],
+   "zoom_max": 15,
+   "radius_km": 100.0,
+   "components": [
+    {
+     "kind": "vector",
+     "file": "hrma-harita-mahia_lc1-v1.pmtiles",
+     "size_bytes": 30376927,
+     "sha256": "5350b5ea967a861d19f5df6745a9611c79c21ac1320ee506ca3403ff3c51974f",
+     "license": "ODbL-1.0",
+     "attribution": "© OpenStreetMap contributors (ODbL 1.0); Protomaps Basemap schema; Natural Earth (public domain)"
+    }
+   ],
+   "source": {
+    "build": "20261115.pmtiles",
+    "version": "4.15.2",
+    "osm_replication_time": "2026-11-15T04:00:00Z",
+    "etag": "\"7fec872c142562ded7dffae739e8f032-520\""
+   }
+  },
+  {
+   "id": "tanegashima",
+   "kind": "site",
+   "name_key": "site.mapPackName.tanegashima",
+   "bbox": [
+    129.928496,
+    29.501689,
+    132.011504,
+    31.298311
+   ],
+   "zoom_max": 15,
+   "radius_km": 100.0,
+   "components": [
+    {
+     "kind": "vector",
+     "file": "hrma-harita-tanegashima-v1.pmtiles",
+     "size_bytes": 9901143,
+     "sha256": "9cd3c4f147604d25ca3a3d259dc80a2e9b2f61d6e5305427b068aa0ac270bf21",
+     "license": "ODbL-1.0",
+     "attribution": "© OpenStreetMap contributors (ODbL 1.0); Protomaps Basemap schema; Natural Earth (public domain)"
+    }
+   ],
+   "source": {
+    "build": "20261115.pmtiles",
+    "version": "4.15.2",
+    "osm_replication_time": "2026-11-15T04:00:00Z",
+    "etag": "\"7fec872c142562ded7dffae739e8f032-520\""
+   }
+  },
+  {
+   "id": "sriharikota",
+   "kind": "site",
+   "name_key": "site.mapPackName.sriharikota",
+   "bbox": [
+    79.310253,
+    12.834689,
+    81.159747,
+    14.631311
+   ],
+   "zoom_max": 15,
+   "radius_km": 100.0,
+   "components": [
+    {
+     "kind": "vector",
+     "file": "hrma-harita-sriharikota-v1.pmtiles",
+     "size_bytes": 39549058,
+     "sha256": "5ded7847b978a15b467259051896e211f4127cdfe5761403f33d7e2994244379",
+     "license": "ODbL-1.0",
+     "attribution": "© OpenStreetMap contributors (ODbL 1.0); Protomaps Basemap schema; Natural Earth (public domain)"
+    }
+   ],
+   "source": {
+    "build": "20261115.pmtiles",
+    "version": "4.15.2",
+    "osm_replication_time": "2026-11-15T04:00:00Z",
+    "etag": "\"7fec872c142562ded7dffae739e8f032-520\""
+   }
+  },
+  {
+   "id": "jiuquan_43",
+   "kind": "site",
+   "name_key": "site.mapPackName.jiuquan_43",
+   "bbox": [
+    99.102178,
+    40.059989,
+    101.481222,
+    41.856611
+   ],
+   "zoom_max": 15,
+   "radius_km": 100.0,
+   "components": [
+    {
+     "kind": "vector",
+     "file": "hrma-harita-jiuquan_43-v1.pmtiles",
+     "size_bytes": 4271826,
+     "sha256": "348578212fb08cdf39e2015964cd87f60885b5e85981531c77bceeb608fe8765",
+     "license": "ODbL-1.0",
+     "attribution": "© OpenStreetMap contributors (ODbL 1.0); Protomaps Basemap schema; Natural Earth (public domain)"
+    }
+   ],
+   "source": {
+    "build": "20261115.pmtiles",
+    "version": "4.15.2",
+    "osm_replication_time": "2026-11-15T04:00:00Z",
+    "etag": "\"7fec872c142562ded7dffae739e8f032-520\""
+   }
+  },
+  {
+   "id": "sinop_tr",
+   "kind": "site",
+   "name_key": "site.mapPackName.sinop_tr",
+   "bbox": [
+    33.943864,
+    41.124789,
+    36.362336,
+    42.921411
+   ],
+   "zoom_max": 15,
+   "radius_km": 100.0,
+   "components": [
+    {
+     "kind": "vector",
+     "file": "hrma-harita-sinop_tr-v1.pmtiles",
+     "size_bytes": 34513554,
+     "sha256": "089675d8c8932af2a7d0a126cb9e15d0b726678b974c4eddc45c778f74fb660e",
+     "license": "ODbL-1.0",
+     "attribution": "© OpenStreetMap contributors (ODbL 1.0); Protomaps Basemap schema; Natural Earth (public domain)"
+    }
+   ],
+   "source": {
+    "build": "20261115.pmtiles",
+    "version": "4.15.2",
+    "osm_replication_time": "2026-11-15T04:00:00Z",
+    "etag": "\"7fec872c142562ded7dffae739e8f032-520\""
+   }
+  },
+  {
+   "id": "konya_tr",
+   "kind": "site",
+   "name_key": "site.mapPackName.konya_tr",
+   "bbox": [
+    31.35517,
+    36.976289,
+    33.63123,
+    38.772911
+   ],
+   "zoom_max": 15,
+   "radius_km": 100.0,
+   "components": [
+    {
+     "kind": "vector",
+     "file": "hrma-harita-konya_tr-v1.pmtiles",
+     "size_bytes": 33738268,
+     "sha256": "3c199b17ced5ee97e07a030a51b8f135b56ea534c4304483bcf9caf483ebc5a3",
+     "license": "ODbL-1.0",
+     "attribution": "© OpenStreetMap contributors (ODbL 1.0); Protomaps Basemap schema; Natural Earth (public domain)"
+    }
+   ],
+   "source": {
+    "build": "20261115.pmtiles",
+    "version": "4.15.2",
+    "osm_replication_time": "2026-11-15T04:00:00Z",
+    "etag": "\"7fec872c142562ded7dffae739e8f032-520\""
+   }
+  },
+  {
+   "id": "turkiye",
+   "kind": "region",
+   "name_key": "site.mapPackName.turkiye",
+   "bbox": [
+    25.6,
+    35.8,
+    44.9,
+    42.2
+   ],
+   "zoom_max": 15,
+   "radius_km": null,
+   "components": [
+    {
+     "kind": "vector",
+     "file": "hrma-harita-turkiye-v1.pmtiles",
+     "size_bytes": 1628223566,
+     "sha256": "e02c04c65f7d6a2b98440c2f21d65d5a13a91ede2b6d02e958239dd87ffc58e2",
+     "license": "ODbL-1.0",
+     "attribution": "© OpenStreetMap contributors (ODbL 1.0); Protomaps Basemap schema; Natural Earth (public domain)"
+    }
+   ],
+   "source": {
+    "build": "20261115.pmtiles",
+    "version": "4.15.2",
+    "osm_replication_time": "2026-11-15T04:00:00Z",
+    "etag": "\"7fec872c142562ded7dffae739e8f032-520\""
+   }
+  }
+ ]
+}

@@ -37,6 +37,12 @@
      * uçurmaz ve nedeni yazar. Önceki hesabın aracı da depodan kalkar —
      * Fırlatma Sahası eski motoru "son hesap" diye uçurmaz. */
     var REFUSAL_CODE = 'engine_mass_not_published';
+    /* V307/FS-KÜÇÜK (kalem 4; SIVI-ORTAM DEVİR 3) — vakum/irtifa tasarımlı
+     * sıvı motorun lülesi deniz seviyesinde ayrılıyorsa yerden kalkış itkisi
+     * yayımlanmaz; uç aracı bu kodla ADIYLA reddeder (eskiden genel
+     * 'unflyable_vehicle'). Ret kaydı metnin ihtiyaç duyduğu tasarım ortamı
+     * ve deniz seviyesi alanlarını (uç yanıtından, aynen) taşır. */
+    var REFUSAL_CODE_SEA_LEVEL = 'sea_level_thrust_not_published';
     var lastRefused = { results: null, body: null };
 
     /* Motor tipini belirle: açık değer > sayfa yolu (solid/liquid) > hibrit. */
@@ -98,12 +104,15 @@
         }).then(function (r) {
             if (!r.ok) {
                 return r.json().catch(function () { return null; }).then(function (b) {
-                    if (r.status === 422 && b && b.error === REFUSAL_CODE) {
+                    if (r.status === 422 && b && (b.error === REFUSAL_CODE
+                            || b.error === REFUSAL_CODE_SEA_LEVEL)) {
                         lastRefused = { results: results, body: b };
                         lastPublished = { results: null, vehicle: null };
                         try {
                             window.localStorage.setItem(STORAGE_KEY, JSON.stringify({
                                 refused: { code: b.error, cause: b.cause || null,
+                                           design_ambient: b.design_ambient || null,
+                                           sea_level: b.sea_level || null,
                                            motor_name: name || null, motor_type: motorType },
                                 saved_at: new Date().toISOString()
                             }));
@@ -235,8 +244,34 @@
     /* V306/UÇUŞ-3: verilen hesabın aracı adıyla reddedildiyse ekran metni,
      * değilse null. Metin uç yanıtının nedeninden (soğutma devresi çözülmedi
      * ya da motor kütlesi yayımlanmadı) sözlükle kurulur. */
+    /* V307/FS-KÜÇÜK (kalem 4): tasarım ortamının adı (uç yanıtının
+     * design_ambient bloğundan; sayı motorundur). */
+    function tasarimOrtami(da) {
+        da = da || {};
+        if (da.mode === 'vacuum') return tr_('flight.ambientVacuum', 'vacuum');
+        if (da.mode === 'altitude' && typeof da.altitude_m === 'number' && isFinite(da.altitude_m)) {
+            return trf_('flight.ambientAltitude', { alt: sayiYaz(da.altitude_m, 0) }, '{alt} m altitude');
+        }
+        if (da.mode === 'pressure' && typeof da.pressure_bar === 'number' && isFinite(da.pressure_bar)) {
+            return trf_('flight.ambientPressure', { p: sayiYaz(da.pressure_bar, 4) }, 'an ambient pressure of {p} bar');
+        }
+        return tr_('flight.ambientNonSeaLevel', 'a non-sea-level ambient');
+    }
     function refusalText(body) {
         if (!body) return null;
+        // Uç gövdesi `error`, köprü kaydı (readLast().refusal) `code` taşır.
+        if ((body.error || body.code) === REFUSAL_CODE_SEA_LEVEL) {
+            var ds = body.sea_level || {};
+            var sayi = function (v) { return (typeof v === 'number' && isFinite(v)) ? sayiYaz(v, 4) : '—'; };
+            return (body.cause === 'nozzle_flow_separated_at_sea_level')
+                ? trf_('flight.refusedSeaLevelSeparated',
+                    { ambient: tasarimOrtami(body.design_ambient),
+                      pe: sayi(ds.exit_pressure_bar), psep: sayi(ds.separation_pressure_bar) },
+                    'No flight: this engine is designed for {ambient}; at sea level its nozzle flow separates (exit pressure {pe} bar, below the separation pressure {psep} bar), so no lift-off thrust is published, no vehicle is built and nothing is flown from the ground. Flying it as an upper stage ignited at altitude is not part of this flight.')
+                : trf_('flight.refusedSeaLevelNotPublished',
+                    { ambient: tasarimOrtami(body.design_ambient) },
+                    'No flight: this engine is designed for {ambient} and its sea-level (lift-off) thrust is not published for this design, so no vehicle is built and nothing is flown from the ground.');
+        }
         return (body.cause === 'cooling_circuit_not_solved')
             ? tr_('flight.refusedCooling',
                 'No flight: the engine mass is not published for this calculation because the regenerative cooling circuit was not solved, so no vehicle is built and nothing is flown. Fix the cooling design and calculate again.')
@@ -570,6 +605,7 @@
         isUserEdit: isUserEdit,
         vehicleRefusalText: vehicleRefusalText,
         refusalText: refusalText,
+        REFUSAL_CODES: [REFUSAL_CODE, REFUSAL_CODE_SEA_LEVEL],
         seedField: seedField,
         inertLedgerText: inertLedgerText,
         renderInertLedger: renderInertLedger,

@@ -3543,7 +3543,18 @@
         'inconsistent_geometry': 'tutarsız geometri',
         'unresolved_geometry_units': 'geometri birimi çözülemedi',
         /* V301/DİL-2: sıvı ucunun bant reddi kodu (L-A tek bant kapısı). */
-        'input_not_accepted': 'girdi kabul edilmedi'
+        'input_not_accepted': 'girdi kabul edilmedi',
+        /* V307/SIVI-ORTAM (NK3-S-4): sıvı ucunun ayrılan sabit nozul ve
+           tasarım ortamı ret kodları (TR ekranda ham İngilizce kod
+           görünüyordu). Kod adları hrma/engines/liquid_rocket_engine.py
+           FIXED_NOZZLE_SEPARATED_CODE ve DESIGN_AMBIENT_*_CODE. */
+        'fixed_nozzle_separated_at_design_ambient': 'sabit nozul tasarım ortamında ayrılıyor',
+        'design_ambient_mode_not_recognised': 'tasarım ortamı seçimi tanınmadı',
+        'design_ambient_mode_required': 'tasarım ortamı seçimi gerekli',
+        'design_ambient_value_required': 'tasarım ortamı değeri gerekli',
+        'design_ambient_value_not_accepted': 'tasarım ortamı değeri kabul edilmedi',
+        'design_ambient_requires_expansion_ratio': 'tasarım ortamı genişleme oranını ister',
+        'design_ambient_needs_cea_solution': 'tasarım ortamı yanma çözümünü ister'
     };
 
     /* DV36-03 — hibrit patlayıcı dayanağının yakıt bloğu notu
@@ -3595,6 +3606,21 @@
                  + ' taşır. Bu yüzden hiçbir teslim Isp sayısı değişmez: teşhis'
                  + ' itki katsayısına hiç uygulanmadı (two_phase_losses_applied'
                  + ' = false).';
+         }],
+        [/^The size-corrected two-phase \(particle-lag\) loss estimate of hrma\.analysis\.two_phase_loss, (\S+) % \(band (\S+) %\), IS applied to the thrust coefficient, so the published Isp, thrust and total impulse include it\. No user multiplier was supplied\. Basis: NASA SP-8039 \(1971\) Fig\. 8 gives the delivered Isp efficiency as a zero-oxide intercept \(about 98 % for a 15 deg cone, the propellant-table nozzle efficiency\) minus an oxide-dependent drop \(this estimate\), and Fig\. 7 draws the divergence and two-phase losses as separate bands, so the product does not double count\. Cross-check: six 32 kg BATES firings in NASA-CR-158815 measured a mean nozzle efficiency of 0\.945 against 0\.943 from this product\. It is an engineering estimate, not a verified value for this propellant\.$/,
+         function (_t, kayip, bant) {
+             /* V307 KATI-DOĞRULAMA faz 3 (B1): modül tahmini uygulandı. */
+             return 'İki fazlı (parçacık gecikmesi) kaybın boyut düzeltmeli tahmini, %'
+                 + I18N_SAYI(kayip) + ' (bant %' + String(bant).split('-').map(I18N_SAYI).join('–')
+                 + '), itki katsayısına UYGULANIR; yayımlanan Isp, itki ve toplam itki'
+                 + ' bu kaybı içerir. Kullanıcı çarpanı verilmedi. Dayanak: NASA SP-8039'
+                 + ' (1971) Şekil 8 teslim Isp verimini sıfır oksit kesişimi (15° koni için'
+                 + ' yaklaşık %98; itici tablosundaki nozul verimi) eksi oksit kesrine bağlı'
+                 + ' düşüş (bu tahmin) olarak verir; Şekil 7 ıraksama ve iki fazlı kayıpları'
+                 + ' ayrı bantlarla çizer, yani çarpım çift sayım değildir. Sağlama:'
+                 + ' NASA-CR-158815\'in altı 32 kg BATES ateşlemesinde ölçülen ortalama nozul'
+                 + ' verimi ' + I18N_SAYI('0.945') + ', bu çarpımdan ' + I18N_SAYI('0.943')
+                 + '. Mühendislik tahminidir; bu itici için doğrulanmış değer değildir.';
          }],
         [/^X_p = (\S+) > 0 and no user multiplier was supplied, so the thrust coefficient carries NO two-phase factor at all \(two_phase_efficiency_applied = 1\.0\) even though the solver's own models estimate a non-zero loss for this state\.$/,
          function (_t, xp) {

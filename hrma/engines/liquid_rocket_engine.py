@@ -12,7 +12,10 @@ from typing import Dict, List, Optional, Tuple
 from hrma.constants import (G_0, R_UNIVERSAL, PA_PER_BAR, LAMBDA_BELL,
                             NOZZLE_FRICTION_LOSS_FRACTION_DEFAULT,
                             lambda_conical,
-                            ISA_TABLE_TOP_M, isa_temperature, isa_pressure)
+                            ISA_TABLE_TOP_M, isa_temperature, isa_pressure,
+                            P_SEA_LEVEL_PA,
+                            ISA_GEOPOTENTIAL_EARTH_RADIUS_M,
+                            isa_pressure_geometric, geometric_to_geopotential)
 # B5 (v2.6.27): NPSH zinciri TEK KAYNAK — mevcut NPSH tanımı, devir düşürme
 # çarpanı ve birim çevrimleri turbopompa boyutlandırma modülünden İTHAL
 # edilir; motor kendi kopyalarını TANIMLAMAZ (parametre tutarlılığı kuralı).
@@ -190,6 +193,26 @@ class UnsupportedInjectorTypeError(ValueError):
         super().__init__(message)
         self.reason_code = 'injector_type_not_modelled'
         self.injector_type = injector_type
+
+
+class DesignAmbientInputError(ValueError):
+    """Tasarım ortamı girdisi kabul edilmedi — motor KURULMAZ (fail-closed).
+
+    V307/SIVI-ORTAM. Tasarım ortamı bütün boyutlandırmanın referansıdır
+    (itki o ortamda tanımlıdır); tanınmayan kip, eksik/bant dışı irtifa ya
+    da basınç ve deniz seviyesi dışındaki ortamda eksik genişleme oranı
+    için sessiz bir yedek (ör. deniz seviyesine düşmek) BAŞKA bir motor
+    tasarlamak olurdu. ``reason_code`` adlı ret kodudur; ``invalid_fields``
+    uç gövdesine aynen taşınır (``/calculate_liquid`` -> 422).
+    """
+
+    def __init__(self, message, reason_code, invalid_fields=None,
+                 message_key=None, message_params=None):
+        super().__init__(message)
+        self.reason_code = reason_code
+        self.invalid_fields = list(invalid_fields or [])
+        self.message_key = message_key
+        self.message_params = dict(message_params or {})
 
 
 # Tablo dışı ama CEA ile ÇÖZÜLEBİLEN çiftlerde (ör. rp1/n2o4, lh2/n2o4) itici
@@ -399,7 +422,9 @@ LIQUID_UNKNOWN_PAIR_DISSOCIATION_TEMP = 3000  # K
 # Geopotansiyel <-> geometrik irtifa dönüşümünün etkin yarıçapı [m]
 # (US Standard Atmosphere 1976 r0). Bu dosyada İKİ yerde çıplak sayı olarak
 # duruyordu (irtifa performansı ve tasarım irtifası); tek tanım (ÖH D15 a3).
-ISA_GEOPOTENTIAL_EARTH_RADIUS_M = 6356766.0
+# V307/SIVI-ORTAM: tanım merkeze taşındı (``hrma.constants.
+# ISA_GEOPOTENTIAL_EARTH_RADIUS_M``, aynı değer); ad bu modülde yukarıdaki
+# içe aktarımla durur (mevcut kullanımlar değişmedi).
 
 
 @lru_cache(maxsize=1)
@@ -3310,6 +3335,18 @@ FEED_VISCOSITY_FALLBACK_PA_S = {'oxidizer': 2.0e-4, 'fuel': 1.2e-3}
 # değerdir (iki motor aynı modüle iki farklı varsayılanla gitmez).
 # TASARIM SEÇİMİDİR, çözüm değildir — çıktıda adıyla beyan edilir.
 TPS_LINER_MATERIAL_DEFAULT = 'silica_phenolic'
+# V307/GÜVERTE-ISIL (kalem 1): sıvı motorun astar kalınlığı YALNIZ gerileme
+# payıdır (toplam gerileme × tasarım payı, Seviye-1 Q*); iletim (yalıtım) payı
+# İÇERMEZ. Hibrit zinciri 3.0.6'dan beri iletim payını ekliyor
+# (``hybrid_liner_sizing``); güverte termal sekmesi de onu ekler ve farkı
+# adıyla yazar. Ad ve gerekçe thermal_protection modülünde TEK tanımdır.
+from hrma.analysis.thermal_protection import (  # noqa: E402
+    LINER_RULE_RECESSION_ONLY as TPS_LINER_THICKNESS_RULE,
+    LINER_RULE_RECESSION_ONLY_BASIS as TPS_LINER_THICKNESS_RULE_BASIS,
+    LINER_STATUS_SIZED as TPS_LINER_STATUS_SIZED,
+    LINER_STATUS_PARTIALLY_SIZED as TPS_LINER_STATUS_PARTIAL,
+    LINER_STATUS_NOT_SIZED as TPS_LINER_STATUS_NOT_SIZED,
+    LINER_STATUS_BASIS as TPS_LINER_STATUS_BASIS)
 # Cidar sıcaklık geçmişi örnekleme tavanı (hibritteki WALL_HISTORY_MAX_POINTS
 # ile aynı gerekçe: yanıt boyutu sınırlanır, son nokta daima korunur).
 TPS_WALL_HISTORY_MAX_POINTS = 200
@@ -3529,6 +3566,137 @@ FIXED_NOZZLE_SEPARATION_BASIS = (
     'separation pressure); leaving the expansion ratio empty sizes the '
     'nozzle ambient-matched at sea level')
 
+#: V307/SIVI-ORTAM: aynı ret, tasarım ortamı deniz seviyesi değilken.
+FIXED_NOZZLE_SEPARATION_DESIGN_AMBIENT_BASIS = (
+    'Summerfield flow separation criterion (the one this engine also '
+    'applies to its altitude table and throttle map): an over-expanded '
+    'nozzle separates when the exit pressure P_e falls below '
+    f'{NOZZLE_SEPARATION_PRESSURE_RATIO:g} x the ambient pressure P_a. The '
+    'engine is sized at the design ambient you selected (the thrust you '
+    'enter is the engine thrust at that ambient pressure) with '
+    'attached-flow nozzle relations, which do not hold for a separated '
+    'nozzle, so no design is published for an expansion ratio that '
+    'separates there. The largest attached expansion ratio is solved from '
+    'the same nozzle relation (exit pressure equal to the separation '
+    'pressure)')
+
+# --- V307/SIVI-ORTAM: TASARIM ORTAMI (deniz seviyesi / irtifa / vakum) ------
+# Sıvı motorun tasarım ortamı 3.0.6'ya kadar SABİT deniz seviyesiydi
+# (``self.P_a = 1,01325``): itki girdisi deniz seviyesi itkisiydi ve deniz
+# seviyesinde ayrılan sabit lüle adlı retle reddedildiği için (yukarıdaki
+# ``FIXED_NOZZLE_SEPARATED_CODE``) üst kademe / vakum motorları (RL10 sınıfı,
+# ε 61) tasarlanamıyordu. Tasarım ortamı artık GİRDİDİR; ``self.P_a`` o
+# ortamın basıncıdır, itki girdisi o ortamdaki motor itkisidir ve lülenin
+# yapışık akışı o ortamda denetlenir. Varsayılan deniz seviyesidir ve o
+# yolda hiçbir sayı değişmez (kanıt: docs/scofield/raw/OH/V307/sivi-ortam).
+#
+#: Deniz seviyesi standart basıncı [bar]. YENİ SAYI DEĞİL: ISA tablosunun
+#: taban satırı (``hrma.constants.P_SEA_LEVEL_PA``); 101325/1e5 IEEE
+#: bölmesi 1,01325 literaliyle bit-aynıdır. Ad katı motordakiyle aynıdır
+#: (``solid_rocket_engine.SEA_LEVEL_PRESSURE_BAR``, aynı kavram).
+SEA_LEVEL_PRESSURE_BAR = P_SEA_LEVEL_PA / PA_PER_BAR
+#: Tasarım ortamı kipleri (form + proje dosyası + API: ``design_ambient_mode``).
+DESIGN_AMBIENT_MODE_SEA_LEVEL = 'sea_level'
+DESIGN_AMBIENT_MODE_ALTITUDE = 'altitude'
+DESIGN_AMBIENT_MODE_PRESSURE = 'pressure'
+DESIGN_AMBIENT_MODE_VACUUM = 'vacuum'
+DESIGN_AMBIENT_MODES = (DESIGN_AMBIENT_MODE_SEA_LEVEL,
+                        DESIGN_AMBIENT_MODE_ALTITUDE,
+                        DESIGN_AMBIENT_MODE_PRESSURE,
+                        DESIGN_AMBIENT_MODE_VACUUM)
+#: Kip gönderilmezse (eski proje dosyası, eski API gövdesi) deniz seviyesi.
+DESIGN_AMBIENT_MODE_DEFAULT = DESIGN_AMBIENT_MODE_SEA_LEVEL
+#: Tasarım ortamı girdi alanları (motor ve uç AYNI adları okur).
+DESIGN_AMBIENT_MODE_FIELD = 'design_ambient_mode'
+DESIGN_AMBIENT_ALTITUDE_FIELD = 'design_ambient_altitude_m'
+DESIGN_AMBIENT_PRESSURE_FIELD = 'design_ambient_pressure_bar'
+#: Tasarım irtifası bandı [m, geometrik]: 0 … ISA tablosunun tepesi
+#: (US Standard Atmosphere 1976, 84,852 km; ``ISA_TABLE_TOP_M``). Üstünde
+#: tablo yoktur (izotermal uzantı beyanlı bir sayısal kararlılık kuralıdır);
+#: orada tasarım vakum kipiyle ya da basınç girilerek yapılır.
+DESIGN_AMBIENT_ALTITUDE_BAND_M = (0.0, ISA_TABLE_TOP_M)
+#: Tasarım ortam basıncı bandı [bar]: 0 (vakum) … deniz seviyesi standardı.
+#: Üst uç HRMA seçimidir: en yoğun tasarım ortamı ISA deniz seviyesidir.
+DESIGN_AMBIENT_PRESSURE_BAND_BAR = (0.0, SEA_LEVEL_PRESSURE_BAR)
+#: ``inputs_not_used`` gerekçe adı: seçili kipin okumadığı ortam alanı.
+DESIGN_AMBIENT_FIELD_UNUSED_REASON = 'not_read_in_this_design_ambient_mode'
+#: Adlı ret kodları (``DesignAmbientInputError.reason_code``).
+DESIGN_AMBIENT_MODE_NOT_RECOGNISED_CODE = 'design_ambient_mode_not_recognised'
+DESIGN_AMBIENT_MODE_REQUIRED_CODE = 'design_ambient_mode_required'
+DESIGN_AMBIENT_VALUE_REQUIRED_CODE = 'design_ambient_value_required'
+DESIGN_AMBIENT_VALUE_NOT_ACCEPTED_CODE = 'design_ambient_value_not_accepted'
+DESIGN_AMBIENT_EXPANSION_RATIO_REQUIRED_CODE = (
+    'design_ambient_requires_expansion_ratio')
+DESIGN_AMBIENT_NEEDS_CEA_CODE = 'design_ambient_needs_cea_solution'
+#: Ekran metni anahtarları (i18n_common.js, EN + TR) — kod -> anahtar.
+DESIGN_AMBIENT_MESSAGE_KEYS = {
+    DESIGN_AMBIENT_MODE_NOT_RECOGNISED_CODE:
+        'err.liquid.design_ambient_mode_not_recognised',
+    DESIGN_AMBIENT_MODE_REQUIRED_CODE:
+        'err.liquid.design_ambient_mode_required',
+    DESIGN_AMBIENT_VALUE_REQUIRED_CODE:
+        'err.liquid.design_ambient_value_required',
+    DESIGN_AMBIENT_VALUE_NOT_ACCEPTED_CODE:
+        'err.liquid.design_ambient_value_not_accepted',
+    DESIGN_AMBIENT_EXPANSION_RATIO_REQUIRED_CODE:
+        'err.liquid.design_ambient_requires_expansion_ratio',
+    DESIGN_AMBIENT_NEEDS_CEA_CODE:
+        'err.liquid.design_ambient_needs_cea_solution',
+}
+DESIGN_AMBIENT_NEEDS_CEA_BASIS = (
+    'A design ambient other than sea level needs the combustion solution '
+    'of this propellant pair in the nozzle you entered (CEA). For this '
+    'request only the static anchor table is available, and its Isp '
+    'anchors are sea-level design anchors (the sea-level value belongs to '
+    'an ambient-matched sea-level nozzle, the vacuum value to a much larger '
+    'nozzle), so no altitude or vacuum design is published from it. No '
+    'design was computed.')
+#: Tasarım ortamının dayanağı (künye; her sonuçta ``design_ambient.basis``).
+DESIGN_AMBIENT_BASIS = (
+    'The thrust you enter is the engine thrust at the design ambient '
+    'pressure p_a (sea_level: 1.01325 bar, ISA / US Standard Atmosphere '
+    '1976 at 0 m; altitude: the ISA pressure of the entered geometric '
+    'altitude, the same atmosphere table the altitude performance table and '
+    'the trajectory solver use; pressure: the entered pressure; vacuum: '
+    'p_a = 0). The propellant flow, the throat and everything sized from '
+    'them follow from F = mdot*g0*Isp(p_a) with the same-nozzle identity '
+    'F(p_a) = F_vac - p_a*A_e (Sutton & Biblarz 9th ed., Eq. 2-14 and '
+    '3-29). The flow separation check (Summerfield criterion, P_e < '
+    f'{NOZZLE_SEPARATION_PRESSURE_RATIO:g} x p_a; Summerfield, Foster & '
+    'Swan, Jet Propulsion 24(9), 1954) is applied at the design ambient: a '
+    'nozzle that is attached there is a valid design even when it separates '
+    'at sea '
+    'level, and the sea-level state is then published separately '
+    '(design_ambient.sea_level).')
+#: Deniz seviyesi dışındaki tasarımda çözücü bloklarına düşülen not.
+DESIGN_AMBIENT_RELOCATION_NOTE = (
+    'this design is sized at a design ambient other than sea level '
+    '(design_ambient): the reference point of the solver chain is that '
+    'ambient, so its values are published under *_design_ambient* names. '
+    'Fields named sea level / _sl_ carry the true sea-level value of the '
+    'same nozzle where it is solved (attached flow), otherwise null.')
+#: Deniz seviyesi durumunun (yer testi bilgisi) dayanağı.
+DESIGN_AMBIENT_SEA_LEVEL_BASIS = (
+    'sea-level state of THIS nozzle (same expansion ratio, same chamber '
+    'pressure, same propellant flow) at 1.01325 bar: the exit pressure is '
+    'the isentropic exit pressure of the nozzle (independent of ambient), '
+    'the flow is attached when P_e >= '
+    f'{NOZZLE_SEPARATION_PRESSURE_RATIO:g} x 1.01325 bar (Summerfield '
+    'criterion on the one-dimensional exit pressure, the same test as the '
+    'design point), and thrust / Isp come from the 0 m row of the altitude '
+    'performance table (same-nozzle identity F(0) = F_vac - p_sl*A_e, '
+    'Sutton & Biblarz 9th ed., Eq. 2-14). They are published only for '
+    'attached flow. max_attached_expansion_ratio is the largest expansion '
+    'ratio that stays attached at sea level at this chamber pressure.')
+#: Deniz seviyesi dışındaki tasarımda ε neden zorunlu (ret + künye metni).
+DESIGN_AMBIENT_EXPANSION_RATIO_REQUIRED_BASIS = (
+    'A design ambient other than sea level needs the expansion ratio of '
+    'the nozzle: with the field empty this solver re-matches the nozzle to '
+    'the ambient pressure of every altitude row (its design row is the '
+    'sea-level row), and in vacuum no ambient-matched expansion ratio '
+    'exists at all (p_a = 0 gives an infinite area ratio). Enter the '
+    'expansion ratio of the nozzle you are designing.')
+
 # --- B4 (v2.6.27 6. dalga): OKUNMAYAN gövde alanları -----------------------
 # ÖLÇÜLDÜ (11 Ağustos 2026, bu blok yazılmadan önce): /calculate_liquid
 # gövdesine `expansion_ratio` 4 / 20 / 60 / 150 / 400 gönderildi; BEŞİNDE DE
@@ -3603,6 +3771,13 @@ LIQUID_INPUT_BANDS = {
                           'Contraction ratio', ''),
     'chamber_diameter': (10.0, 5000.0, 'Chamber diameter', ' mm'),
     'nozzle_expansion_ratio': (1.5, 300.0, 'Nozzle expansion ratio', ''),
+    # V307/SIVI-ORTAM: tasarım ortamı (kip ``design_ambient_mode``).
+    'design_ambient_altitude_m': (DESIGN_AMBIENT_ALTITUDE_BAND_M[0],
+                                  DESIGN_AMBIENT_ALTITUDE_BAND_M[1],
+                                  'Design altitude', ' m'),
+    'design_ambient_pressure_bar': (DESIGN_AMBIENT_PRESSURE_BAND_BAR[0],
+                                    DESIGN_AMBIENT_PRESSURE_BAND_BAR[1],
+                                    'Design ambient pressure', ' bar'),
     'throat_diameter': (1.0, 3000.0, 'Throat diameter', ' mm'),
     'injector_pressure_drop': (0.2, 200.0, 'Injector pressure drop',
                                ' bar'),
@@ -3748,7 +3923,13 @@ class LiquidRocketEngine:
         # gamma'sı ``self.gamma``dır (CEA eşdeğeri, itici çiftine göre
         # ~1,13-1,24); yanlış gamma'yı okuyacak sonraki geliştirici için
         # tuzaktı. Ölü öznitelik SİLİNDİ; yerine ikinci bir sayı KONMADI.
-        self.P_a = 1.01325  # Atmospheric pressure (bar)
+        # V307/SIVI-ORTAM: P_a TASARIM ORTAMININ basıncıdır [bar]. Varsayılan
+        # deniz seviyesi (1,01325; ``SEA_LEVEL_PRESSURE_BAR`` aynı bitler);
+        # ``design_ambient_mode`` girdisi irtifa / basınç / vakum seçer.
+        # Kip itici referanslarından ÖNCE çözülür: CEA ortam Isp'si ve
+        # tasarım ε'su o basınçta kurulur.
+        self.P_a = SEA_LEVEL_PRESSURE_BAR  # Design ambient pressure (bar)
+        self._resolve_design_ambient()
 
         # Set propellant properties
         self._set_propellant_properties()
@@ -4625,6 +4806,10 @@ class LiquidRocketEngine:
         beyanlar.extend(getattr(self, '_turbopump_inputs_unused', None) or [])
         # V301/L-A (SV-10): turbopompalı çevrimde gönderilen feed_pressure.
         beyanlar.extend(getattr(self, '_feed_pressure_unused', None) or [])
+        # V307/SIVI-ORTAM: seçili tasarım ortamı kipinin okumadığı ortam
+        # alanı (ör. vakum kipinde gönderilmiş irtifa).
+        beyanlar.extend(
+            getattr(self, '_design_ambient_inputs_unused', None) or [])
         return beyanlar
 
     # ------------------------------------------------------------------
@@ -5584,10 +5769,19 @@ class LiquidRocketEngine:
         kullanıcıya açıkça söylenir.
         """
         if pe_user < NOZZLE_SEPARATION_PRESSURE_RATIO * self.P_a:
-            self._warn('warn.liquid.flow_separation', 'warning',
-                       eps=float(eps_user),
-                       pe_bar=round(float(pe_user), 3),
-                       ratio=float(NOZZLE_SEPARATION_PRESSURE_RATIO))
+            if getattr(self, 'design_ambient_is_sea_level', True):
+                self._warn('warn.liquid.flow_separation', 'warning',
+                           eps=float(eps_user),
+                           pe_bar=round(float(pe_user), 3),
+                           ratio=float(NOZZLE_SEPARATION_PRESSURE_RATIO))
+            else:
+                # V307/SIVI-ORTAM: tasarım ortamı deniz seviyesi değil;
+                # uyarı o ortamın basıncını adıyla söyler.
+                self._warn('warn.liquid.flow_separation_design_ambient',
+                           'warning', eps=float(eps_user),
+                           pe_bar=float(f'{float(pe_user):.4g}'),
+                           pa_bar=float(f'{float(self.P_a):.4g}'),
+                           ratio=float(NOZZLE_SEPARATION_PRESSURE_RATIO))
             # V306/SIVI-CEKET-B (kalem 5, S1; UÇUŞ-KÜTLE DEVİR 2): sabit
             # (kullanıcı) ε tasarım ortamında AYRILIYOR. Motor bu noktada
             # bağlı akış aşırı genişleme itkisiyle boyutlanıyordu (ölçüldü:
@@ -5636,7 +5830,417 @@ class LiquidRocketEngine:
                 None if eps_max is None
                 else float(np.floor(eps_max * 100.0) / 100.0)),
             'basis': FIXED_NOZZLE_SEPARATION_BASIS,
+            # V307/SIVI-ORTAM: tasarım ortamı deniz seviyesi DEĞİLSE kayıt
+            # ortamı adıyla taşır (deniz seviyesinde kayıt eskisiyle aynı).
+            **({} if getattr(self, 'design_ambient_is_sea_level', True) else {
+                'basis': FIXED_NOZZLE_SEPARATION_DESIGN_AMBIENT_BASIS,
+                'design_ambient_mode': self.design_ambient_mode,
+                'design_ambient_altitude_m': self.design_ambient_altitude_m,
+            }),
         }
+
+    # ------------------------------------------------------------------
+    # V307/SIVI-ORTAM — TASARIM ORTAMI (deniz seviyesi / irtifa / vakum)
+    # ------------------------------------------------------------------
+    @staticmethod
+    def isa_ambient_pressure_bar(altitude_m):
+        """ISA ortam basıncı [bar] — GEOMETRİK irtifa [m].
+
+        Atmosfer tek modüldür (``hrma.constants.isa_pressure``, US Standard
+        Atmosphere 1976); irtifa tablosu (``calculate_altitude_performance``)
+        ve yörünge çözücüsü (``TrajectoryAnalyzer._atm_full``) ile AYNI
+        geometrik -> geopotansiyel dönüşümü (H = h·R/(R + h)); dönüşümün
+        TEK yardımcısı ``hrma.constants.isa_pressure_geometric``tir.
+        """
+        return float(isa_pressure_geometric(altitude_m)) / PA_PER_BAR
+
+    def _resolve_design_ambient(self):
+        """``design_ambient_*`` girdilerinden tasarım ortamını kurar.
+
+        Ayarlar: ``design_ambient_mode``, ``design_ambient_source``,
+        ``design_ambient_altitude_m`` (yalnız irtifa kipinde), ``P_a`` [bar]
+        ve ``design_ambient_is_sea_level``. Kabul edilmeyen girdi
+        ``DesignAmbientInputError`` atar (sessiz yedek yok). Seçili kipin
+        okumadığı ortam alanı gönderildiyse ``inputs_not_used`` ile beyan
+        edilir (çevrim alanlarıyla aynı desen).
+
+        Deniz seviyesi DIŞINDAKİ ortamda genişleme oranı zorunludur
+        (``DESIGN_AMBIENT_EXPANSION_RATIO_REQUIRED_BASIS``) ve burada, itici
+        referansları çözülmeden önce okunur: ilk CEA geçişi de kullanıcının
+        lülesinde koşar.
+        """
+        ov = self.overrides
+        alan_k, alan_h, alan_p = (DESIGN_AMBIENT_MODE_FIELD,
+                                  DESIGN_AMBIENT_ALTITUDE_FIELD,
+                                  DESIGN_AMBIENT_PRESSURE_FIELD)
+
+        def _bos(v):
+            return v is None or (isinstance(v, str) and v.strip() == '')
+
+        def _ret(kod, alan, deger, mesaj, **ek):
+            kayit = {'field': alan, 'reason': kod, 'motor_form': 'liquid'}
+            if not _bos(deger):
+                kayit['value'] = (deger if isinstance(deger, (int, float))
+                                  and not isinstance(deger, bool)
+                                  else str(deger)[:60])
+            kayit.update(ek)
+            raise DesignAmbientInputError(
+                mesaj, kod, [kayit],
+                message_key=DESIGN_AMBIENT_MESSAGE_KEYS[kod],
+                message_params={k: v for k, v in kayit.items()
+                                if k not in ('reason', 'motor_form')})
+
+        def _sayi(alan, bant, birim):
+            ham = ov.get(alan)
+            if _bos(ham):
+                _ret(DESIGN_AMBIENT_VALUE_REQUIRED_CODE, alan, None,
+                     f"The design ambient mode '{kip}' needs '{alan}' "
+                     f'({birim}); it was not supplied. No design was '
+                     'computed.', mode=kip, unit=birim,
+                     min=float(bant[0]), max=float(bant[1]))
+            try:
+                if isinstance(ham, bool):
+                    raise TypeError('bool')
+                deger = float(ham)
+            except (TypeError, ValueError):
+                deger = float('nan')
+            if not (np.isfinite(deger) and bant[0] <= deger <= bant[1]):
+                _ret(DESIGN_AMBIENT_VALUE_NOT_ACCEPTED_CODE, alan, ham,
+                     f"'{alan}' = {ham!r} is not accepted: enter a value "
+                     f'between {bant[0]:g} and {bant[1]:g} {birim}. No '
+                     'design was computed.', mode=kip, unit=birim,
+                     min=float(bant[0]), max=float(bant[1]))
+            return deger
+
+        ham_kip = ov.get(alan_k)
+        if _bos(ham_kip):
+            kip = DESIGN_AMBIENT_MODE_DEFAULT
+            for alan in (alan_h, alan_p):
+                if not _bos(ov.get(alan)):
+                    _ret(DESIGN_AMBIENT_MODE_REQUIRED_CODE, alan_k, None,
+                         f"'{alan}' was supplied without '{alan_k}'. Send "
+                         f"'{alan_k}' (one of: "
+                         f"{', '.join(DESIGN_AMBIENT_MODES)}) so the design "
+                         'ambient is stated, not guessed. No design was '
+                         'computed.', supplied_field=alan,
+                         accepted=list(DESIGN_AMBIENT_MODES))
+        else:
+            kip = (ham_kip.strip().lower() if isinstance(ham_kip, str)
+                   else None)
+            if kip not in DESIGN_AMBIENT_MODES:
+                _ret(DESIGN_AMBIENT_MODE_NOT_RECOGNISED_CODE, alan_k,
+                     ham_kip,
+                     f"'{alan_k}' = {ham_kip!r} is not a design ambient "
+                     f"mode. Accepted: {', '.join(DESIGN_AMBIENT_MODES)}. "
+                     'No design was computed.',
+                     accepted=list(DESIGN_AMBIENT_MODES))
+
+        irtifa = None
+        if kip == DESIGN_AMBIENT_MODE_ALTITUDE:
+            irtifa = _sayi(alan_h, DESIGN_AMBIENT_ALTITUDE_BAND_M, 'm')
+            p_a = self.isa_ambient_pressure_bar(irtifa)
+            kaynak = 'altitude_isa'
+        elif kip == DESIGN_AMBIENT_MODE_PRESSURE:
+            p_a = _sayi(alan_p, DESIGN_AMBIENT_PRESSURE_BAND_BAR, 'bar')
+            kaynak = 'entered_pressure'
+        elif kip == DESIGN_AMBIENT_MODE_VACUUM:
+            p_a = 0.0
+            kaynak = 'vacuum'
+        else:
+            p_a = SEA_LEVEL_PRESSURE_BAR
+            kaynak = ('sea_level' if not _bos(ham_kip)
+                      else 'sea_level_default')
+
+        okunmayan = {
+            DESIGN_AMBIENT_MODE_ALTITUDE: (alan_p,),
+            DESIGN_AMBIENT_MODE_PRESSURE: (alan_h,),
+        }.get(kip, (alan_h, alan_p))
+        self._design_ambient_inputs_unused = (
+            self._declare_cycle_inputs_unused(
+                okunmayan, DESIGN_AMBIENT_FIELD_UNUSED_REASON,
+                "'{field}' was supplied but the design ambient mode "
+                f"'{kip}' does not read it: the field was not evaluated "
+                'and changed no result.')
+            if not _bos(ham_kip) else [])
+
+        self.design_ambient_mode = kip
+        self.design_ambient_source = kaynak
+        self.design_ambient_altitude_m = irtifa
+        self.P_a = float(p_a)
+        self.design_ambient_is_sea_level = bool(
+            self.P_a == SEA_LEVEL_PRESSURE_BAR)
+
+        if not self.design_ambient_is_sea_level:
+            alt, ust = LIQUID_INPUT_BANDS['nozzle_expansion_ratio'][:2]
+            ham_eps = ov.get('nozzle_expansion_ratio')
+            try:
+                if _bos(ham_eps) or isinstance(ham_eps, bool):
+                    raise ValueError('empty')
+                eps = float(ham_eps)
+                if not (np.isfinite(eps) and alt <= eps <= ust):
+                    raise ValueError('band')
+            except (TypeError, ValueError):
+                _ret(DESIGN_AMBIENT_EXPANSION_RATIO_REQUIRED_CODE,
+                     'nozzle_expansion_ratio', ham_eps,
+                     DESIGN_AMBIENT_EXPANSION_RATIO_REQUIRED_BASIS
+                     + f' Accepted {alt:g}-{ust:g}. No design was computed.',
+                     mode=kip, ambient_pressure_bar=float(p_a),
+                     min=float(alt), max=float(ust))
+            # İlk CEA geçişi (kurucu) de kullanıcının lülesinde koşsun:
+            # ``_apply_overrides`` aynı değeri aynı kapıdan yeniden okur.
+            self.expansion_ratio_input = eps
+
+    def _same_nozzle_isp_slope_s_per_bar(self):
+        """Aynı lüle özdeşliğinin eğimi [s/bar]: A_e/(ṁ_ana·g0)·1e5.
+
+        F(p_a) = F_vac − p_a·A_e ve A_e/ṁ_ana = ε·c*/(P_c·C_D) olduğundan
+        Isp(p_a) = Isp_vac − p_a·ε·c*/(P_c·C_D·g0) (Sutton & Biblarz 9th
+        ed., Eq. 2-14 / 3-29). ``_calculate_mixture_ratio_effects`` tasarım
+        noktası Isp'sini AYNI ifadeyle kurar; ε tasarım lülesidir.
+        """
+        eps = float(getattr(self, 'design_reference_expansion_ratio', 0.0)
+                    or getattr(self, 'expansion_ratio', 0.0) or 0.0)
+        cd = self._throat_discharge_coefficient()
+        return float(PA_PER_BAR * eps * float(self.c_star)
+                     / (float(self.P_c) * PA_PER_BAR * cd * self.g0))
+
+    def _max_attached_expansion_ratio(self, ambient_bar, eps_hi):
+        """Verilen ortamda Summerfield ölçütüyle AYRILMAYAN en büyük ε.
+
+        ``_fixed_nozzle_separation_record`` ile aynı kök: P_e(ε) =
+        ``NOZZLE_SEPARATION_PRESSURE_RATIO``·p_a, P_e ε ile monoton azalır
+        (``_cf_at``), ikiye bölme 1 < ε ≤ ``eps_hi``. Döner: ``(ε_max,
+        durum)``; durum ``'solved'``, ``'unbounded_in_vacuum'`` (p_a = 0:
+        ayrılma yok), ``'above_accepted_range'`` (``eps_hi``de bile yapışık)
+        ya da ``'not_solved'``.
+        """
+        esik = NOZZLE_SEPARATION_PRESSURE_RATIO * float(ambient_bar)
+        if not (esik > 0.0):
+            return None, 'unbounded_in_vacuum'
+        try:
+            lo, hi = 1.0 + 1e-6, float(eps_hi)
+            if self._cf_at(hi, ambient_bar)[1] >= esik:
+                return None, 'above_accepted_range'
+            if not (self._cf_at(lo, ambient_bar)[1] >= esik):
+                return None, 'not_solved'
+            for _ in range(200):
+                orta = 0.5 * (lo + hi)
+                if self._cf_at(orta, ambient_bar)[1] >= esik:
+                    lo = orta
+                else:
+                    hi = orta
+                if hi - lo <= 1e-9 * hi:
+                    break
+            return float(lo), 'solved'
+        except Exception:  # noqa: BLE001 — sayı uydurulmaz
+            return None, 'not_solved'
+
+    def _publish_design_ambient(self, results, altitude_performance,
+                                isp_design_ambient):
+        """``design_ambient`` bloğunu yayımlar; deniz seviyesi adlı alanları
+        deniz seviyesi DIŞINDAKİ tasarımda gerçek deniz seviyesi değerine
+        (ya da "ayrılır" hükmüyle ``None``a) bağlar.
+
+        Deniz seviyesi tasarımında mevcut alanların HİÇBİRİ değişmez; yalnız
+        ``design_ambient`` ve ``isp_design_ambient`` eklenir. Anahtar adları
+        katı motorun ``design_ambient`` bloğuyla ortaktır (``pressure_bar``,
+        ``pressure_kpa``, ``altitude_m``, ``source``, ``is_sea_level``,
+        ``isp_design_ambient_s``, ``isp_sea_level_s``,
+        ``sea_level_flow_separated``).
+
+        Deniz seviyesi durumu (yer testi bilgisi) irtifa tablosunun 0 m
+        satırından okunur: aynı lüle, aynı debi, ISA 0 m; satır bağlı akış
+        özdeşliğiyle F(0) = F_vac − p_sl·A_e kurar ve lüle orada ayrılıyorsa
+        (Summerfield) sayı yayımlamaz.
+        """
+        ds = bool(getattr(self, 'design_ambient_is_sea_level', True))
+        p_a = float(self.P_a)
+        eps = float(self.expansion_ratio)
+        eps_ust = float(LIQUID_INPUT_BANDS['nozzle_expansion_ratio'][1])
+        try:
+            pe = float(self._cf_at(eps, 0.0)[1])
+        except Exception:  # noqa: BLE001
+            pe = None
+        if pe is not None and not np.isfinite(pe):
+            pe = None
+        oran = float(NOZZLE_SEPARATION_PRESSURE_RATIO)
+        esik_ds = oran * SEA_LEVEL_PRESSURE_BAR
+        ayrik_ds = (None if pe is None else bool(pe < esik_ds))
+        ayrik_tasarim = (None if pe is None else bool(pe < oran * p_a))
+
+        satir0 = None
+        if isinstance(altitude_performance, list) and altitude_performance:
+            _s = altitude_performance[0]
+            if isinstance(_s, dict) and _s.get('altitude') == 0:
+                satir0 = _s
+
+        def _sonlu(v):
+            return (float(v) if isinstance(v, (int, float))
+                    and not isinstance(v, bool) and np.isfinite(v) else None)
+
+        if ds:
+            # Deniz seviyesi tasarımı: tasarım noktası deniz seviyesidir.
+            itki_ds = _sonlu(self.F)
+            isp_ds = _sonlu(isp_design_ambient)
+            if ayrik_ds:
+                # Yalnız Python API yolunda erişilir (uç bu tasarımı adlı
+                # retle reddeder): bağlı akış sayısı deniz seviyesi durumu
+                # olarak yayımlanmaz.
+                itki_ds = isp_ds = None
+        else:
+            itki_ds = _sonlu((satir0 or {}).get('thrust'))
+            isp_ds = _sonlu((satir0 or {}).get('specific_impulse'))
+            if ayrik_ds or ayrik_ds is None:
+                itki_ds = isp_ds = None
+
+        eps_max_ds, eps_max_ds_durum = self._max_attached_expansion_ratio(
+            SEA_LEVEL_PRESSURE_BAR, eps_ust)
+        eps_max_t, eps_max_t_durum = self._max_attached_expansion_ratio(
+            p_a, eps_ust)
+
+        def _2dp(x):
+            return (None if x is None
+                    else float(np.floor(x * 100.0) / 100.0))
+
+        if ayrik_ds:
+            neden_ds = (
+                'the nozzle separates at sea level by the Summerfield '
+                f'criterion (P_e = {pe:.4f} bar < {oran:g} x 1.01325 bar = '
+                f'{esik_ds:.4f} bar): attached-flow relations do not hold '
+                'there and separated nozzle flow is NOT modelled, so no '
+                'sea-level thrust or Isp is published. The test uses the '
+                'one-dimensional exit pressure: a contoured nozzle whose '
+                'wall pressure at the exit is higher than that value can '
+                'stay attached, and the wall pressure distribution is not '
+                'solved here.')
+        elif ayrik_ds is None:
+            neden_ds = ('the nozzle exit pressure could not be solved, so '
+                        'the sea-level state is not evaluated')
+        elif itki_ds is None or isp_ds is None:
+            neden_ds = ('the sea-level row of the altitude performance '
+                        'table is not published for this design '
+                        '(altitude_performance[0].not_modelled_reason)')
+        else:
+            neden_ds = None
+
+        results['design_ambient'] = {
+            'mode': getattr(self, 'design_ambient_mode',
+                            DESIGN_AMBIENT_MODE_DEFAULT),
+            'source': getattr(self, 'design_ambient_source',
+                              'sea_level_default'),
+            'pressure_bar': p_a,
+            'pressure_kpa': p_a * 100.0,
+            'altitude_m': getattr(self, 'design_ambient_altitude_m', None),
+            'is_sea_level': ds,
+            'thrust_design_ambient_N': _sonlu(self.F),
+            'isp_design_ambient_s': _sonlu(isp_design_ambient),
+            'isp_sea_level_s': isp_ds,
+            'sea_level_flow_separated': ayrik_ds,
+            'design_point': {
+                'exit_pressure_bar': pe,
+                'separation_pressure_bar': oran * p_a,
+                'separation_pressure_ratio': oran,
+                'flow_separated': ayrik_tasarim,
+                'max_attached_expansion_ratio': eps_max_t,
+                'max_attached_expansion_ratio_2dp': _2dp(eps_max_t),
+                'max_attached_expansion_ratio_status': eps_max_t_durum,
+            },
+            'sea_level': {
+                'ambient_pressure_bar': SEA_LEVEL_PRESSURE_BAR,
+                'exit_pressure_bar': pe,
+                'separation_pressure_bar': esik_ds,
+                'separation_pressure_ratio': oran,
+                'flow_separated': ayrik_ds,
+                'status': ('not_evaluated' if ayrik_ds is None else
+                           'separated' if ayrik_ds else 'attached'),
+                'thrust_N': itki_ds,
+                'isp_s': isp_ds,
+                'not_published_reason': neden_ds,
+                'max_attached_expansion_ratio': eps_max_ds,
+                'max_attached_expansion_ratio_2dp': _2dp(eps_max_ds),
+                'max_attached_expansion_ratio_status': eps_max_ds_durum,
+                'basis': DESIGN_AMBIENT_SEA_LEVEL_BASIS,
+            },
+            'max_attached_expansion_ratio_search_limit': eps_ust,
+            'basis': DESIGN_AMBIENT_BASIS,
+        }
+        results['isp_design_ambient'] = _sonlu(isp_design_ambient)
+        if ds:
+            return
+
+        # --- Deniz seviyesi DIŞINDAKİ tasarım: deniz seviyesi adlı alanlar --
+        # Bu alanlar motorun iç zincirinde TASARIM ORTAMI değerini taşır
+        # (zincirin demiri tasarım ortamıdır). Ad "deniz seviyesi" dediği
+        # için her biri aynı lülenin gerçek deniz seviyesi değerine bağlanır;
+        # lüle orada ayrılıyorsa ``None`` (neden: design_ambient.sea_level).
+        results['isp_sea_level'] = isp_ds
+        # Ortak tüketicilerin (rapor özeti, performans paneli, .eng) ilk
+        # okuduğu başlık Isp adı; katı motorda da tasarım ortamının Isp'sidir
+        # (``specific_impulse`` = ``isp_design_ambient``).
+        results['specific_impulse'] = _sonlu(isp_design_ambient)
+        ozet = results.get('design_summary')
+        perf = ozet.get('performance') if isinstance(ozet, dict) else None
+        if isinstance(perf, dict):
+            perf['thrust_sl_N'] = itki_ds
+            perf['isp_sl_s'] = isp_ds
+            perf['thrust_design_ambient_N'] = _sonlu(self.F)
+            perf['isp_design_ambient_s'] = _sonlu(isp_design_ambient)
+            perf['design_ambient_pressure_bar'] = p_a
+
+        def _tasi(blok, eski, yeni, ds_degeri=None):
+            # Tasarım ortamı değeri kendi adına taşınır; deniz seviyesi adlı
+            # anahtar gerçek deniz seviyesi değerini (yoksa None) taşır.
+            if isinstance(blok, dict) and eski in blok:
+                blok[yeni] = blok[eski]
+                blok[eski] = ds_degeri
+
+        yapisik = bool(ayrik_ds is False)
+        s0 = satir0 if (yapisik and isinstance(satir0, dict)) else {}
+        cekirdek_ds = _sonlu(s0.get('specific_impulse_core',
+                                    s0.get('specific_impulse')))
+        ana_oda_ds = _sonlu(s0.get('specific_impulse_main_chamber'))
+        if ana_oda_ds is None:
+            ana_oda_ds = cekirdek_ds
+        film = ((results.get('cooling_system') or {}).get('film_cooling')
+                or {}).get('performance') if isinstance(
+                    results.get('cooling_system'), dict) else None
+        _tasi(film, 'isp_core_sea_level_s', 'isp_core_design_ambient_s',
+              cekirdek_ds)
+        _tasi(film, 'isp_delivered_sea_level_s',
+              'isp_delivered_design_ambient_s', isp_ds)
+        defter = results.get('mass_flow_ledger')
+        _tasi(defter, 'engine_isp_sea_level_s',
+              'engine_isp_design_ambient_s', isp_ds)
+        _tasi(defter, 'main_chamber_isp_sea_level_s',
+              'main_chamber_isp_design_ambient_s', ana_oda_ds)
+        _tasi(defter, 'turbine_exhaust_isp_sea_level_s',
+              'turbine_exhaust_isp_design_ambient_s',
+              _sonlu(s0.get('specific_impulse_turbine_exhaust')))
+        # Çevrim muhasebesi blokları çözücü zincirinin REFERANS noktasını
+        # (tasarım ortamı) anlatır; deniz seviyesi için ayrı bir çevrim
+        # çözümü koşulmaz, o adlar boş kalır.
+        muhasebe = results.get('cycle_isp_accounting')
+        for _ad in ('headline_isp', 'engine_isp', 'isp_loss',
+                    'main_chamber_isp', 'headline_minus_engine'):
+            _tasi(muhasebe, _ad + '_sl_s', _ad + '_design_ambient_s')
+        dfs = results.get('detailed_feed_system')
+        cevrim = dfs.get('engine_cycle_solution') if isinstance(
+            dfs, dict) else None
+        for _ad in ('isp_main', 'isp_engine', 'isp_loss'):
+            _tasi(cevrim, _ad + '_sl_s', _ad + '_design_ambient_s')
+        kisma = results.get('throttle_map')
+        for _nokta in (kisma.get('points') or []) if isinstance(
+                kisma, dict) else []:
+            _tasi(_nokta, 'isp_sea_level', 'isp_design_ambient')
+        for _blok in (film, defter, muhasebe, cevrim, kisma):
+            if isinstance(_blok, dict):
+                _blok['design_ambient_note'] = DESIGN_AMBIENT_RELOCATION_NOTE
+
+    def design_ambient_block_inputs(self):
+        """(kip, kaynak, irtifa_m, P_a_bar, deniz_seviyesi_mi) — salt okuma."""
+        return (self.design_ambient_mode, self.design_ambient_source,
+                self.design_ambient_altitude_m, float(self.P_a),
+                bool(self.design_ambient_is_sea_level))
 
     def fixed_nozzle_separation_refusal(self):
         """V306/SIVI-CEKET-B (kalem 5): ayrılan sabit lülenin ret kaydı ya da None."""
@@ -6891,6 +7495,26 @@ class LiquidRocketEngine:
             self._calculate_mixture_ratio_effects()
             return
 
+        # V307/SIVI-ORTAM: yerleşik tablonun çapaları DENİZ SEVİYESİ tasarım
+        # çapalarıdır (isp_sl ortam-eşlenik deniz seviyesi lülesi, isp_vac çok
+        # daha büyük bir lüle). Deniz seviyesi dışındaki tasarım ortamı
+        # motorun KENDİ lülesinde bir CEA çözümü ister; tablo yolunda o
+        # ortam için kaynaklı bir zincir yok -> adlı ret (sayı üretilmez).
+        if not getattr(self, 'design_ambient_is_sea_level', True):
+            raise DesignAmbientInputError(
+                DESIGN_AMBIENT_NEEDS_CEA_BASIS,
+                DESIGN_AMBIENT_NEEDS_CEA_CODE,
+                [{'field': DESIGN_AMBIENT_MODE_FIELD,
+                  'reason': DESIGN_AMBIENT_NEEDS_CEA_CODE,
+                  'value': getattr(self, 'design_ambient_mode', None),
+                  'motor_form': 'liquid',
+                  'combustion_data_source': str(getattr(
+                      self, 'combustion_data_source', ''))}],
+                message_key=DESIGN_AMBIENT_MESSAGE_KEYS[
+                    DESIGN_AMBIENT_NEEDS_CEA_CODE],
+                message_params={'mode': getattr(
+                    self, 'design_ambient_mode', None)})
+
         # Statik tablo / muhafazakâr tahmin yolu: eski davranış (yalnız η_c*).
         eta_cs = float(getattr(self, 'eta_c_star', 1.0) or 1.0)
         if eta_cs != 1.0 and hasattr(self, 'c_star'):
@@ -7176,16 +7800,32 @@ class LiquidRocketEngine:
         # import edilirse Python G_0'i fonksiyon lokali sayar ve fonksiyonun
         # basindaki g0_precise = G_0 satiri UnboundLocalError verir (gizli bug
         # duzeltildi — G_0 import listesinden cikarildi).
-        from hrma.constants import isa_pressure
-        P_atm = isa_pressure(altitude)  # Pa
+        # V307/İRTİFA-TEK: ``altitude`` GEOMETRİK irtifadır (irtifa tablosunun
+        # satır irtifası); USSA 1976'ya geopotansiyele çevrilerek verilir —
+        # aynı satırın yayımladığı ortam basıncıyla AYNI okuma (önceden lüle
+        # doğrudan ``isa_pressure(altitude)`` ile, satır basıncı geometrik
+        # okumayla çözülüyordu: bir satırda iki ortam).
+        P_atm = isa_pressure_geometric(altitude)  # Pa
 
         # Convert to bar
         P_atm_bar = P_atm / 100000
-        
-        # Space vacuum conditions
-        if altitude >= 100000:
-            P_atm_bar = 1e-6
-        
+        # (Eski "Space vacuum conditions" dalı ``altitude >= 100000`` iken
+        # P_atm_bar = 1e-6 YAZIYORDU: kaynaksız sayı. Kaldırıldı; 84 852 m
+        # geopotansiyelin üstünde merkezî yardımcının tablo tepesi izotermal
+        # uzantısı geçerlidir. Ölçüldü: 100 km satırında eşlenik ε iki
+        # durumda da tavana (EXPANSION_RATIO_SOLVER_MAX) kırpılır, yayımlanan
+        # ε değişmez — RAPOR İRTİFA-TEK §2.)
+
+        # V307/SIVI-ORTAM: TASARIM çağrısında (irtifa tablosunun satır
+        # çağrısı değil) ortam tasarım ortamıdır. Deniz seviyesi tasarımında
+        # bu dal koşmaz (isa_pressure(0)/1e5 = P_a, aynı bitler).
+        _ortam_disi = not getattr(self, 'design_ambient_is_sea_level', True)
+        _satir_cagrisi = bool(getattr(self, '_altitude_row_call', False))
+        _tasarim_ortami = (_ortam_disi and altitude == 0
+                           and not _satir_cagrisi)
+        if _tasarim_ortami:
+            P_atm_bar = float(self.P_a)
+
         self.P_e = P_atm_bar  # Exit pressure equals ambient
         
         # OPUS DENETİM DÜZELTMESİ (critical): Eski iç içe fsolve'daki
@@ -7247,12 +7887,22 @@ class LiquidRocketEngine:
             # bunu okur ve o koşuyu 'OPTIMIZED' saymaz.
             self._expansion_optimum_fallback = True
 
+        # V307/SIVI-ORTAM: vakum tasarımında ortam-eşlenik genişleme oranı
+        # YOKTUR (p_a = 0 sonsuz alan oranı verir); yukarıdaki 1e-9 tabanlı
+        # sayı ve tavan kırpması bir çözüm değildir, yayımlanmaz.
+        if _tasarim_ortami and float(self.P_a) <= 0.0:
+            eps_unclamped = None
+            epsilon_optimal = None
+            kirpma = None
+
         # P3B2-09: kırpma durumu YALNIZ tasarım irtifası (altitude=0) için
         # saklanır. calculate_altitude_performance bu fonksiyonu 0-100 km
         # arasında yeniden çağırıyor; bayrak irtifaya göre kapsanmazsa üst
         # irtifaların TAVAN kırpması design_summary'ye ve nozzle_angles'a
         # sızar (bugünkü çağrı sırası tesadüfen doğru sonucu veriyordu).
-        if altitude == 0:
+        # V307/SIVI-ORTAM: deniz seviyesi dışındaki tasarımda tablonun 0 m
+        # satırı tasarım çağrısı DEĞİLDİR; kırpma durumunu o yazmaz.
+        if altitude == 0 and not (_ortam_disi and _satir_cagrisi):
             self._expansion_unclamped = eps_unclamped
             self._expansion_clamp = kirpma
             self._expansion_clamp_band = kirpma_bandi
@@ -9852,9 +10502,9 @@ class LiquidRocketEngine:
                     break
 
         for alt in altitudes:
-            # Geopotential height (US Standard Atmosphere 1976)
-            H = (alt * ISA_GEOPOTENTIAL_EARTH_RADIUS_M
-                 / (ISA_GEOPOTENTIAL_EARTH_RADIUS_M + alt))
+            # Geopotential height (US Standard Atmosphere 1976); alt GEOMETRİK.
+            # V307/İRTİFA-TEK: merkezî yardımcı (aynı ifade, bit-aynı).
+            H = geometric_to_geopotential(alt)
 
             # Katman secimi: taban yuksekligi H'yi asmayan son katman
             # (hrma.constants.ISA_LAYERS: (h_taban, T_taban, lapse, P_taban))
@@ -9888,16 +10538,29 @@ class LiquidRocketEngine:
             # tarafindan zaten kullaniliyor — tek kaynaga baglaniyor.
             # ISA tablosu 84,852 km'de biter; ustunde izotermal uzanti
             # uygulanir ve bu durum cikti satirinda beyan edilir.
-            if alt > ISA_TABLE_TOP_M:
-                T = isa_temperature(alt)
-                pressure_atm = isa_pressure(alt) / 1e5   # Pa -> bar
+            # V307/İRTİFA-TEK: eşik ve çağrı GEOPOTANSİYEL H ile (katı
+            # tablonun ÖH D15 a3 düzeltmesinin ikizi). Önceden geometrik
+            # ``alt`` hem geopotansiyel tablo tepesiyle karşılaştırılıyor hem
+            # de ``isa_pressure``a doğrudan veriliyordu: 100 km satırı
+            # 100 km GEOPOTANSİYEL basıncını yayımlıyordu.
+            if H > ISA_TABLE_TOP_M:
+                T = isa_temperature(H)
+                pressure_atm = isa_pressure(H) / 1e5   # Pa -> bar
                 atmosphere_basis = ('ISA isothermal extension above '
-                                    '84.852 km (US Std Atm 1976 table top)')
+                                    '84.852 km geopotential (US Std Atm 1976 '
+                                    'table top)')
             else:
                 atmosphere_basis = 'ISA / US Std Atm 1976'
 
             # Calculate optimal nozzle for this altitude
-            nozzle_geom = self.calculate_nozzle_geometry(altitude=alt)
+            # V307/SIVI-ORTAM: satır çağrısı işaretlenir; deniz seviyesi
+            # dışındaki tasarımda 0 m satırı tasarım çağrısıyla karışmaz
+            # (deniz seviyesi tasarımında işaretin etkisi yoktur).
+            self._altitude_row_call = True
+            try:
+                nozzle_geom = self.calculate_nozzle_geometry(altitude=alt)
+            finally:
+                self._altitude_row_call = False
             epsilon_opt = nozzle_geom['expansion_ratio']
 
             # High-precision thrust coefficient calculation
@@ -10047,7 +10710,38 @@ class LiquidRocketEngine:
                 and float(self.P_a) > 0.0
                 and isp_sl_ana > 0.0
                 and isp_vac_ana >= isp_sl_ana)
-            if ayni_lule_ozdesligi:
+            # V307/SIVI-ORTAM — deniz seviyesi DIŞINDAKİ tasarım ortamı.
+            # (1) Aynı lüle özdeşliği F(h) = F_vac − p_a(h)·A_e doğrudan
+            #     A_e/ṁ ile yazılır (vakumda P_a = 0'a bölme olmaz, çok küçük
+            #     P_a'da fark bölümü hassasiyet yitirmez):
+            #     Isp(h) = Isp_vac − p_a(h)·ε·c*/(P_c·C_D·g0)
+            #     (Sutton & Biblarz 9th ed., Eq. 2-14 ve 3-29; tasarım
+            #     noktası Isp'sini kuran bağıntının kendisi,
+            #     ``_calculate_mixture_ratio_effects``).
+            # (2) Satırın ortam basıncında sabit lüle Summerfield ölçütüyle
+            #     AYRILIYORSA (P_e < oran·p_a(h)) bağlı akış bağıntıları o
+            #     satırda geçerli değildir: itki ve Isp yayımlanmaz, satır
+            #     ``flow_separated`` ile adıyla durur. Deniz seviyesi
+            #     tasarımında bu dallar koşmaz (o yolun sayıları değişmez).
+            _ortam_disi = not getattr(self, 'design_ambient_is_sea_level',
+                                      True)
+            vakum_ozdesligi = bool(
+                _ortam_disi and sl_anchor_ok and pe_fixed_bar is not None
+                and isp_vac_ana > 0.0)
+            satir_ayrik = bool(
+                _ortam_disi and pe_fixed_bar is not None
+                and pe_fixed_bar < (NOZZLE_SEPARATION_PRESSURE_RATIO
+                                    * float(pressure_atm)))
+            if vakum_ozdesligi:
+                isp_per_cf = isp_sl_ana / CF_ideal_sl
+                isp_anchor_basis = (
+                    'delivered Isp of this fixed nozzle from the same-nozzle '
+                    'identity F(h) = F_vac - p_a(h)*A_e (Sutton & Biblarz '
+                    '9th ed., Eq. 2-14), i.e. Isp(h) = Isp_vac - p_a(h) * '
+                    'eps * c_star / (P_c * C_D * g0): the relation that also '
+                    'sets the Isp at the design ambient, so the row at the '
+                    'design ambient pressure is the design point')
+            elif ayni_lule_ozdesligi:
                 isp_per_cf = isp_sl_ana / CF_ideal_sl
                 isp_anchor_basis = (
                     'delivered Isp anchored at the sea-level design point '
@@ -10073,7 +10767,24 @@ class LiquidRocketEngine:
                 isp_per_cf = None
                 isp_anchor_basis = 'not_modelled (no positive ideal-CF anchor)'
 
-            if isp_per_cf is None or not (CF_ideal > 0.0):
+            if satir_ayrik and isp_per_cf is not None and CF_ideal > 0.0:
+                isp_altitude = None
+                thrust_altitude = None
+                CF_actual = None
+                isp_ratio = None
+                thrust_ratio = None
+                satir_defter = None
+                not_modelled_reason = (
+                    'the fixed nozzle is separated at this ambient pressure '
+                    'by the Summerfield criterion (P_e = %.4f bar < %g x '
+                    'p_a = %.4f bar): attached-flow relations do not hold '
+                    'and separated nozzle flow is NOT modelled here, so no '
+                    'thrust or Isp is published for this row'
+                    % (float(pe_fixed_bar),
+                       NOZZLE_SEPARATION_PRESSURE_RATIO,
+                       NOZZLE_SEPARATION_PRESSURE_RATIO
+                       * float(pressure_atm)))
+            elif isp_per_cf is None or not (CF_ideal > 0.0):
                 # Bu irtifada ideal tek boyutlu teori NEGATİF itki katsayısı
                 # veriyor: lüle tamamen ayrılmış rejimde. HRMA akış ayrılmasını
                 # ÇÖZMEZ, bu yüzden sayı UYDURULMAZ — alanlar null döner ve
@@ -10105,7 +10816,11 @@ class LiquidRocketEngine:
                 # Doğru tavan satırın KENDİ lülesinin vakum Isp'sidir; o
                 # tavan tanım gereği hiçbir ortam basıncında bağlamaz, çünkü
                 # CF(ε, P_a>0) < CF(ε, 0).
-                if ayni_lule_ozdesligi:
+                if vakum_ozdesligi:
+                    isp_altitude = (isp_vac_ana
+                                    - float(pressure_atm)
+                                    * self._same_nozzle_isp_slope_s_per_bar())
+                elif ayni_lule_ozdesligi:
                     isp_altitude = (isp_vac_ana
                                     - (isp_vac_ana - isp_sl_ana)
                                     * float(pressure_atm) / float(self.P_a))
@@ -10237,6 +10952,10 @@ class LiquidRocketEngine:
                 'isp_anchor_basis': isp_anchor_basis,
                 'not_modelled_reason': not_modelled_reason,
                 **(satir_defter or {}),
+                # V307/SIVI-ORTAM: deniz seviyesi dışındaki tasarımda satırın
+                # ayrılma hükmü adıyla (deniz seviyesi tasarımında satır
+                # eskisiyle aynı anahtarları taşır).
+                **({'flow_separated': satir_ayrik} if _ortam_disi else {}),
             })
 
         # Tasarım noktası geometrisini geri yükle (bkz. yukarıdaki not).
@@ -10444,7 +11163,14 @@ class LiquidRocketEngine:
             cooling['film_cooling']['performance'] = film_performance
 
         # Özgül itki kontrolü
-        if actual_isp_sl < 100 or actual_isp_sl > 500:
+        # V307/SIVI-ORTAM: deniz seviyesi bandı ve "vakum ⟷ deniz seviyesi
+        # iyileşmesi" hükmü deniz seviyesi tasarımına aittir; başka tasarım
+        # ortamında ``actual_isp_sl`` o ortamın Isp'sidir ve bu iki hüküm
+        # ona uygulanmaz (deniz seviyesi durumu ``design_ambient.sea_level``
+        # bloğunda ayrıca yayımlanır).
+        _ds_tasarimi = bool(getattr(self, 'design_ambient_is_sea_level',
+                                    True))
+        if _ds_tasarimi and (actual_isp_sl < 100 or actual_isp_sl > 500):
             self._warn('warn.liquid.isp_sea_level_out_of_band', 'warning',
                        isp_s=round(float(actual_isp_sl), 1),
                        lo_s=100.0, hi_s=500.0)
@@ -10500,7 +11226,8 @@ class LiquidRocketEngine:
         # onu basar, yani kullanıcı ham anahtar GÖRMEZ. Borcun bekçisi
         # ``tests/test_engine_warning_i18n.py::ZINCIR_BORCU``.
         isp_improvement = (actual_isp_vac - actual_isp_sl) / actual_isp_sl
-        if (isp_improvement < VACUUM_ISP_IMPROVEMENT_BAND[0]
+        if _ds_tasarimi and (
+                isp_improvement < VACUUM_ISP_IMPROVEMENT_BAND[0]
                 or isp_improvement > VACUUM_ISP_IMPROVEMENT_BAND[1]):
             _iyilesme_kaydi = dict(self._mk_warning(
                 'warn.liquid.vacuum_isp_improvement_out_of_band', 'warning',
@@ -10629,6 +11356,20 @@ class LiquidRocketEngine:
         _isp_kimlik = (float(self.isp_sl_main)
                        if getattr(self, '_cycle_isp_applied', False)
                        else float(self.isp_sl))
+        if not _ds_tasarimi:
+            # V307/SIVI-ORTAM: özdeşlik DENİZ SEVİYESİ satırınındır; başka
+            # tasarım ortamında çekirdek deniz seviyesi Isp'si tablonun 0 m
+            # satırından okunur (aynı lüle, aynı debi). Satır yayımlanmadıysa
+            # (lüle deniz seviyesinde ayrılıyor) özdeşlik DEĞERLENDİRİLMEZ.
+            _isp_kimlik = None
+            for _row in (altitude_performance or []):
+                if isinstance(_row, dict) and _row.get('altitude') == 0:
+                    _isp_kimlik = (
+                        _row.get('specific_impulse_main_chamber')
+                        if getattr(self, '_cycle_isp_applied', False)
+                        else _row.get('specific_impulse_core',
+                                      _row.get('specific_impulse')))
+                    break
         if (_cf_sl and _isp_kimlik and getattr(self, 'c_star', None)
                 and _cd > 0):
             _pred = float(_cf_sl) * float(self.c_star) / (G_0 * _cd)
@@ -11337,6 +12078,11 @@ class LiquidRocketEngine:
         # V301/FİZİK-2 (kalem 4, CAD-2 DEVİR 2): iki katmanlı cidarda kamara
         # ve lüle kütlesi ÇİZİLEN geometriden, CAD'in tek işleviyle; kuru
         # toplam, T/W, Tasarım Özeti ve uçuş aracının okuduğu alanlar ondan.
+        # V307/SIVI-ORTAM: tasarım ortamı künyesi + deniz seviyesi durumu
+        # (yer testi bilgisi). Yayım kapılarından ÖNCE: kapılar bu bloğu da
+        # bekletebilir.
+        self._publish_design_ambient(results, altitude_performance,
+                                     actual_isp_sl)
         self._iki_katmanli_kutle_tek_kaynak(results)
         # V306/SIVI-SOĞUTMA (M-SIVI-24) — SOĞUTMA DEVRESİ YAYIM KAPISI
         # (fail-closed): çözülmemiş devreden kütle/T/W yayımlanmaz.
@@ -12818,10 +13564,21 @@ class LiquidRocketEngine:
             # verilmişse yukarıdaki dal çalışır ve giriş basıncı yalnız
             # karşılaştırılır (bkz. unwired_inputs).
             p_exhaust, _basis = self._turbine_exhaust_pressure_bar()
-            pr_from_inlet = float(self.turbine_inlet_pressure_bar) / p_exhaust
-            if pr_from_inlet > 1.05:
-                kwargs['turbine_pr'] = pr_from_inlet
-                self.turbine_pressure_ratio = pr_from_inlet
+            if p_exhaust > 0.0:
+                pr_from_inlet = (float(self.turbine_inlet_pressure_bar)
+                                 / p_exhaust)
+                if pr_from_inlet > 1.05:
+                    kwargs['turbine_pr'] = pr_from_inlet
+                    self.turbine_pressure_ratio = pr_from_inlet
+            else:
+                # V307/SIVI-ORTAM: açık çevrim + vakum tasarımı. Türbin
+                # egzozunun karşı basıncı ortam basıncı sayılıyordu; vakumda
+                # o basınç sıfırdır ve giriş basıncından bir basınç oranı
+                # KURULAMAZ (sonsuz). Oran uydurulmaz: çözücünün çevrime
+                # özgü kaynaklı varsayılanı kullanılır ve adıyla söylenir.
+                self._warn('warn.liquid.turbine_pr_not_from_inlet_in_vacuum',
+                           'warning',
+                           inlet_bar=float(self.turbine_inlet_pressure_bar))
         if self.engine_cycle == 'pressure_fed':
             # A11: tank basıncı TEK tanım noktasından (_tank_pressure_bar).
             kwargs['tank_pressure_bar'] = float(self._tank_pressure_bar()[0])
@@ -12839,7 +13596,11 @@ class LiquidRocketEngine:
             sol = solve_cycle(solver_name, float(self.P_c),
                               float(self.mdot_total), float(self.MR),
                               self.fuel_type, self.oxidizer_type,
-                              ambient_pressure_bar=float(self.P_a),
+                              # V307/SIVI-ORTAM: vakum tasarımında (P_a = 0)
+                              # çevrimin vakum referans ortamı; P_a > 0 iken
+                              # max() P_a'nın kendisini döndürür (aynı bitler).
+                              ambient_pressure_bar=max(
+                                  float(self.P_a), CYCLE_VACUUM_AMBIENT_BAR),
                               isp_main_s=isp_main_sl, **kwargs)
         except ValueError as exc:
             out['reason'] = str(exc)
@@ -16329,8 +17090,13 @@ class LiquidRocketEngine:
             # kullanıldığını ve bu oranla tutarlı giriş basıncını söyler.
             # Eski 1,2 alt kırpması kaldırıldı: giriş basıncı çıkışın 1,2
             # katından küçükse ham oran yazılır (sessiz kırpma yok).
-            pr_from_inlet = p_in / p_exhaust
-            if abs(pr_from_inlet - pr) / pr > INPUT_CONSISTENCY_TOLERANCE:
+            # V307/SIVI-ORTAM: açık çevrim + vakum tasarımında çevrim
+            # çözümü yokken karşı basınç 0'dır; oran kurulamaz, kıyas
+            # yapılmaz (sayı uydurulmaz).
+            pr_from_inlet = (p_in / p_exhaust if p_exhaust > 0.0 else None)
+            if (pr_from_inlet is not None
+                    and abs(pr_from_inlet - pr) / pr
+                    > INPUT_CONSISTENCY_TOLERANCE):
                 self._warn('warn.liquid.turbine_pr_inconsistent', 'warning',
                            inlet_bar=float(p_in),
                            pr_from_inlet=round(float(pr_from_inlet), 1),
@@ -16552,8 +17318,9 @@ class LiquidRocketEngine:
                 'solved pressure ladder')
         else:
             p_exhaust, exhaust_basis = self._turbine_exhaust_pressure_bar()
-            turbine_card['inlet_pressure_implied_bar'] = float(
-                turbine_card['pressure_ratio']) * p_exhaust
+            turbine_card['inlet_pressure_implied_bar'] = (
+                float(turbine_card['pressure_ratio']) * p_exhaust
+                if p_exhaust > 0.0 else None)
             turbine_card['inlet_pressure_implied_basis'] = (
                 'pressure ratio x turbine exhaust pressure (' + exhaust_basis
                 + '); the cycle balance did not converge')
@@ -16713,6 +17480,13 @@ class LiquidRocketEngine:
             p = float(self.P_c) * (1.0 + max(dp_frac, 0.0))
             return p, ('closed cycle: the turbine exhausts into the main '
                        'chamber (Pc plus injector dP)')
+        if not (float(self.P_a) > 0.0):
+            # V307/SIVI-ORTAM: vakum tasarımı — ortam basıncı sıfır; çevrim
+            # çözümü yokken sonlu bir karşı basınç bilinmiyor (0 döner,
+            # çağıranlar oranı kurmaz).
+            return 0.0, ('open cycle: the turbine exhausts through its own '
+                         'nozzle to the design ambient, which is vacuum '
+                         '(no finite back pressure without a cycle solution)')
         return float(self.P_a), ('open cycle: the turbine exhausts through '
                                  'its own nozzle to ambient')
 
@@ -18240,30 +19014,63 @@ class LiquidRocketEngine:
                     # P_e ∝ Pc (aynı ε, γ): ayrılma başlangıcı kesin kısma
                     # oranı f_sep = eşik / P_e(tasarım).
                     f_sep = ayrilma_esigi / float(pe_design)
-                    self._warn('warn.liquid.throttle_flow_separation',
-                               'warning',
-                               onset_pct=round(100.0 * f_sep, 1),
-                               onset_pc_bar=round(base_pc * f_sep, 1),
-                               throttle_pct=round(100.0 * f, 1),
-                               pc_bar=round(float(pc), 1),
-                               pe_bar=round(float(pe_f), 3),
-                               threshold_bar=round(float(ayrilma_esigi), 3),
-                               ratio=float(NOZZLE_SEPARATION_PRESSURE_RATIO),
-                               design_pe_bar=round(float(pe_design), 3))
+                    if getattr(self, 'design_ambient_is_sea_level', True):
+                        self._warn(
+                            'warn.liquid.throttle_flow_separation',
+                            'warning',
+                            onset_pct=round(100.0 * f_sep, 1),
+                            onset_pc_bar=round(base_pc * f_sep, 1),
+                            throttle_pct=round(100.0 * f, 1),
+                            pc_bar=round(float(pc), 1),
+                            pe_bar=round(float(pe_f), 3),
+                            threshold_bar=round(float(ayrilma_esigi), 3),
+                            ratio=float(NOZZLE_SEPARATION_PRESSURE_RATIO),
+                            design_pe_bar=round(float(pe_design), 3))
+                    else:
+                        # V307/SIVI-ORTAM: ayrılma tasarım ortamında (deniz
+                        # seviyesi değil); metin o ortamı adıyla söyler.
+                        self._warn(
+                            'warn.liquid.throttle_flow_separation_design_ambient',  # noqa: E501
+                            'warning',
+                            onset_pct=round(100.0 * f_sep, 1),
+                            onset_pc_bar=round(base_pc * f_sep, 1),
+                            throttle_pct=round(100.0 * f, 1),
+                            pc_bar=round(float(pc), 1),
+                            pe_bar=float(f'{float(pe_f):.4g}'),
+                            threshold_bar=float(
+                                f'{float(ayrilma_esigi):.4g}'),
+                            pa_bar=float(f'{float(self.P_a):.4g}'),
+                            ratio=float(NOZZLE_SEPARATION_PRESSURE_RATIO),
+                            design_pe_bar=float(f'{float(pe_design):.4g}'))
                 elif not any(
                         isinstance(_w, dict)
-                        and _w.get('code') == 'warn.liquid.flow_separation'
+                        and _w.get('code') in (
+                            'warn.liquid.flow_separation',
+                            'warn.liquid.flow_separation_design_ambient')
                         for _w in (getattr(self, 'design_warnings', None)
                                    or [])):
                     # Tasarım noktası da ayrık ve henüz söylenmemiş: hüküm
                     # TASARIM değerleriyle basılır (kısma değeriyle değil).
-                    self._warn('warn.liquid.flow_separation', 'warning',
-                               eps=float(getattr(self, 'expansion_ratio', 0)
-                                         or 0),
-                               pe_bar=(round(float(pe_design), 3)
-                                       if pe_design is not None
-                                       else round(float(pe_f), 3)),
-                               ratio=float(NOZZLE_SEPARATION_PRESSURE_RATIO))
+                    if getattr(self, 'design_ambient_is_sea_level', True):
+                        self._warn(
+                            'warn.liquid.flow_separation', 'warning',
+                            eps=float(getattr(self, 'expansion_ratio', 0)
+                                      or 0),
+                            pe_bar=(round(float(pe_design), 3)
+                                    if pe_design is not None
+                                    else round(float(pe_f), 3)),
+                            ratio=float(NOZZLE_SEPARATION_PRESSURE_RATIO))
+                    else:
+                        self._warn(
+                            'warn.liquid.flow_separation_design_ambient',
+                            'warning',
+                            eps=float(getattr(self, 'expansion_ratio', 0)
+                                      or 0),
+                            pe_bar=float('%.4g' % float(
+                                pe_design if pe_design is not None
+                                else pe_f)),
+                            pa_bar=float(f'{float(self.P_a):.4g}'),
+                            ratio=float(NOZZLE_SEPARATION_PRESSURE_RATIO))
 
             # --- İtki: haritanın KENDİ Isp'si ve KENDİ debi varsayımıyla.
             thrust_n = None
@@ -20344,6 +21151,8 @@ class LiquidRocketEngine:
             cs['cooling_circuit_status'] = 'not_solved'
         if kapsam == JACKET_GATE_SCOPE_DESIGN:
             results['thrust_chamber_isp'] = {
+                # V307/SIVI-ORTAM: deniz seviyesi dışındaki tasarımda bu
+                # zincir değeri tasarım ortamınındır (aşağıda taşınır).
                 'sea_level_s': float(getattr(self, 'isp_sl_main',
                                              self.isp_sl)),
                 'vacuum_s': float(getattr(self, 'isp_vac_main',
@@ -20355,6 +21164,13 @@ class LiquidRocketEngine:
                            'delivered efficiencies, none of which depends on '
                            'the jacket'),
             }
+        if (kapsam == JACKET_GATE_SCOPE_DESIGN
+                and not getattr(self, 'design_ambient_is_sea_level', True)):
+            _tca = results['thrust_chamber_isp']
+            _tca['design_ambient_s'] = _tca['sea_level_s']
+            _tca['sea_level_s'] = None
+            _tca['design_ambient_pressure_bar'] = float(self.P_a)
+            _tca['design_ambient_note'] = DESIGN_AMBIENT_RELOCATION_NOTE
         self._warn('warn.liquid.cooling_dependent_values_withheld',
                    'critical')
         results['input_warnings'] = list(self.design_warnings)
@@ -23195,6 +24011,17 @@ class LiquidRocketEngine:
                 'blowing_lambda': sizing['blowing_lambda'],
                 'blowing_gas_fraction': sizing['blowing_gas_fraction'],
                 'blockage_basis': sizing['blockage_basis'],
+                # V307/GÜVERTE-ISIL (kalem 1): B' çözümüne giren kenar gazı
+                # c_p'si de yayımlanır. Eksikti; güverte aynı istasyonu aynı
+                # işlevle (``ablative_thickness``) yeniden koşarken c_p'yi
+                # bilemiyor, ya üflemesiz (psi = 1) ya kendi zincirinin
+                # c_p'siyle başka bir gerileme hızı basıyordu (ölçüldü, L1
+                # boğaz: motor 0,653 ⟷ güverte 0,698 mm/s).
+                'gas_cp_J_kgK': sizing['gas_cp_J_kgK'],
+                # Kalınlığın NEYİ içerdiği adıyla (hibrit zincirinin
+                # ``thickness_rule`` alanının karşılığı).
+                'thickness_rule': TPS_LINER_THICKNESS_RULE,
+                'thickness_rule_basis': TPS_LINER_THICKNESS_RULE_BASIS,
                 # --- v2.6.27: geçerlilik kapısı (çekirdeğin hükmü) ---
                 'station_radius_m': sizing['station_radius_m'],
                 'station_radius_source': (None if radius_m is None
@@ -23234,6 +24061,21 @@ class LiquidRocketEngine:
                 r_throat,
                 'throat radius solved by this run (the same D_t the Bartz '
                 'correlation is evaluated at)')
+            # V307/GÜVERTE-ISIL (kalem 1): BLOK DÜZEYİNDE ASTAR HÜKMÜ.
+            # ``status: 'modelled'`` bu bloğun KOŞTUĞUNU söyler, astarın
+            # boyutlandığını değil. ÖLÇÜLDÜ (örnek sıvı, Pc 50 bar, ablatif):
+            # iki istasyon da zarf dışı (``thickness_status: NOT_MODELLED``,
+            # kalınlık yok) iken blok 'modelled' diyordu; güverte ise aynı
+            # motor için 'NOT_SIZED' basıyordu. Özet, istasyon hükümlerinden
+            # türetilir (yeni hesap yok): güvertenin hüküm adlarıyla aynı.
+            _boyutsuz = [ad for ad in ('chamber_liner', 'nozzle_entry_liner')
+                         if out[ad].get('thickness_status') != 'sized']
+            out['liner_sizing_status'] = (
+                TPS_LINER_STATUS_SIZED if not _boyutsuz
+                else TPS_LINER_STATUS_NOT_SIZED if len(_boyutsuz) == 2
+                else TPS_LINER_STATUS_PARTIAL)
+            out['liner_stations_not_sized'] = _boyutsuz
+            out['liner_sizing_status_basis'] = TPS_LINER_STATUS_BASIS
 
         # --- Çıplak (korumasız) cidar ısı-yutucu geçmişi ------------------
         # Sürücü katsayı motorun KENDİ kamara tasarım akısından geri çözülür:

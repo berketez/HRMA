@@ -388,7 +388,7 @@ class TestTekGozlemKunyesi:
     def test_markdown_satiri_sacilim_sutunlarini_bos_birakiyor(self):
         md = cr.to_markdown(_n1_kosu())
         satir = [s for s in md.splitlines()
-                 if s.startswith("| solid | burn_rate")]
+                 if s.startswith("| solid [sugar] | burn_rate")]
         assert satir, md
         assert "(single observation)" in satir[0], satir[0]
         hucreler = [h.strip() for h in satir[0].split("|")]
@@ -401,7 +401,7 @@ class TestTekGozlemKunyesi:
         metin = sr.generate_status_section(_n1_kosu(),
                                            generated_on="2026-08-28")
         satir = [s for s in metin.splitlines()
-                 if s.startswith("| solid | burn_rate")]
+                 if s.startswith("| solid [sugar] | burn_rate")]
         assert satir, metin
         assert "(single observation)" in satir[0], satir[0]
         hucreler = [h.strip() for h in satir[0].split("|")]
@@ -416,7 +416,7 @@ class TestTekGozlemKunyesi:
                     for i in range(3)]
         md = cr.to_markdown(cr.run_correlation(records=kayitlar))
         satir = [s for s in md.splitlines()
-                 if s.startswith("| solid | burn_rate")][0]
+                 if s.startswith("| solid [sugar] | burn_rate")][0]
         assert "(single observation)" not in satir, satir
         hucreler = [h.strip() for h in satir.split("|")]
         assert hucreler[5] != "-" and hucreler[6] != "-", satir
@@ -604,6 +604,11 @@ class TestUcGovdesiDurustlukKanallari:
         # alanı eklendi — tek kaynaktan okunur ki liste ile ürün ayrışamasın.
         from hrma.validation.status_report import _HONESTY_FIELDS
         p10b2_01_kunyesi = p10b2_01_kunyesi | set(_HONESTY_FIELDS)
+        # V307 KATI-DOĞRULAMA karar 3: hücre şekli ÜÇÜNCÜ KEZ genişledi — katı
+        # istatistiği itici ailesine göre ayrı yayımlandığı için aile adı
+        # hücre kimliğinin parçasıdır (katı dışı hücrede None). Bekçinin
+        # iddiası ("Z5S bu şekle dokunmadı") aynen korunur.
+        p10b2_01_kunyesi = p10b2_01_kunyesi | {"propellant_family"}
         for hucre in kucuk_uc_govdesi["cells"]:
             assert cekirdek <= set(hucre), sorted(hucre)
             assert set(hucre) - cekirdek <= p10b2_01_kunyesi, sorted(hucre)

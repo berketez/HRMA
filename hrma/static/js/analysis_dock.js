@@ -265,6 +265,7 @@
         outside_anchor_envelope_unverified: 'common.code.outside_anchor_envelope_unverified',
         OUT_OF_PUBLISHED_RANGE: 'common.code.OUT_OF_PUBLISHED_RANGE',
         not_applied_unverified: 'common.code.not_applied_unverified',
+        module_estimate_applied: 'common.code.module_estimate_applied',
         user_supplied_unvalidated: 'common.code.user_supplied_unvalidated',
         not_evaluated_no_condensed_fraction: 'common.code.not_evaluated_no_condensed_fraction'
     };
@@ -2876,6 +2877,35 @@
         }
 
         // ------------------------------------------------------------------
+        // V307/GÜVERTE-ISIL (kalem 2) — YEREL SONUÇ
+        // ------------------------------------------------------------------
+        // Panel, kurulan gövdeye bakıp ucun MODELLEMEDİĞİ bir durumu uca
+        // gitmeden kendi çizebilir: `spec.localResult(payload)` bir nesne
+        // dönerse istek GÖNDERİLMEZ ve nesne panelin `render`ına verilir
+        // (dil değişiminde yeniden çizilmek üzere saklanır). null / undefined
+        // dönerse akış aynen sürer. Bugün tek kullanıcısı termal sekme: film /
+        // ışınım / dump soğutmalı motorda sekme hesap yapmaz, motor sonucunun
+        // soğutma bloğunu gösterir (eskiden doğal taşınıma düşüp başka bir
+        // soğutmanın hükmünü basıyordu).
+        if (typeof spec.localResult === 'function') {
+            let yerel = null;
+            try { yerel = spec.localResult(built.payload); } catch (e) { yerel = null; }
+            if (yerel && typeof yerel === 'object') {
+                purgePlots(root);
+                root.innerHTML = '';
+                lastData[spec.id] = yerel;
+                lastPayload[spec.id] = JSON.stringify(built.payload);
+                status.removeAttribute('data-onceki-tasarim');
+                spec.render(yerel, root);
+                if (window.I18N && window.I18N.applyTo) window.I18N.applyTo(root);
+                root.style.display = 'block';
+                status.textContent = T('dock.localResult',
+                    'No request was sent: this tab does not model this case. '
+                    + 'See the note below.');
+                return;
+            }
+        }
+
         // ÖH D24 / P11B2-11 — BOŞ GÖVDE POSTALAMA
         // ------------------------------------------------------------------
         // ÖLÇÜLDÜ (a3/once.json + P11 B2-repro-09): `fields: []` ile
@@ -2888,7 +2918,14 @@
         // yanında duran, HİÇ çalışmayan ikinci bir kontroldü.
         // Boş gövdenin MEŞRU olduğu tek uç (`/api/correlation-report`,
         // ölçüldü: 200 + 54.805 B) bunu `allowsEmptyPayload` ile BEYAN eder.
-        if (!Object.keys(built.payload).length && spec.allowsEmptyPayload !== true) {
+        // V307/SEKME-GÜVERTE (NK3-H-7): alan tanımlayan panelde gövde ZORUNLU
+        // alanlar boş olduğu için boşsa (son hesap başarısız, tohum yok)
+        // doğru ileti "boş zorunlu alanlar"dır, aşağıda adlarıyla basılır;
+        // bu dal yalnız alanı HİÇ olmayan paneller içindir. ÖLÇÜLDÜ
+        // (tests/test_v307_sekme_guverte.py, performans paneli bayat):
+        // "This panel declares no deck fields …" basılıyordu.
+        if (!Object.keys(built.payload).length && !built.missing.length
+                && spec.allowsEmptyPayload !== true) {
             root.style.display = 'none';
             status.textContent = T('dock.emptyPayload',
                 'This panel declares no deck fields, so this button would '

@@ -227,12 +227,37 @@ def ornek_hibrit_regresyonu():
 KAYITTAN_DUSEN_ALANLAR = {'hybrid': ('total_impulse', 'param_start',
                                      'param_end')}
 
-#: Kayıttan düşen ``inputs`` bölümleri. ``dynamic`` (uçuş/6-DOF ve geçici
-#: analiz panellerinin durumu: kuru kütle, itici, itki, yanma süresi …) bu
-#: örnekte kullanıcı girdisi DEĞİL (``user_typed`` boş), sonuçtan türetilen
-#: değerlerdir; dosyada dondurulursa motor değiştiğinde bayat kalır. Sayfa
-#: bunları sonuçtan yeniden kurar (katı/sıvı örnekler de taşımıyor).
-KAYITTAN_DUSEN_BOLUMLER = {'hybrid': ('dynamic',)}
+#: Kayıttan düşen ``inputs`` bölümleri — BOŞ.
+#: V307/S2-KALINTI (kalem 4, NK3-H + KILAVUZ): burada eskiden
+#: ``{'hybrid': ('dynamic',)}`` vardı; gerekçesi "katı/sıvı örnekler de
+#: taşımıyor" idi, oysa ÖLÇÜLDÜ (3.0.6 örnekleri, 519ab53ec): sıvı ve katı
+#: örnek ``inputs.dynamic.flight`` TAŞIYOR, yalnız hibrit taşımıyordu. Sonuç:
+#: hibrit örnek açılınca proje şeridi ve 6-DOF / Zaman Çözümlü panelleri
+#: "3.0.6 öncesi bir sürümle kaydedilmiş" diyordu (dosyanın app_version'ı
+#: 3.0.6). Bayatlık kaygısı da tutmuyor: ``dynamic.flight`` yalnız ELLE
+#: yazılan alanları damgalar (``user_typed`` / ``trajectory_user_typed``
+#: boş); damgasız alanları sayfa her motor hesabında yeniden tohumlar
+#: (sixdof_panel.js ``projeDurumunuKur``, project_bar.js
+#: ``restoreFlightSetup``). Üç örnek aynı belgeyi taşır.
+KAYITTAN_DUSEN_BOLUMLER = {}
+
+
+def kayittan_dusur(motor_type, belge):
+    """Sayfanın belgesinden örneğe girmeyen alan/bölümleri çıkarır.
+
+    ``belge`` yerinde değişir; dönen liste düşenlerin adlarıdır
+    (``inputs.<bölüm>`` biçiminde bölümler). Tek yer: ``main`` bunu
+    çağırır, bekçi (tests/test_v307_s2_kalinti.py) aynı işlevi sınar."""
+    girdiler = belge['inputs']
+    dusen = [k for k in KAYITTAN_DUSEN_ALANLAR.get(motor_type, ())
+             if k in girdiler['fields']]
+    for k in dusen:
+        girdiler['fields'].pop(k)
+    for k in KAYITTAN_DUSEN_BOLUMLER.get(motor_type, ()):
+        if k in girdiler:
+            girdiler.pop(k)
+            dusen.append('inputs.' + k)
+    return dusen
 
 
 # ---------------------------------------------------------------------------
@@ -841,16 +866,14 @@ def main(secilen=None):
                                  'belgesinden farklı')
         _ozeti_denetle(client, motor_type, name, govde,
                        diskte['results_summary'])
-        dusen = [k for k in KAYITTAN_DUSEN_ALANLAR.get(motor_type, ())
-                 if k in diskte['inputs']['fields']]
-        dusen_bolum = [k for k in KAYITTAN_DUSEN_BOLUMLER.get(motor_type, ())
-                       if k in diskte['inputs']]
-        if dusen or dusen_bolum:
-            for k in dusen:
-                diskte['inputs']['fields'].pop(k)
-            for k in dusen_bolum:
-                diskte['inputs'].pop(k)
-                dusen.append('inputs.' + k)
+        dusen = kayittan_dusur(motor_type, diskte)
+        # V307/S2-KALINTI (kalem 4): örnek, sayfanın uçuş kurulumunu taşımak
+        # ZORUNDA (yoksa açılışta "3.0.6 öncesi" notu çıkar) — fail-closed.
+        if not ((diskte['inputs'].get('dynamic') or {}).get('flight')):
+            raise SystemExit(f'{name}: belgede inputs.dynamic.flight yok — '
+                             'sayfanın uçuş kurulumu (serializeFlightSetup) '
+                             'örneğe girmedi')
+        if dusen:
             # Ürünün kayıt biçimi (hrma/utils/projects.py save_project).
             dosya.write_text(json.dumps(diskte, ensure_ascii=False, indent=1,
                                         allow_nan=False), encoding='utf-8')

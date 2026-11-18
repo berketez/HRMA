@@ -348,13 +348,30 @@ def _single_item(key: str, mass: Optional[float]) -> List[Dict[str, Any]]:
 
 
 def _tank_entry(key: str, d_m: Optional[float], l_m: Optional[float],
-                v_m3: Optional[float]) -> Optional[Dict[str, Any]]:
-    """Tank kaydı; çap ya da boy yoksa ``None`` (uydurulmaz)."""
+                v_m3: Optional[float],
+                pressure_vessel: Any = None) -> Optional[Dict[str, Any]]:
+    """Tank kaydı; çap ya da boy yoksa ``None`` (uydurulmaz).
+
+    V307/UÇUŞ-GÖVDE: ``diameter_m`` / ``length_m`` tankın İÇ ölçüleridir
+    (motorun boyutlandırma modeli: düz kapaklı dik silindir, V = π/4·D²·L).
+    Kabuk kalınlıkları motorun AYNI tank için yayımladığı basınçlı kap
+    bloğundan (``hrma.analysis.pressure_vessel``; birim alan adında, mm)
+    okunur: ``wall_thickness_m`` (silindir cidarı) ve
+    ``end_closure_thickness_m`` (baş / kapak). Yayımlanmamışsa ``None``
+    (uydurulmaz); gövde türetimi o durumu adıyla söyler.
+    """
     if d_m is None or l_m is None or d_m <= 0.0 or l_m <= 0.0:
         return None
+    pv = pressure_vessel if isinstance(pressure_vessel, dict) else {}
+    cidar = _mm_to_m(pv.get('wall_thickness_used_mm'))
+    bas = _mm_to_m(pv.get('head_thickness_available_mm'))
     return {'key': key, 'diameter_m': float(d_m), 'length_m': float(l_m),
             'volume_m3': (float(v_m3) if v_m3 is not None and v_m3 > 0.0
-                          else None)}
+                          else None),
+            'wall_thickness_m': (cidar if cidar is not None and cidar > 0.0
+                                 else None),
+            'end_closure_thickness_m': (bas if bas is not None and bas > 0.0
+                                        else None)}
 
 
 def _liquid_tanks(results: Dict) -> Optional[List[Dict[str, Any]]]:
@@ -371,7 +388,8 @@ def _liquid_tanks(results: Dict) -> Optional[List[Dict[str, Any]]]:
         hacim_l = _num(dim.get('volume'))           # litre (adıyla)
         kayit = _tank_entry(key, _mm_to_m(dim.get('diameter')),
                             _mm_to_m(dim.get('length')),
-                            hacim_l / 1000.0 if hacim_l is not None else None)
+                            hacim_l / 1000.0 if hacim_l is not None else None,
+                            _get(pt, key, 'pressure_vessel'))
         if kayit is None:
             return None        # bir tank okunamıyorsa toplam da bilinmez
         out.append(kayit)
@@ -385,7 +403,9 @@ def _hybrid_tanks(eng: Dict) -> Optional[List[Dict[str, Any]]]:
         return None
     kayit = _tank_entry('oxidizer_tank', _num(blok.get('tank_diameter_m')),
                         _num(blok.get('tank_length_m')),
-                        _num(blok.get('tank_volume_m3')))
+                        _num(blok.get('tank_volume_m3')),
+                        _get(eng, 'oxidizer_tank_pressure_vessel',
+                             'pressure_vessel'))
     return None if kayit is None else [kayit]
 
 
@@ -846,10 +866,23 @@ def _normalize_liquid(results: Dict) -> Dict[str, Any]:
         kamara_od, kamara_kaynak = _length_m(results, 'chamber_diameter')
     od_m, od_kaynak = _envelope_od_m(kamara_od, kamara_kaynak, kd, results)
 
+    # V307/SIVI-ORTAM: ``thrust`` motorun TASARIM ORTAMINDAKİ itkisidir.
+    # Araç yerden kalkar ve itkinin irtifa düzeltmesi deniz seviyesi
+    # referansıyla kurulur (``motor_flight_thrust``: thrust_sl_N + 1,01325
+    # bar). Tasarım ortamı deniz seviyesi DEĞİLSE aracın itkisi de aynı
+    # lülenin deniz seviyesi itkisidir; lüle orada ayrılıyorsa motor o
+    # sayıyı yayımlamaz ve araç itkisiz kalır (uç adıyla reddeder: uçuş yok).
+    # Deniz seviyesi tasarımında iki sayı aynıdır (satır eskisiyle aynı).
+    itki = _num(results.get('thrust'))
+    _ortam = results.get('design_ambient')
+    if isinstance(_ortam, dict) and _ortam.get('is_sea_level') is False:
+        itki = _num(_get(results, 'design_summary', 'performance',
+                         'thrust_sl_N'))
+
     return {
         # Kararlı sonuç itki eğrisi taşımaz (transient sıvıda modellenmiyor).
         'thrust_curve': None,
-        'thrust': _num(results.get('thrust')),
+        'thrust': itki,
         'burn_time': _num(results.get('burn_time')),
         'propellant_mass': prop,
         # P4B3-20: uçan atıl kütle tankları ve artık propelanı İÇERİR;
@@ -1289,13 +1322,122 @@ def airframe_fit_conflicts(engine_od_m: Any, engine_length_m: Any,
 #: Gövde türetme kuralının künyesi. HRMA SEÇİMİDİR (kaynaklı bir tasarım
 #: kuralı değil): araç tasarımı HRMA'nın kapsamı dışındadır (karar 56), bu
 #: kural yalnız "motor ve tankları bu gövdeye sığar" alt sınırını kurar.
+#:
+#: V307/UÇUŞ-GÖVDE (17 Kas 2026) — TÜRETİLMİŞ GÖVDE TANKLARI TAŞIR. ÖLÇÜLDÜ
+#: (``docs/scofield/raw/OH/V307/ucus-govde/ONKAYIT.md``): eski kural dış
+#: çapı tankın İÇ çapına, boyu tank İÇ boylarının toplamına eşitliyordu;
+#: motorun aynı tank için yayımladığı cidar (sıvı 3,0 mm, hibrit 2,7 mm)
+#: hesaba girmiyordu ve Fırlatma Sahası alanı aşağı yuvarlayınca (0,473395
+#: → 0,473; 3,3523 → 3,35) gövde tankın iç çapından bile dar kalıyordu —
+#: çalkantı bağlantısı ``TANK_GOVDEDEN_GENIS`` / ``TANK_BURUN_ICINDE`` ile
+#: reddediliyordu. Bugünkü kural: dış çap tankın DIŞ çapını (iç çap + 2 ×
+#: yayımlanan cidar), boy tankların dış boyunu (iç boy + iki baş kalınlığı)
+#: taşır; ikisi de sayfa alanlarının çözünürlüğüne YUKARI yuvarlanır. Yeni
+#: sayı yoktur: kalınlıklar motorun basınçlı kap bloğundandır; seçimler
+#: (bütünleşik tank, temas eden başlar, sıra, burun) aşağıdaki metinde adıyla.
 AIRFRAME_DERIVATION_BASIS = (
     'HRMA choice, not a sourced design rule: the source carries no airframe, '
-    'so the body is the smallest cylinder that holds the engine and its '
+    'so the body is the smallest cylinder that carries the engine and its '
     'propellant tanks as the engine sized them. Outer diameter = the larger '
-    'of the engine envelope and the widest propellant tank; length behind '
-    'the nose = engine length + the tank lengths stacked in line. The '
-    'airframe wall is not modelled and its dry mass is not derived: enter it.')
+    'of the engine envelope and the widest propellant tank outer diameter '
+    '(the published inner diameter + 2 x the wall thickness the engine '
+    'publishes for that tank; the tank wall is taken as the body skin, no '
+    'separate skin or clearance is added). Length behind the nose = engine '
+    'length + the tanks stacked in line in the order of the engine tank '
+    'list (oxidizer forward), each with its inner length + its two end '
+    'closure thicknesses, neighbouring closures in contact (no inter-tank '
+    'bay or feed line length is added). With tanks, both are rounded up to '
+    'the resolution of the vehicle forms (1 mm and 10 mm) so every page '
+    'shows and flies the same number. A wall or closure thickness the '
+    'engine does not publish is taken as zero and named in '
+    'tank_shell_not_published (the body is then a lower bound). The nose is '
+    'the fixed 0.50 m ogive of the Launch Site view. The airframe dry mass '
+    'is not derived: enter it.')
+
+#: Türetilmiş gövdenin burnu (HRMA SEÇİMİ; kaynaklı bir tasarım kuralı
+#: değil). Fırlatma Sahası'nın sorulmayan sabit burnuyla AYNI sayıdır
+#: (``templates/launch_site.html`` ``LS_FIXED_AIRFRAME``; eşitliği
+#: ``tests/test_v307_ucus_govde.py`` bekler). Motor sayfası 6-DOF paneli
+#: türetilmiş gövdeyi bu burunla kurar: iki sayfa aynı gövdeyi uçurur.
+DERIVED_AIRFRAME_NOSE_LENGTH_M = 0.50
+DERIVED_AIRFRAME_NOSE_TYPE = 'ogive'
+
+#: Türetilmiş gövdenin yukarı yuvarlandığı adımlar = sayfaların gövde
+#: alanı çözünürlüğü (çap 3, boy 2 ondalık; ``launch_site.html``
+#: ``GOVDE_ALANLARI``, ``sixdof_panel.js``). Yuvarlama YUKARIdır: aşağı
+#: yuvarlanan gövde taşıdığı tanktan dar/kısa kalır (ölçülen kök).
+DERIVED_AIRFRAME_DIAMETER_STEP_M = 0.001
+DERIVED_AIRFRAME_LENGTH_STEP_M = 0.01
+#: Yukarı yuvarlamada kayan nokta artığı payı (adım cinsinden): 0,116·1000 =
+#: 116,00000000000001 bir üst adıma çıkmasın. Fizik değil, sayı gösterimi.
+_STEP_ROUNDING_GUARD = 1e-9
+
+
+def _round_up_to_step(value: float, step: float) -> float:
+    """``value``yi ``step``in katına YUKARI yuvarla (onluk adımda tam sayı)."""
+    return math.ceil(value / step - _STEP_ROUNDING_GUARD) / round(1.0 / step)
+
+
+def tank_stack(tanks: Any, engine_length_m: Any,
+               inner_lengths_m: Optional[Dict[str, float]] = None
+               ) -> Optional[Dict[str, Any]]:
+    """Tankların gövde içindeki dizilimi — TEK TANIM (gövde boyu + tank yeri).
+
+    Kıçtan buruna: motor, sonra tanklar; ``tanks`` listesi BURUNDAN KIÇA
+    sıradadır (son tank motorun hemen önünde). Her tank iç boyu + iki baş
+    kalınlığı kadar yer tutar; komşu başlar temas hâlindedir (tanklar arası
+    bölme / boru boşluğu eklenmez — :data:`AIRFRAME_DERIVATION_BASIS`).
+
+    ``inner_lengths_m``: tank anahtarı → iç boy [m] (çalkantı bağlantısı
+    yüklenen tank geometrisinin tablo boyunu verir); yoksa kaydın
+    ``length_m``i. Baş kalınlığı yayımlanmamışsa 0 alınır ve anahtar
+    ``shell_not_published`` listesine girer.
+
+    Dönüş: ``{'length_m': motor + tanklar [m], 'tanks': [{'key',
+    'base_from_tail_m', 'top_from_tail_m'}, ...] (burundan kıça),
+    'shell_not_published': [key, ...]}``; ``base`` tankın kıça bakan İÇ
+    tabanı, ``top`` buruna bakan İÇ tepesidir (gövdenin kıç ucundan uzaklık).
+    Motor boyu ya da bir tank boyu bilinmiyorsa ``None`` (uydurulmaz).
+    """
+    motor = _num(engine_length_m)
+    if motor is None or motor < 0.0 or not isinstance(tanks, list):
+        return None
+    x = motor
+    yerler = []
+    eksik = []
+    for t in reversed(tanks):
+        if not isinstance(t, dict):
+            return None
+        anahtar = t.get('key')
+        boy = _num((inner_lengths_m or {}).get(anahtar)
+                   if inner_lengths_m and anahtar in inner_lengths_m
+                   else t.get('length_m'))
+        if boy is None or boy <= 0.0:
+            return None
+        bas = _num(t.get('end_closure_thickness_m'))
+        if bas is None:
+            eksik.append(anahtar)
+            bas = 0.0
+        taban = x + bas
+        tepe = taban + boy
+        yerler.append({'key': anahtar, 'base_from_tail_m': taban,
+                       'top_from_tail_m': tepe})
+        x = tepe + bas
+    yerler.reverse()
+    eksik.reverse()
+    return {'length_m': x, 'tanks': yerler, 'shell_not_published': eksik}
+
+
+def tank_outer_diameter_m(tank: Any) -> Optional[float]:
+    """Tankın DIŞ çapı: iç çap + 2 × yayımlanan cidar (cidar yoksa iç çap)."""
+    if not isinstance(tank, dict):
+        return None
+    d = _num(tank.get('diameter_m'))
+    if d is None:
+        return None
+    cidar = _num(tank.get('wall_thickness_m'))
+    return d + 2.0 * cidar if cidar is not None else d
+
 
 #: Fırlatma Sahası "Örnek araç" — TEK TANIM (HRMA seçimi; gerçek bir motorun
 #: ya da roketin verisi DEĞİL, gösterim aracıdır). Sayılar eskiden
@@ -1342,25 +1484,53 @@ def derive_airframe(vehicle: Dict[str, Any]) -> Dict[str, Any]:
     """Araç tanımı taşımayan kaynak için gövde (kural: AIRFRAME_DERIVATION_BASIS).
 
     Dönüş: ``{'source': 'derived', 'body_diameter_m', 'length_behind_nose_m',
-    'body_length_m': None, 'airframe_dry_mass_kg': None, 'basis'}``. Toplam
-    boy burun boyunu içerir; burun Fırlatma Sahası'nda sabit olduğu için
-    sayfa ``burun + length_behind_nose_m`` toplar. Motor zarfı ya da boyu
-    bilinmiyorsa ilgili alan ``None`` kalır (uydurulmaz) — sayfa alanı boş
-    bırakır ve kullanıcıdan ister.
+    'body_length_m': None, 'airframe_dry_mass_kg': None, 'basis',
+    'nose_length_m', 'nose_type', 'tank_order', 'tank_stations',
+    'tank_shell_not_published'}``. Toplam boy burun boyunu içerir: sayfa
+    ``nose_length_m + length_behind_nose_m`` toplar (Fırlatma Sahası kendi
+    sabit burnuyla — aynı sayı). Motor zarfı ya da boyu bilinmiyorsa ilgili
+    alan ``None`` kalır (uydurulmaz) — sayfa alanı boş bırakır ve
+    kullanıcıdan ister.
+
+    V307/UÇUŞ-GÖVDE: tank taşıyan araçta (sıvı, hibrit) çap tankın DIŞ
+    çapını, boy tankların dış boyunu taşır ve alan çözünürlüğüne yukarı
+    yuvarlanır; ``tank_order`` burundan kıça tank anahtarları,
+    ``tank_stations`` her tankın iç tepe/taban istasyonu (burun tabanından,
+    m). Tanksız araçta (katı, örnek) sayılar 3.0.6 ile bit-aynıdır.
     """
     od = _num(vehicle.get('engine_od_m'))
     boy = _num(vehicle.get('engine_length_m'))
     tanklar = vehicle.get('propellant_tanks')
     cap = od
     arka = boy
+    sira: Optional[List[str]] = None
+    istasyonlar: Optional[List[Dict[str, Any]]] = None
+    eksik: List[str] = []
     if isinstance(tanklar, list):
+        sira = [t.get('key') for t in tanklar if isinstance(t, dict)]
         for t in tanklar:
-            d = _num(t.get('diameter_m')) if isinstance(t, dict) else None
-            l = _num(t.get('length_m')) if isinstance(t, dict) else None
+            d = tank_outer_diameter_m(t)
             if d is not None and cap is not None:
                 cap = max(cap, d)
-            if l is not None and arka is not None:
-                arka += l
+            if isinstance(t, dict) and _num(t.get('wall_thickness_m')) is None:
+                eksik.append(t.get('key'))
+        yigin = tank_stack(tanklar, boy) if tanklar else None
+        if tanklar:
+            # Tank taşıyan gövde: dizilim tek tanımdan; alan çözünürlüğüne
+            # YUKARI yuvarlanır (aşağı yuvarlanan gövde tanktan dar kalır).
+            arka = yigin['length_m'] if yigin is not None else None
+            if yigin is not None:
+                eksik.extend(k for k in yigin['shell_not_published']
+                             if k not in eksik)
+            if cap is not None:
+                cap = _round_up_to_step(cap, DERIVED_AIRFRAME_DIAMETER_STEP_M)
+            if arka is not None:
+                arka = _round_up_to_step(arka, DERIVED_AIRFRAME_LENGTH_STEP_M)
+                istasyonlar = [
+                    {'key': y['key'],
+                     'top_behind_nose_m': arka - y['top_from_tail_m'],
+                     'base_behind_nose_m': arka - y['base_from_tail_m']}
+                    for y in yigin['tanks']]
     elif tanklar is None and vehicle.get('motor_type') in ('liquid', 'hybrid'):
         # Tank geometrisi yayımlanmamış bir sıvı/hibrit motorda gövde boyu
         # motordan kurulamaz (tankın yeri bilinmez): uydurulmaz.
@@ -1372,6 +1542,11 @@ def derive_airframe(vehicle: Dict[str, Any]) -> Dict[str, Any]:
         'length_behind_nose_m': arka,
         'airframe_dry_mass_kg': None,
         'basis': AIRFRAME_DERIVATION_BASIS,
+        'nose_length_m': DERIVED_AIRFRAME_NOSE_LENGTH_M,
+        'nose_type': DERIVED_AIRFRAME_NOSE_TYPE,
+        'tank_order': sira,
+        'tank_stations': istasyonlar,
+        'tank_shell_not_published': eksik,
     }
 
 

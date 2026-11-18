@@ -475,9 +475,14 @@ class TestOHD2011AkiHukmu:
         assert 'EARNED_FLUX_KINDS.indexOf(p.kind) !== -1' in prot
 
     def test_missing_turu_kazanilmis_sayilmiyor(self, prot):
-        """`fluxProvenance` dört tür üretir; ikisi hüküm kazandırır."""
+        """Panel üç tür üretir; ikisi hüküm kazandırır.
+
+        V307/GÜVERTE-ISIL (kalem 3): ``assumed`` (panelin kendi akı / çift
+        varsayılanı) türü ÜRETİLMEZ — panelin o varsayılanları kalktı; tür
+        geri gelirse gizli bir tanım değeri geri gelmiş demektir."""
         turler = set(re.findall(r"kind:\s*'([a-z]+)'", prot))
-        assert {'missing', 'computed', 'assumed', 'user'} <= turler, turler
+        assert {'missing', 'computed', 'user'} <= turler, turler
+        assert 'assumed' not in turler, turler
         m = re.search(r"var EARNED_FLUX_KINDS\s*=\s*\[([^\]]*)\]", prot)
         izinli = set(re.findall(r"'([a-z_]+)'", m.group(1)))
         assert 'missing' not in izinli

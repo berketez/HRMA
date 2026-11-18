@@ -191,6 +191,9 @@ class TestOHD2811GeziciBandKapisi:
 # ===========================================================================
 SAFETY = {'chamber_pressure': 50, 'propellant_mass': 5,
           'chamber_diameter': 0.15, 'wall_thickness': 0.005,
+          # V307/GÜVERTE-ISIL kalem 4: oda sıcaklığı zorunlu (3000 K
+          # varsayılanı kalktı); eski örtük değer açık, sayılar bit-aynı.
+          'chamber_temperature': 3000.0,
           'motor_type': 'hybrid'}
 
 

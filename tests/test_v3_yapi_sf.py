@@ -2115,7 +2115,9 @@ class TestUcKendiBayragiOnayYok:
         dta_satiri = re.search(r'design_target_assessment(.*?)(?:'
                                r'verdict_safety_factor|$)', d['metin'])
         assert dta_satiri, d['metin'][:400]
-        assert 'status: NOT_EVALUATED' in dta_satiri.group(1)
+        # V307/SEKME-GÜVERTE (NK3-K-2): dta satırı kullanıcı dilinde
+        # ("status: NOT_EVALUATED" → "grade of the target: NOT EVALUATED").
+        assert 'grade of the target: NOT EVALUATED' in dta_satiri.group(1)
         assert not re.search(r'\bSAFE\b|VERY LOW', d['metin']), (
             re.findall(r'.{60}\bSAFE\b.{20}', d['metin']))
         assert 'withheld' in d['metin']
@@ -2445,17 +2447,26 @@ class TestKabFormYoluSivi:
         # davranışta da aynen basılır (susturulmaz).
         dta_eski = eski['uc']['structural_analysis']['safety_analysis'][
             'design_target_assessment']
-        dta_satiri = 'status: {} · risk_level: {}'.format(
-            dta_eski['status'], dta_eski['risk_level'])
+        # V307/SEKME-GÜVERTE (NK3-K-2): satır artık kullanıcı dilinde
+        # ("status: X · risk_level: Y" ham anahtarları görünür metinden
+        # indi); iddia aynı: ucun kendi dta hükmü ve riski basılır.
+        def _soz(v):
+            return str(v).replace('_', ' ')
+        dta_satiri = 'grade of the target: {} · risk {}'.format(
+            _soz(dta_eski['status']), _soz(dta_eski['risk_level']))
         assert dta_satiri in eski['metin']
         if str(dta_eski['status']).upper() in _UC_BASARISIZ_DEGERLERI:
             assert dta_satiri in yeni['metin']
         assert 'Fatigue Status SAFE' in eski['metin']
         assert not re.search(r'\bSAFE\b|\bACCEPTABLE\b|VERY LOW|'
-                             r'risk_level: LOW', yeni['metin']), (
+                             r'risk_level: LOW|\brisk LOW\b', yeni['metin']), (
             re.findall(r'.{60}(?:\bSAFE\b|ACCEPTABLE|LOW).{20}',
                        yeni['metin']))
-        assert 'status: NOT_EVALUATED' in yeni['metin']
+        # (Eski iddia 'status: NOT_EVALUATED' "earned_scope_status:
+        # NOT_EVALUATED" satırından da karşılanıyordu; iki satır artık
+        # kullanıcı dilinde.)
+        assert re.search(r'(?:measured sections|grade of the target): '
+                         r'NOT EVALUATED', yeni['metin'])
         assert re.search(_DOCK_BASARISIZ, yeni['metin'])
         assert _t7_yapraklar(yeni['uc'], _UC_ONAY_DEGERLERI) == []
 

@@ -4191,24 +4191,125 @@ def supersede_bare_wall_records(result, superseded_by: str, nodes) -> int:
     return sayac
 
 
+# ===========================================================================
+# V307/SEKME-GÜVERTE (NK3-S-3) — SOĞUTMA BÜTÇESİ KORUNAN CİDARDA YAYIMLANMAZ
+# ---------------------------------------------------------------------------
+# ÖLÇÜLDÜ (docs/scofield/raw/OH/V307/sekme-guverte/olcum_once_A.json, güverte
+# TERMAL sekmesi, motorların kendi tohumuyla): korunan cidar hükmü verirken
+# (astar ya da verilmiş cidar çifti) "Gereken soğutma alanı" çıplak cidarın
+# kararlı doğal taşınım bütçesi olarak basılıyordu — sıvı L1 (ablatif, sıcak
+# gaz yüzeyi 0,051 m²) 266,26 m²; hibrit L1 155,67, L2 1137,19 m²; katı L1
+# 242,18, L2 4971,64 m². Sayı A = Q / (h_soğutucu × ΔT_tasarım), Q çıplak
+# cidarın referans soğutulmuş cidar sıcaklığındaki gaz tarafı ısı yüküdür:
+# ısıyı ASTAR emerken (aşınma + iletim) ya da kasa yalıtım arkasında motorun
+# çözdüğü sıcaklıkta dururken bu bütçe korunan cidarı anlatmaz, tasarım sayısı
+# gibi okunur. Korunan cidar hükmü yönettiğinde alan ve sınıf verimi
+# yayımlanmaz; nedeni KODUYLA (arayüz çevirir) ve cümlesiyle yazılır. Isı
+# yükü (gaz tarafı) ve ısı kuyusu kütlesi sayı olarak kalır.
+# ===========================================================================
+
+#: Astarla korunan soğutma sınıfları (motorun kendi soğutma tipi adıyla). Bu
+#: sınıfta sıcak gaz ısısını astar emer; model sınıfı astar yolu
+#: (``wall_protection = 'ablative_liner'``) ve çıplak cidar SINIRI ile
+#: değerlendirir. Sınırın dış yüz modeli ``BARE_WALL_BOUND_OUTER_COOLING``.
+LINER_PROTECTED_COOLING_TYPES = ('ablative',)
+
+#: Astarlı motorda çıplak cidar sınırının dış yüz soğutma modeli: kabuk dışı
+#: ortam havasına doğal taşınım (``COOLANT_SIDE_DECLARED_TYPICAL['natural']``
+#: bandı, Incropera & DeWitt Tablo 1.1; künyesi
+#: ``COOLANT_SIDE_DECLARED_SOURCE``).
+BARE_WALL_BOUND_OUTER_COOLING = 'natural'
+
+BARE_WALL_OUTER_COOLING_BASIS = (
+    'outer-surface model of the bare-wall bound only: with an ablative liner '
+    'the motor\'s shell rejects heat to the ambient air by natural convection '
+    '(declared typical band, coolant_side_coefficient_source). The motor\'s '
+    'own cooling class is design_parameters.cooling_type.')
+
+#: Soğutma bütçesinin geri çekilme kodları (arayüz bu kodları çevirir).
+COOLING_BUDGET_WITHHELD_LINER = 'liner_protected_wall'
+COOLING_BUDGET_WITHHELD_SUPPLIED = 'supplied_wall_temperature'
+COOLING_BUDGET_WITHHELD_ABLATIVE = 'ablative_cooling_class'
+
+_COOLING_BUDGET_WITHHELD_TEXT = {
+    COOLING_BUDGET_WITHHELD_LINER: (
+        'The required cooling area and the cooling-class efficiency are the '
+        'steady rejection budget of the BARE wall (A = Q / (h_coolant x '
+        'dT_design) with the bare-wall heat load). The ablative liner '
+        'verdict governs: the liner absorbs the hot-gas heat, so that budget '
+        'does not describe this wall and is not published.'),
+    COOLING_BUDGET_WITHHELD_SUPPLIED: (
+        'The required cooling area and the cooling-class efficiency are the '
+        'steady rejection budget of the BARE wall (A = Q / (h_coolant x '
+        'dT_design) with the bare-wall heat load). The supplied wall '
+        'temperatures govern (for example the case temperature the motor '
+        'solved behind its insulation), so that budget does not describe '
+        'this wall and is not published.'),
+    COOLING_BUDGET_WITHHELD_ABLATIVE: (
+        'Ablative cooling: the hot-gas heat is absorbed by the liner '
+        '(recession and conduction), not rejected by convection, so a '
+        'convection area budget and a cooling-class efficiency do not apply '
+        'and are not published. The liner verdict is chamber_liner_check.'),
+}
+
+
+def withhold_cooling_budget(result, code: str) -> bool:
+    """Soğutma bütçesini (gereken alan + sınıf verimi) geri çeker.
+
+    ``required_cooling_area`` ve ``cooling_efficiency`` ``None`` olur; neden
+    ``required_cooling_area_withheld_code`` (arayüz çevirir) ve
+    ``required_cooling_area_withheld_because`` (cümle) ile yazılır. Isı yükü
+    ve ısı kuyusu alanları DEĞİŞMEZ. Yerinde değiştirir; blok yoksa False.
+    """
+    ca = result.get('cooling_analysis') if isinstance(result, dict) else None
+    if not isinstance(ca, dict):
+        return False
+    neden = _COOLING_BUDGET_WITHHELD_TEXT[code]
+    ca['required_cooling_area'] = None
+    ca['required_cooling_area_withheld_code'] = code
+    ca['required_cooling_area_withheld_because'] = neden
+    ca['cooling_efficiency'] = None
+    ca['cooling_efficiency_basis'] = neden
+    return True
+
+
+def declare_liner_protected_cooling(result, motor_cooling_type: str) -> None:
+    """Astarla korunan soğutma sınıfının (``LINER_PROTECTED_COOLING_TYPES``)
+    yanıt künyesi: ``design_parameters.cooling_type`` motorun sınıfıdır,
+    çıplak cidar sınırının dış yüz modeli ayrı alanda; soğutma bütçesi
+    yayımlanmaz (``COOLING_BUDGET_WITHHELD_ABLATIVE``)."""
+    dp = result.setdefault('design_parameters', {})
+    dp['cooling_type'] = motor_cooling_type
+    dp['bare_wall_outer_cooling'] = BARE_WALL_BOUND_OUTER_COOLING
+    dp['bare_wall_outer_cooling_basis'] = BARE_WALL_OUTER_COOLING_BASIS
+    withhold_cooling_budget(result, COOLING_BUDGET_WITHHELD_ABLATIVE)
+
+
 def apply_wall_protection(analyzer, result: Dict, motor_data: Dict,
                           material: str, wall_thickness: float, *,
                           wall_temperature_hot: Optional[float] = None,
                           wall_temperature_cold: Optional[float] = None,
-                          wall_protection: str = WALL_PROTECTION_NONE
+                          wall_protection: str = WALL_PROTECTION_NONE,
+                          liner_station: Optional[Dict] = None
                           ) -> Optional[Dict]:
     """Korunan cidar hükmünü ``analyze_heat_transfer`` sonucuna işler.
 
     Öncelik: verilmiş cidar çifti (1) > ablatif astar (2) > hiçbiri (yanıt
     değişmez, ``None`` döner). Çağıran (uç) girdileri kapıdan geçirmiştir:
     çift ya ikisi birden ya hiç, sonlu ve pozitif, ``hot >= cold``.
+
+    ``liner_station`` (V307/GÜVERTE-ISIL kalem 1): astar istasyonunun
+    VERİLMİŞ gaz tarafı girdileri (``h_gas_W_m2K``, ``T_recovery_K``, isteğe
+    bağlı ``gas_cp_J_kgK``) — motor sonucunun astar bloğundaki değerler.
+    Verilmezse istasyon bu isteğin kendi ısı zincirinden türetilir (eski yol,
+    bit-aynı).
     """
     if wall_temperature_hot is not None and wall_temperature_cold is not None:
         return _apply_supplied_wall(analyzer, result, motor_data, material,
                                     wall_thickness, float(wall_temperature_hot),
                                     float(wall_temperature_cold))
     if wall_protection == WALL_PROTECTION_ABLATIVE_LINER:
-        return _apply_chamber_liner(result, motor_data)
+        return _apply_chamber_liner(result, motor_data, liner_station)
     return None
 
 
@@ -4238,10 +4339,47 @@ def _apply_supplied_wall(analyzer, result, motor_data, material,
         'superseded_bare_wall_records': cevrilen,
     }
     result['supplied_wall_check'] = blok
+    # V307/SEKME-GÜVERTE (NK3-S-3): verilmiş cidar sıcaklığı yönetirken
+    # doğal taşınım bütçesi çıplak cidarındır (ölçülen katı L2: 4971,64 m²).
+    # Rejeneratif/zorlanmış sınıfta bütçe soğutucu tarafı tasarımıdır, kalır.
+    if ((result.get('design_parameters') or {}).get('cooling_type')
+            == 'natural'):
+        withhold_cooling_budget(result, COOLING_BUDGET_WITHHELD_SUPPLIED)
     return blok
 
 
-def _apply_chamber_liner(result, motor_data):
+# ===========================================================================
+# V307/GÜVERTE-ISIL (kalem 1) — ASTAR İSTASYONU: VERİLMİŞ ⟷ TÜRETİLMİŞ
+# ---------------------------------------------------------------------------
+# ÖLÇÜLDÜ (docs/scofield/raw/OH/V307/guverte-isil/olcum_once.json; künye ve
+# tablo ``thermal_protection.LINER_RULE_RECESSION_ONLY`` üstünde): sıvı ablatif
+# motorun hazne astarını motor KENDİ Bartz zincirinin hazne katsayısıyla
+# sürüyor (L1: h_g 1894 W/m²K, T_r = T_c 3395 K -> gerileme 0,1375 mm/s),
+# bu uç ise aynı istasyonu kendi zincirinden türetiyordu (2595 W/m²K, T_aw
+# 3384 K -> 0,2080 mm/s). Aynı çekirdek (``ablative_thickness``), iki girdi,
+# iki sayı; 50 bar örnekte iki ayrı ret (0,367 ⟷ 0,405 mm/s).
+# Güverte motorun astar istasyonu girdilerini isteğe bağlı alanlarla gönderir;
+# verildiğinde gerileme hızı, gerileme payı ve zarf hükmü motorun astar
+# bloğuyla AYNIDIR. İletim payı (hibrit zincirinin kuralı) bu uçta eklenmeye
+# devam eder ve iki parça adıyla yayımlanır.
+# ===========================================================================
+LINER_STATION_SUPPLIED = 'supplied'
+LINER_STATION_DERIVED = 'derived'
+
+LINER_STATION_SUPPLIED_SOURCE = (
+    'liner station inputs SUPPLIED with the request (the chamber liner '
+    'station of the motor result the analysis deck was seeded from): the '
+    'gas-side coefficient, the recovery temperature and the edge-gas '
+    'specific heat are the motor chain\'s own values, so the recession rate, '
+    'the recession allowance and the envelope verdict equal the motor '
+    'result\'s liner block. They are NOT re-derived from the heat chain of '
+    'this endpoint.')
+LINER_STATION_DERIVED_SOURCE = (
+    'chamber coefficient recovered from the chamber design flux of this '
+    'request: h_g = q_chamber/(T_aw - T_wall_ref)')
+
+
+def _apply_chamber_liner(result, motor_data, liner_station=None):
     kodlar = bare_wall_critical_codes(result)
     gs = result.get('gas_side_analysis') or {}
     if not kodlar:
@@ -4259,28 +4397,70 @@ def _apply_chamber_liner(result, motor_data):
     yaricap = _positive_length(motor_data.get('chamber_diameter'))
     cp_gaz = _positive_length((result.get('heat_transfer_coefficients') or {})
                             .get('gas_cp'))
-    eksik = [ad for ad, deger in (
-        ('gas_side_analysis.chamber_heat_flux', q_kamara),
-        ('gas_side_analysis.adiabatic_wall_temperature', t_aw),
-        ('gas_side_analysis.reference_wall_temperature', t_ref),
-        ('burn_time', t_yanma), ('chamber_diameter', yaricap)) if deger is None]
-    if not eksik and t_aw <= t_ref:
-        eksik.append('adiabatic_wall_temperature > reference_wall_temperature')
+    verilmis = isinstance(liner_station, dict) and bool(liner_station)
+    if verilmis:
+        # Verilmiş istasyon: sürücü çift ve c_p motorun astar bloğundan.
+        # Bu isteğin kendi zincirinden yalnız karşılaştırma akısı
+        # (``q_caller``; enerji dengesi yolunda kalınlığa GİRMEZ) okunur.
+        eksik = [ad for ad, deger in (
+            ('gas_side_analysis.chamber_heat_flux', q_kamara),
+            ('burn_time', t_yanma), ('chamber_diameter', yaricap))
+            if deger is None]
+    else:
+        eksik = [ad for ad, deger in (
+            ('gas_side_analysis.chamber_heat_flux', q_kamara),
+            ('gas_side_analysis.adiabatic_wall_temperature', t_aw),
+            ('gas_side_analysis.reference_wall_temperature', t_ref),
+            ('burn_time', t_yanma), ('chamber_diameter', yaricap))
+            if deger is None]
+        if not eksik and t_aw <= t_ref:
+            eksik.append(
+                'adiabatic_wall_temperature > reference_wall_temperature')
 
-    def _sizing_yok(neden):
+    def _sizing_yok(neden, sizing=None, girdiler=None):
         blok = {'status': 'not_applied', 'verdict': 'NOT_SIZED',
                 'severity': 'critical', 'governs': False,
                 'bare_wall_codes': kodlar, 'reason': neden,
                 'basis': ('fail-closed: no liner could be sized, so the '
                           'bare-wall critical records stand unchanged')}
+        # V307/GÜVERTE-ISIL (kalem 1): ret, NEDENİN SAYILARIYLA yayımlanır
+        # (motorun astar bloğu da gerileme hızını ve istasyon hükmünü
+        # yayımlıyor; iki tarafın aynı reddi verdiği bu alanlardan okunur).
+        if isinstance(sizing, dict):
+            blok['thickness_status'] = sizing.get('thickness_status')
+            blok['recession_rate_mm_s'] = sizing.get('recession_rate_mm_s')
+            blok['recession_validity_max_mm_s'] = sizing.get(
+                'recession_validity_max_mm_s')
+            blok['validity_note'] = sizing.get('validity_note')
+        if girdiler is not None:
+            blok['inputs'] = girdiler
         result['chamber_liner_check'] = blok
         return blok
 
     if eksik:
         return _sizing_yok('the liner sizing needs: ' + ', '.join(eksik))
 
-    h_kamara = q_kamara / (t_aw - t_ref)
     yaricap = yaricap / 2.0
+    if verilmis:
+        h_kamara = float(liner_station['h_gas_W_m2K'])
+        t_aw = float(liner_station['T_recovery_K'])
+        cp_gaz = _positive_length(liner_station.get('gas_cp_J_kgK'))
+        istasyon_kaynagi = LINER_STATION_SUPPLIED
+        h_kaynagi = LINER_STATION_SUPPLIED_SOURCE
+    else:
+        h_kamara = q_kamara / (t_aw - t_ref)
+        istasyon_kaynagi = LINER_STATION_DERIVED
+        h_kaynagi = LINER_STATION_DERIVED_SOURCE
+    girdiler = {
+        'chamber_heat_flux_W_m2': q_kamara,
+        'h_gas_W_m2K': h_kamara,
+        'h_gas_source': h_kaynagi,
+        'liner_station_source': istasyon_kaynagi,
+        'T_recovery_K': t_aw,
+        'burn_time_s': t_yanma,
+        'station_radius_m': yaricap,
+        'gas_cp_J_kgK': cp_gaz,
+    }
     # Astar malzemesi hibrit zincirinin BEYANLI seçimidir (tek kaynak); geç
     # içe aktarma: motor modülü bu modülü içe aktarıyor (döngü yok).
     from hrma.engines.hybrid_rocket_engine import (
@@ -4300,7 +4480,8 @@ def _apply_chamber_liner(result, motor_data):
             T_initial_K=(result.get('design_parameters') or {}).get(
                 'ambient_temperature'), **ek)
     except Exception as exc:  # çekirdek kapısı: sayı uydurulmaz
-        return _sizing_yok(f'ablative sizing failed: {exc}')
+        return _sizing_yok(f'ablative sizing failed: {exc}',
+                           girdiler=girdiler)
     kalinlik_mm = sizing.get('required_thickness_mm')
     gecerli = (sizing.get('thickness_status') == 'sized'
                and sizing.get('model_valid') is True
@@ -4308,7 +4489,8 @@ def _apply_chamber_liner(result, motor_data):
     if not gecerli:
         return _sizing_yok(sizing.get('validity_note')
                            or ('liner thickness status '
-                               f"{sizing.get('thickness_status')!r}"))
+                               f"{sizing.get('thickness_status')!r}"),
+                           sizing=sizing, girdiler=girdiler)
 
     # Astar yolunda ``safety_analysis`` ÇIPLAK cidarın kendisidir (astar
     # arkası çözülmez): onun kayıtları da aşılır; astar uyarısı ARDINDAN
@@ -4339,17 +4521,7 @@ def _apply_chamber_liner(result, motor_data):
         .get('max_temperature'),
         'bare_wall_basis': BARE_WALL_BOUND_BASIS,
         'superseded_bare_wall_records': cevrilen,
-        'inputs': {
-            'chamber_heat_flux_W_m2': q_kamara,
-            'h_gas_W_m2K': h_kamara,
-            'h_gas_source': ('chamber coefficient recovered from the chamber '
-                             'design flux of this request: h_g = q_chamber/'
-                             '(T_aw - T_wall_ref)'),
-            'T_recovery_K': t_aw,
-            'burn_time_s': t_yanma,
-            'station_radius_m': yaricap,
-            'gas_cp_J_kgK': cp_gaz,
-        },
+        'inputs': girdiler,
         'sizing': sizing,
         'scope': CHAMBER_LINER_SCOPE,
         'source': ('Level-1 Q* recession allowance + conduction allowance '
@@ -4358,4 +4530,7 @@ def _apply_chamber_liner(result, motor_data):
                    'liner (hybrid_rocket_engine._thermal_protection_block)'),
     }
     result['chamber_liner_check'] = blok
+    # V307/SEKME-GÜVERTE (NK3-S-3): astar yönetirken soğutma bütçesi çıplak
+    # cidarındır (ölçülen sıvı L1 266,26 m², hibrit L1 155,67 m²).
+    withhold_cooling_budget(result, COOLING_BUDGET_WITHHELD_LINER)
     return blok

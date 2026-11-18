@@ -98,6 +98,89 @@
                  material: k.material_key };
     }
 
+    // V307/SEKME-GÜVERTE (NK3-H-1) — MOTORUN CİDARI. ÖLÇÜLDÜ
+    // (docs/scofield/raw/OH/V307/sekme-guverte/olcum_once_1.json, hibrit L1):
+    // GÜVENLİK sekmesi motorun cidarıyla (SS304, 1,00 mm, iç çap 29,8 mm)
+    // "öngörülen patlama basıncı 253,4 bar" basıyordu; bu sekme cidarı
+    // motordan ALMIYOR, kendi 0,21 mm'sini boyutlandırıp "54,5 bar · PASS"
+    // diyordu — aynı kamara için iki patlama basıncı. Sekme artık motorun
+    // cidarını (iç çap ve malzemeyle birlikte) tohumlar; değerlendirilen
+    // cidarın KİMİN olduğu başlıkta yazar. Motorun son sonucundaki cidar ve
+    // künyesi burada tutulur (render aynı sayıyı kıyaslar); sonuç yoksa null.
+    var motorCidari = null;
+
+    //: Göreli eşitlik toleransı — sekmenin kullandığı cidar motorunkiyle
+    //: "aynı" mı? Güverte gövdeye tam değeri gönderir (V306/GÜVERTE-HATA
+    //: kalem 3), uç milimetre yankısını aynen döndürür; 1e-9 yalnız kayan
+    //: nokta yuvarlamasını yutar.
+    var CIDAR_ESIT_TOL = 1e-9;
+
+    function ayniCidar(a, b) {
+        return Number.isFinite(a) && Number.isFinite(b)
+            && Math.abs(a - b) <= CIDAR_ESIT_TOL * Math.max(Math.abs(b), 1e-12);
+    }
+
+    // Motor cidarının künye cümlesi ("motorun cidarı: 1,00 mm, HRMA
+    // boyutlandırdı"). Künye motorun KENDİ beyanından (güvertenin ortak
+    // okuyucusu readWallThicknessProvenance) gelir; beyan yoksa kaynak adı
+    // söylenmez (uydurma yok).
+    function motorCidarMetni(mc) {
+        if (!mc || !Number.isFinite(mc.mm)) return '';
+        var p = { t: U.fmt(mc.mm, 2) };
+        if (mc.katman === 'closeout') {
+            return U.tf('panel.vessel.motorWallCloseout', p,
+                'The motor\'s closeout (outer shell) is {t} mm.');
+        }
+        if (mc.kaynak === 'solver_sized') {
+            return U.tf('panel.vessel.motorWallSized', p,
+                'The motor\'s wall is {t} mm (HRMA sized it in the motor result).');
+        }
+        if (mc.kaynak === 'user_supplied') {
+            return U.tf('panel.vessel.motorWallUser', p,
+                'The motor\'s wall is {t} mm (the wall you entered on the motor page).');
+        }
+        return U.tf('panel.vessel.motorWallPlain', p, 'The motor\'s wall is {t} mm.');
+    }
+
+    // Değerlendirilen cidarın kimliği: 'proposed' (bu sekme boyutlandırdı),
+    // 'motor' (motorun cidarı) ya da 'tab' (bu sekmeye girilen başka cidar).
+    function cidarKimligi(d) {
+        if (d.auto_sized) return 'proposed';
+        if (motorCidari && ayniCidar(d.wall_thickness_used_mm, motorCidari.mm)) {
+            return 'motor';
+        }
+        return Number.isFinite(d.wall_thickness_used_mm) ? 'tab' : null;
+    }
+
+    // Başlığın altındaki görünür künye satırı (kartlardaki patlama basıncı
+    // BU cidarındır).
+    function cidarKunyesi(d) {
+        var kimlik = cidarKimligi(d);
+        var motorMetni = motorCidarMetni(motorCidari);
+        if (kimlik === 'proposed') {
+            return { kimlik: kimlik, kind: 'warn',
+                text: T('panel.vessel.wallProposed',
+                        'PROPOSED WALL — this tab sized it to the code minimum '
+                        + 'and the burst margin; it is not the motor\'s wall.')
+                    + (motorMetni ? ' ' + motorMetni : '') };
+        }
+        if (kimlik === 'motor') {
+            return { kimlik: kimlik, kind: 'info',
+                text: T('panel.vessel.wallIsMotor',
+                        'EVALUATED WALL — the motor\'s wall.')
+                    + ' ' + motorMetni };
+        }
+        if (kimlik === 'tab') {
+            return { kimlik: kimlik, kind: 'info',
+                text: U.tf('panel.vessel.wallIsTab',
+                           { t: U.fmt(d.wall_thickness_used_mm, 2) },
+                           'EVALUATED WALL — the {t} mm entered in this tab, '
+                           + 'not the motor\'s wall.')
+                    + (motorMetni ? ' ' + motorMetni : '') };
+        }
+        return null;
+    }
+
     function statusKind(status) {
         var s = String(status || '').toUpperCase();
         if (s === 'PASS') return 'ok';
@@ -153,9 +236,22 @@
                   'No wall thickness supplied — sized to the code-required minimum.'));
         }
 
+        // V307/SEKME-GÜVERTE (NK3-H-1): kimin cidarı — rozetlerin altında,
+        // kartlardan önce.
+        var kunye = cidarKunyesi(d);
+        var kunyeHtml = kunye
+            ? '<div data-vessel-wall-basis="' + kunye.kimlik + '"'
+              + ' style="font-family:var(--hd-mono, monospace); font-size:0.74rem;'
+              + ' line-height:1.45; margin:4px 0 8px; white-space:normal; color:'
+              + (kunye.kind === 'warn' ? 'var(--hd-orange, #ff8c33)'
+                                       : 'var(--hd-ink, #cfe8f2)')
+              + ';">' + U.esc(kunye.text) + '</div>'
+            : '';
+        var oneri = kunye && kunye.kimlik === 'proposed';
+
         var head = document.createElement('div');
         head.innerHTML = '<div style="display:flex; flex-wrap:wrap; gap:8px; margin:8px 0;">'
-            + badges + '</div>'
+            + badges + '</div>' + kunyeHtml
             + '<div style="display:flex; flex-wrap:wrap; gap:10px; margin:10px 0;">'
             // ÖH D31 / OH-D30-13 — DÜRÜST AD ÖNCE OKUNUR.
             // Uç aynı sayıyı iki adla yayımlıyor: tarihsel
@@ -163,7 +259,10 @@
             // `predicted_burst_pressure_bar`. Kart dürüst adı okur, eski
             // ad yalnız GERİYE DÖNÜK yedektir (eski sürüm uçları). İpucu
             // ucun KENDİ künyesini basar; metin panelde İCAT EDİLMEZ.
-            + U.statCard(T('panel.vessel.cardBurst', 'Predicted burst pressure'),
+            + U.statCard(oneri
+                    ? T('panel.vessel.cardBurstProposed',
+                        'Predicted burst pressure — proposed wall')
+                    : T('panel.vessel.cardBurst', 'Predicted burst pressure'),
                 U.fmt(Number.isFinite(d.predicted_burst_pressure_bar)
                           ? d.predicted_burst_pressure_bar
                           : d.actual_burst_pressure_bar, 1), 'bar',
@@ -188,7 +287,9 @@
             + U.statCard(T('panel.vessel.cardReqThk', 'Required thickness'),
                 U.fmt(d.required_thickness_mm, 2), 'mm', null,
                 T('panel.vessel.cardReqThkTip', 'Code-required minimum wall thickness'))
-            + U.statCard(T('panel.vessel.cardWallUsed', 'Wall used'),
+            + U.statCard(oneri
+                    ? T('panel.vessel.cardWallProposed', 'Proposed wall (this tab)')
+                    : T('panel.vessel.cardWallUsed', 'Wall used'),
                 U.fmt(d.wall_thickness_used_mm, 2), 'mm',
                 (Number.isFinite(d.thickness_margin) && d.thickness_margin < 1.0)
                     ? 'err' : 'ok',
@@ -352,8 +453,12 @@
         motorTypes: ['hybrid', 'liquid', 'solid'],
         fields: [
             ['code_mode', 'Design Code', 'aiaa_s080', CODE_MODES, 'panel.vessel.fDesignCode', 'panel.vessel.help.code_mode'],
-            ['meop_bar', 'MEOP (bar)', 60, 1, 'panel.vessel.fMeop', 'panel.vessel.help.meop_bar'],
-            ['inner_diameter_mm', 'Inner Diameter (mm)', 150, 1, 'common.f.innerDiameterMm', 'panel.vessel.help.inner_diameter_mm'],
+            // V307/SEKME-GÜVERTE (NK3-H-7 ailesi): MEOP ve iç çapın tanım
+            // değeri BOŞ (eskiden 60 bar / 150 mm — son hesap başarısızken
+            // sekme o gizli kabı boyutlandırıyordu). Boşsa istek
+            // gönderilmez, alan adıyla söylenir (`required`).
+            ['meop_bar', 'MEOP (bar)', '', 1, 'panel.vessel.fMeop', 'panel.vessel.help.meop_bar'],
+            ['inner_diameter_mm', 'Inner Diameter (mm)', '', 1, 'common.f.innerDiameterMm', 'panel.vessel.help.inner_diameter_mm'],
             ['wall_thickness_mm', 'Wall Thickness (mm, blank = auto-size)', '', 0.1,
              'panel.vessel.fWallAuto', 'panel.vessel.help.wall_thickness_mm'],
             ['material', 'Material', VARSAYILAN_MALZEME, MATERIALS, 'common.f.material', 'panel.vessel.help.material'],
@@ -362,6 +467,7 @@
              'panel.vessel.fWeld', 'panel.vessel.help.weld_efficiency'],
             ['head_type', 'Head Type', 'ellipsoidal_2_1', HEAD_TYPES, 'panel.vessel.fHeadType', 'panel.vessel.help.head_type'],
         ],
+        required: ['meop_bar', 'inner_diameter_mm'],
         fromResults: function (r) {
             var m = (r && r.motor) || r || {};
             var out = {};
@@ -386,12 +492,32 @@
                 out.inner_diameter_mm = idMm;
             }
             var kat = basincKatmani(m);
+            // V307/SEKME-GÜVERTE (NK3-H-1): motorun cidarı tohumlanır. Tek
+            // cidarda bu, motorun kendi cidar okuyucusunun sayısıdır
+            // (GÜVENLİK sekmesiyle AYNI okuyucu: readWallThicknessMM ve
+            // künyesi readWallThicknessProvenance); iki katmanlı cidarda
+            // basıncı taşıyan dış kabuk (aşağıda). Kabuk yayımlanmadıysa
+            // astarın kalınlığı kap cidarı diye TOHUMLANMAZ (o katman basıncı
+            // taşımaz): alan boş kalır, sekme kendi önerisini boyutlandırır
+            // ve başlıkta "önerilen cidar" der.
+            motorCidari = null;
+            if (!kat) {
+                var wp = U.readWallThicknessProvenance
+                    ? U.readWallThicknessProvenance(r) : null;
+                if (wp && Number.isFinite(wp.value_mm) && wp.value_mm > 0) {
+                    out.wall_thickness_mm = wp.value_mm;
+                    motorCidari = { mm: wp.value_mm, kaynak: wp.source,
+                                    katman: 'single' };
+                }
+            }
             if (kat && !kat.withheld) {
                 out.meop_bar = kat.mdp_bar;
                 out.inner_diameter_mm = kat.inner_diameter_mm;
                 out.wall_thickness_mm = kat.thickness_mm;
                 out.temperature_K = kat.temperature_K;
                 out.material = kat.material;
+                motorCidari = { mm: kat.thickness_mm, kaynak: null,
+                                katman: 'closeout' };
             } else if (kat && kat.withheld) {
                 // Kabuk yayımlanmadı: hazne değerleri kalır ama hesaptan
                 // gelmiş gibi imlenmez; neden kaynak çipinde.
@@ -402,6 +528,27 @@
                 gk2.inner_diameter_mm = 'closeout_withheld: chamber diameter '
                     + 'shown, not the closeout inner diameter';
                 out[U.WITHHELD_KEY || '__withheld'] = gk2;
+            }
+            // V307/SEKME-GÜVERTE (NK3-H-1): sıvı TEK cidarda malzeme motorun
+            // kamara malzemesidir (GÜVENLİK sekmesiyle aynı okuyucu,
+            // structural_analysis.chamber_structure.material_key). ÖLÇÜLDÜ
+            // (olcum_once_1.json, sıvı L1 ss 304): sekme panel varsayılanı
+            // Al 6061-T6 ile hesaplıyordu. Yanıtta malzeme yoksa varsayılan
+            // kalır ve adıyla beyan edilir (katı/hibrit deseni).
+            var _mtS = (window.AnalysisDock && typeof window.AnalysisDock.getMotorType === 'function')
+                ? window.AnalysisDock.getMotorType() : undefined;
+            if (_mtS === 'liquid' && !kat) {
+                var kamaraMalz = U.readChamberMaterial ? U.readChamberMaterial(r) : undefined;
+                if (typeof kamaraMalz === 'string' && kamaraMalz) {
+                    out.material = kamaraMalz;
+                } else {
+                    out.material = VARSAYILAN_MALZEME;
+                    var gk3 = out[U.WITHHELD_KEY || '__withheld'] || {};
+                    gk3.material = 'chamber_material_not_in_results: the liquid '
+                        + 'engine result publishes no chamber material, so the '
+                        + 'panel default ' + VARSAYILAN_MALZEME + ' is used';
+                    out[U.WITHHELD_KEY || '__withheld'] = gk3;
+                }
             }
             // V301/K-C1 (KT-22): katı sayfada malzeme ana tasarımın KASA
             // malzemesidir (structural_analysis.case_analysis.case_material).

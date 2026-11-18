@@ -131,6 +131,19 @@ def _satir_rengi(html, etiket, pencere=900):
 # eskisi gibi atlanıyor), ``axial_buckling_safety_factor = None``,
 # ``axial_compression_force_N = 0.0``, ``governing_load_case = unpressurized``
 # ve ``safety_factor_is_tautological`` beş modda da ``True``.
+#
+# V307/KIRMIZI-B (16 Kas 2026) — ZORUNLU ALANLAR ARTIK PANELİN TANIM DEĞERİ
+# DEĞİL. SEKME-GÜVERTE kalem 4 (NK3-H-7; fcd5869dd, 36eb497bf) motordan gelen
+# büyüklüklerin gizli tanım değerlerini kaldırdı: yapısal 40 bar / Ø 0,1 m /
+# 0,5 m / boğaz 0,02 m, cıvata 40 bar / Ø 100 mm, güvenlik 40 bar / 3000 K /
+# 1000 N / Ø 0,1 m / 5 mm. Alanlar boş + ``required`` (panel ``register``
+# spec'i); boşsa güverte isteği GÖNDERMEZ ve alanı adıyla söyler. Aşağıdaki
+# gövdelerde bu alanların değerleri AYNI kaldı, ama artık KULLANICININ (ya da
+# motor tohumunun) doldurduğu değerler olarak: bu dosyanın öbür bekçileri
+# aynı yanıtı ölçmeye devam eder. Bağı ölçen bekçi (aşağıda
+# ``TestPanelVarsayilaniKosabilir``) panelin varsayılanda göndermediği her
+# alanın panelin ZORUNLU beyanında olduğunu ve uç tarafının o alan yokken
+# adıyla reddettiğini ölçer.
 YAPISAL_GOVDE = {
     'chamber_pressure': 40, 'chamber_diameter': 0.1, 'chamber_length': 0.5,
     'throat_diameter': 0.02,
@@ -363,13 +376,37 @@ class TestBurkulmaHukmu:
         # Rozetin `title` niteliği SAYILMAZ: üzerine gelmeden okunmayan bir
         # metin ekranda değildir. Gerekçe kendi paragrafında, alan adıyla
         # birlikte basılmalı.
+        #
+        # V307/KIRMIZI-B — BEKLENTİ DEĞİŞTİ (SEKME-GÜVERTE kalem 2, NK3-K-2;
+        # 8b8854896). Eski: görünür paragraf "<span>applied_axial_stress_
+        # pressurized_basis</span>: <ucun İngilizce cümlesi>". Yeni: makine
+        # adı ve ucun İngilizce cümlesi görünür metinden indi (ORTAK: ham
+        # anahtar kullanıcıya gösterilmez; TR ekranda İngilizce cümle görünür
+        # metinde durmaz — V3.0.5 SIVI-CIDAR / DİL "Teknik ayrıntı" deseni).
+        # Görünür satır kullanıcı dilinde bir ÖZET başlığıdır ve iddianın
+        # kendisini söyler ("... neden tam sıfır olabilir"); ucun cümlesi
+        # AYNEN kendi paragrafında, kapalı ``hd-teknik-ayrinti`` kutusunda,
+        # alanın adresi gizli makine çapasında (``data-machine-field``).
+        # Bekçinin özü korunur: gerekçe bir ``title`` niteliği değil, bir
+        # tıkla açılan kendi paragrafıdır ve görünür özet sıfır iddiasını
+        # taşır. Kutunun varsayılan KAPALI olduğu test_z5_rozet_dock
+        # envanterinde adıyla durur.
         html = r['html']
         m = re.search(
-            r'<p[^>]*>\s*<span[^>]*>\s*applied_axial_stress_pressurized_basis'
-            r'\s*</span>\s*:\s*(.{0,80})', html, re.S)
+            r'<details[^>]*class="[^"]*hd-teknik-ayrinti[^"]*"[^>]*>\s*'
+            r'<summary[^>]*>([^<]+)</summary>\s*'
+            r'<p[^>]*>\s*<span[^>]*data-machine-field='
+            r'"applied_axial_stress_pressurized_basis"[^>]*>[^<]*</span>'
+            r'(.*?)</p>\s*</details>', html, re.S)
         assert m, ('ucun kendi gerekçesi ("0 tam olarak sıfırdır, eksik '
-                   'model değil") ekranda kendi paragrafında basılmıyor')
-        assert gerekce[:30] in html, 'gerekçe metni ekrana inmiyor'
+                   'model değil") kendi paragrafında, makine çapasıyla ve '
+                   'görünür bir özet başlığının altında basılmıyor')
+        ozet = ' '.join(m.group(1).split())
+        assert ozet and 'applied_axial' not in ozet, (
+            'özet başlığı boş ya da ham alan adı: %r' % ozet)
+        assert 'zero' in ozet.lower() or 'sıfır' in ozet.lower(), (
+            'görünür özet sıfır iddiasını söylemiyor: %r' % ozet)
+        assert gerekce[:30] in m.group(2), 'gerekçe metni paragrafa inmiyor'
 
 
 # ---------------------------------------------------------------------------
@@ -704,7 +741,9 @@ const sandbox = {
     Promise, isFinite, parseFloat, parseInt, document: doc,
     AnalysisDock: { ui: {}, util: {}, register: function (s) {
         yakalanan = { id: s.id, endpoint: s.endpoint || null,
-                      fields: (s.fields || []).map(f => [f[0], f[2]]) };
+                      fields: (s.fields || []).map(f => [f[0], f[2]]),
+                      required: Array.isArray(s.required)
+                          ? s.required.slice() : [] };
     } },
 };
 sandbox.window = sandbox; sandbox.globalThis = sandbox;
@@ -738,6 +777,11 @@ def _varsayilan_yuk(spec):
     çözülürse payload'a KONUR, çözülmezse (boş dize) KONMAZ — ve
     ``requiredFieldInfo`` sayısal olmayan varsayılanı isteğe bağlı sayar,
     yani istek yine de gönderilir. Seçim kutuları (dizi) ilk seçeneği verir.
+
+    V307/KIRMIZI-B: ``requiredFieldInfo`` panelin ``required`` beyanındaki
+    alanı varsayılanı ne olursa olsun ZORUNLU sayar; o alan boşsa güverte
+    isteği hiç göndermez (``missing``). Bu yük, beyanlı zorunlu alanlar
+    dolmadan gönderilmez; zorunlu alanları gövde (kullanıcının girdisi) ekler.
     """
     yuk = {}
     for ad, varsayilan in spec['fields']:
@@ -808,11 +852,27 @@ class TestPanelVarsayilaniKosabilir:
             '%s varsayılan olarak %s alanlarını da GÖNDERİYOR, bu dosyanın '
             'gövdesinde yoklar — gövde panelin varsayılanının gerisinde '
             'kaldı' % (panel, eksik))
+        # V307/KIRMIZI-B — BEKLENTİ DEĞİŞTİ (SEKME-GÜVERTE kalem 4, NK3-H-7).
+        # Eski: panelin varsayılanda göndermediği hiçbir alan gövdede
+        # olamazdı. Yeni: yalnız panelin ZORUNLU beyanlı (``required``) ve
+        # tanım değeri boş alanı olabilir — o alan boşken güverte istek
+        # göndermez, kullanıcı (ya da motor tohumu) doldurunca gider; gövde
+        # o doldurulmuş hâli temsil eder. Beyansız boş alan gövdede yine
+        # yasak: o alan boşken istek GİDER ve alanı taşımaz.
+        zorunlu = set(spec.get('required') or [])
         gonderilmeyen = sorted(set(govde) & (panel_alanlari - set(beklenen)))
-        assert not gonderilmeyen, (
-            '%s bu alanları varsayılan durumda GÖNDERMİYOR (boş alan), ama '
-            'gövde gönderiyor: %s — gövde artık panelin varsayılan koşumunu '
-            'temsil etmiyor' % (panel, gonderilmeyen))
+        beyansiz = [a for a in gonderilmeyen if a not in zorunlu]
+        assert not beyansiz, (
+            '%s bu alanları varsayılan durumda GÖNDERMİYOR (boş alan) ve '
+            'ZORUNLU da beyan etmiyor, ama gövde gönderiyor: %s — gövde artık '
+            'panelin varsayılan koşumunu temsil etmiyor' % (panel, beyansiz))
+        # Ters yön: panelin boş + zorunlu her alanı gövdede olmalı; yoksa
+        # ucun kapısından geçen yük panelin gönderebileceği bir yük değildir.
+        bos_zorunlu = sorted((zorunlu & panel_alanlari) - set(beklenen))
+        govdede_yok = [a for a in bos_zorunlu if a not in govde]
+        assert not govdede_yok, (
+            '%s bu alanları ZORUNLU beyan ediyor (boşsa istek gitmez) ama '
+            'gövdede yoklar: %s' % (panel, govdede_yok))
 
     @pytest.mark.parametrize('panel,uc,govde', _PANEL_GOVDELERI,
                              ids=[x[0] for x in _PANEL_GOVDELERI])
@@ -823,8 +883,36 @@ class TestPanelVarsayilaniKosabilir:
         ÖLÇÜLDÜ (1 Eyl 2026, birleşik ağaç): ``chamber_temperature`` alanının
         0 varsayılanı ``/analyze_structural_safety`` kapısından 422
         ``invalid_structural_input`` ile dönüyordu.
+
+        V307/KIRMIZI-B: panelin zorunlu alanları artık boş tanımlı; güverte
+        onlar boşken istek göndermez. Uç tarafı ayrıca ölçülür: aynı yük
+        zorunlu alanlar OLMADAN doğrudan gelirse uç ADIYLA reddeder (4xx +
+        alan adı; 500 değil, sessiz sabit değil). ÖLÇÜLDÜ
+        (docs/scofield/raw/OH/V307/kirmizi-b/olc_bos_zorunlu.json): yapısal
+        422 ``incomplete_structural_input`` + ``missing_fields`` (dördü),
+        cıvata 400 "Provide either 'pressure_bar' (with 'seal_diameter_mm')
+        ...", güvenlik 422 ``incomplete_safety_input`` + ``missing_fields``.
         """
         c = _test_client()
+        spec = _panel_spec(panel) if NODE else None
+        if spec is not None:
+            zorunlu = set(spec.get('required') or [])
+            yalin = {k: v for k, v in govde.items() if k not in zorunlu}
+            assert yalin != govde, (
+                '%s gövdesinde zorunlu beyanlı alan yok — ölçüm boş geçerdi'
+                % panel)
+            r = c.post(uc, json=yalin, headers={'Host': '127.0.0.1:8080'})
+            j = r.get_json() or {}
+            assert r.status_code in (400, 422), (
+                '%s zorunlu alanları yokken %s ucu HTTP %s döndü (adlı 4xx '
+                'bekleniyordu): %s' % (panel, uc, r.status_code,
+                                       json.dumps(j, ensure_ascii=False)[:400]))
+            adlanan = set(j.get('missing_fields') or [])
+            metin = str(j.get('error', '')) + ' ' + str(j.get('message', ''))
+            adlanan |= {a for a in zorunlu if a in metin}
+            assert adlanan & zorunlu, (
+                '%s ucu zorunlu alanı ADIYLA anmadan reddetti: %s'
+                % (uc, json.dumps(j, ensure_ascii=False)[:400]))
         r = c.post(uc, json=govde, headers={'Host': '127.0.0.1:8080'})
         if panel in _VARSAYILANI_ADIYLA_EKSIK:
             kod, eksik, tamamlayan = _VARSAYILANI_ADIYLA_EKSIK[panel]

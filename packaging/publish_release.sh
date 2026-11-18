@@ -245,20 +245,20 @@ gh release create "v${VERSION}" "$DMG" "$EXE" \
     ${GH_TASLAK[@]+"${GH_TASLAK[@]}"} \
     "${NOT_ARGS[@]}"
 
-# README'deki doğrudan indirme linklerini yeni sürüme çevir (her yayında güncel kalsın)
-# Python bloğu göreli 'README.md' yolunu kullanır — önce repo köküne geç.
-cd "$SRC"
-python3 - "$VERSION" <<'PY'
-import re, sys
-v = sys.argv[1]
-p = 'README.md'
-s = open(p, encoding='utf-8').read()
-s = re.sub(r'/releases/download/v[\d.]+/', f'/releases/download/v{v}/', s)
-s = re.sub(r'HRMA-Setup-[\d.]+-macOS\.dmg', f'HRMA-Setup-{v}-macOS.dmg', s)
-s = re.sub(r'HRMA-Setup-[\d.]+\.exe', f'HRMA-Setup-{v}.exe', s)
-open(p, 'w', encoding='utf-8').write(s)
-print('README indirme linkleri v' + v + ' oldu — commit etmeyi unutma')
-PY
+# README YAYINDAN SONRA YAZILMAZ (3.0.7 SÜREÇ kalem 7).
+# Eskiden burada README'nin indirme bağlantıları yayından SONRA yeni sürüme
+# çevriliyordu ("commit etmeyi unutma"). Bu, yayınlanan etiketin README'sinin
+# eski bağlantıları taşıdığı ve paket ağacının yayından sonra kirlendiği eski
+# sıranın kalıntısıydı. 3.0.6'dan beri kapı 1/10 bağlantıları yayından ÖNCE
+# ister; 3.0.7'den beri README'yi sürüm adı commit'i yazar
+# (tools/surum_commit_uret.py). Yayın betiği artık ağaca dokunmaz; yalnız
+# yayınlanan ağaçtaki README'nin bu sürüme gittiğini bildirir (kapı atlanmış
+# TASLAK'ta eksikse uyarır).
+if grep -q "/releases/download/v${VERSION}/HRMA-Setup-${VERSION}" "$SRC/README.md" 2>/dev/null; then
+    echo "README indirme bağlantıları v${VERSION} (sürüm adı commit'inden; ağaç değiştirilmedi)"
+else
+    echo "UYARI: README v${VERSION} indirme bağlantısı taşımıyor — tools/surum_commit_uret.py ile yazılmalıydı (ağaç değiştirilmedi)"
+fi
 
 echo "TAMAM: https://github.com/${GH_DEPO}/releases/tag/v${VERSION} (etiket -> ${YAYIN_SHA:0:12})"
 if [ "$TASLAK" = "1" ]; then

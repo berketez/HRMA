@@ -114,6 +114,26 @@ class TestOHD2312RotaCikarimi:
         rotalar = {'/api/export-stl-zip', '/api/export-pdf/<report_type>'}
         assert d18._rotaya_cevir('/api/export-', rotalar) == set()
 
+    def test_sorgu_dizgeli_ve_segment_onegi_kesin_cozulur(self):
+        """V307/KIRMIZI-C: iki yeni kalıp tahmin etmez.
+
+        ``?`` içeren önekte yol TAMDIR (önek değil); ``/`` ile biten önek
+        segment düzeyinde eşlenir ama kuralın kalanı değişkenle başlamalıdır.
+        """
+        rotalar = {'/api/map-packs/labels', '/api/map-packs/<pack_id>',
+                   '/api/tile/<layer_key>/<int:z>/<int:x>/<int:y>',
+                   '/api/tile/cache/clear', '/api/export-stl-zip'}
+        assert d18._onekten_rotalar('/api/map-packs/labels?bbox=',
+                                    rotalar) == {'/api/map-packs/labels'}
+        assert d18._onekten_rotalar('/api/tile/pack_detail/', rotalar) == {
+            '/api/tile/<layer_key>/<int:z>/<int:x>/<int:y>'}
+        # Segment ortasında biten önek ve LİTERAL kuyruklu kural yutulmaz
+        # (``/api/map-packs/<pack_id>/cancel``in kalanı değişken değil).
+        rotalar.add('/api/map-packs/<pack_id>/cancel')
+        assert d18._onekten_rotalar('/api/export-', rotalar) == set()
+        assert d18._onekten_rotalar('/api/map-packs/labels/', rotalar) == set()
+        assert d18._onekten_rotalar('/api/yok/labels?x=', rotalar) == set()
+
     def test_parametrize_listesinden_rota_cozulur(self):
         kaynak = (
             "import pytest\n"

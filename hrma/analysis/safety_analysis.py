@@ -2662,7 +2662,20 @@ class SafetyAnalyzer:
             if motor_data.get(_ad) is not None:
                 _sicaklik_kapisi(_ad, motor_data[_ad])
 
-        chamber_temperature = float(motor_data.get('chamber_temperature', 3000))
+        # V307/GÜVERTE-ISIL (kalem 4) — ODA SICAKLIĞI UYDURULMAZ. Eski satır
+        # ``get('chamber_temperature', 3000)`` idi. ``/analyze_safety`` alanı
+        # artık zorunlu tutuyor (422); bu modülün öbür çağıranı PDF güvenlik
+        # bölümü (``hrma.export.pdf_safety``) sıcaklığı yalnız motor
+        # verisinde VARSA geçiriyordu. ÖLÇÜLDÜ (docs/scofield/raw/OH/V307/
+        # guverte-isil/k4_pdf_once.json): sıcaklığı olmayan motor verisiyle
+        # rapor bölümü ``thermal_safety.chamber_temperature_k = 3000.0``
+        # yayımlıyordu; V307'de orada da zorunlu
+        # (``PDF_SAFETY_REQUIRED_FIELDS``). Bu satır savunma derinliğidir:
+        # yoksa None (yankı alanı; ısı zinciri onsuz koşmaz ve hüküm aşağıdaki
+        # kapıda adıyla geri çekilir).
+        _tc_ham = motor_data.get('chamber_temperature')
+        chamber_temperature = (float(_tc_ham) if _tc_ham is not None
+                               else None)
         wall_thickness = float(motor_data.get('wall_thickness', 0.005) or 0.005)
         chamber_diameter = float(motor_data.get('chamber_diameter', 0.1) or 0.1)
         # ÖH D36 / onemli2-sivi a2: ``get('burn_time', 10) or 10`` kalktı —
@@ -3283,8 +3296,10 @@ class SafetyAnalyzer:
         
         # Auto-ignition analysis
         # P5B2-14: motor tipi tutuşma koluna da geçer (sınıf çözümü için).
+        # V307/GÜVERTE-ISIL (kalem 4): 3000 K varsayılanı kalktı; sıcaklık
+        # yoksa None gider ve sıcak yüzey ölçütü adıyla değerlendirilmez.
         auto_ignition_risk = self._assess_auto_ignition_risk(
-            propellant_type, motor_data.get('chamber_temperature', 3000),
+            propellant_type, motor_data.get('chamber_temperature'),
             motor_type=motor_data.get('motor_type')
         )
         
@@ -4949,14 +4964,29 @@ class SafetyAnalyzer:
                     'note': ('Vapor accumulation near hot components; '
                              'ventilate before approach'),
                     'resolved_class': sinif, 'basis': dayanak}
+        tane_sinifi = (mt in ('solid', 'hybrid')
+                       or sinif in ('composite', 'double_base', 'composite_db',
+                                    'solid_monoprop'))
         try:
-            sicak = (float(chamber_temperature)
-                     > SAFETY_MODEL['autoignition_hot_gas_k'])
+            _tc = float(chamber_temperature)
         except (TypeError, ValueError):
-            sicak = False
-        if sicak and (mt in ('solid', 'hybrid')
-                      or sinif in ('composite', 'double_base', 'composite_db',
-                                   'solid_monoprop')):
+            _tc = None
+        if _tc is not None and not np.isfinite(_tc):
+            _tc = None
+        if _tc is None and tane_sinifi:
+            # V307/GÜVERTE-ISIL (kalem 4): eskiden çağıran 3000 K uyduruyordu
+            # (ölçüt hep "sıcak" çıkıyordu); bugün sıcaklık verilmediyse ölçüt
+            # sessizce "soğuk" sayılıp LOW da denmez — yangın ekseninin
+            # NOT_EVALUATED kanalı (toksik eksenle aynı desen).
+            return {'risk_level': AUTO_IGNITION_NOT_EVALUATED,
+                    'note': ('Auto-ignition risk was not assessed: the '
+                             'chamber temperature was not supplied, so the '
+                             'hot-surface reignition criterion cannot be '
+                             'evaluated.'),
+                    'resolved_class': sinif, 'basis': dayanak}
+        sicak = (_tc is not None
+                 and _tc > SAFETY_MODEL['autoignition_hot_gas_k'])
+        if sicak and tane_sinifi:
             return {'risk_level': 'MEDIUM',
                     'note': ('Residual grain can reignite from hot surfaces; '
                              'enforce cooldown'),

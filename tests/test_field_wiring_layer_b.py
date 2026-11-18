@@ -473,8 +473,8 @@ LEGITIMATE_CONSTANTS = (
     'oxidizer_tank_slosh.slosh.baffle.blocked_area_ratio',
     'oxidizer_tank_slosh.slosh.baffle.recommended_width_ratio',
     # 1 g BEYANI: g_eff sabit standart yerçekimidir ve öyle BEYAN edilir
-    # (hybrid_rocket_engine.py:4132-4140 g_eff_basis: uçuş ivmesi bağlaşımı
-    # NOT_MODELLED). Çözücüye g_eff=self.g0 geçirilir (:4107-4108) ve sonuç
+    # (hybrid_rocket_engine.py g_eff_basis: motor kartı 1 g'dedir; uçuş
+    # ivmesiyle bağlaşım 6-DOF çalkantı alt bölümünde, 3.0.7). Çözücüye g_eff=self.g0 geçirilir (:4107-4108) ve sonuç
     # sözlüğü aynı değeri yankılar (slosh_analysis.py:390).
     'oxidizer_tank_slosh.g_eff_m_s2',
     'oxidizer_tank_slosh.slosh.g_eff',

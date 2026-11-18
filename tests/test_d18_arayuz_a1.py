@@ -208,7 +208,14 @@ class TestP11S1_03CiftinAyniligi:
             f'uyuşmaz çiftte künye {kind!r} — koşuma GİRMEMİŞ bir çift '
             'hükmün kaynağı gibi gösteriliyor')
         assert re.findall(r'data-tps-pair-match="(\w+)"', html) == ['false']
-        assert re.findall(r'data-tps-earned="(\w+)"', html) == ['false']
+        # V307/GÜVERTE-ISIL (kalem 3) — BEKLENTİ DEĞİŞTİ (eski: earned
+        # 'false', sayı basılmaz). Ölçülen kusurda uyuşmayan çift GÜVERTENİN
+        # kendi varsayılanıydı (3000 / 3200). O varsayılanlar kalktı (alanlar
+        # boş; bekçisi tests/test_v307_guverte_isil.py): motorun çiftiyle
+        # uyuşmayan çift artık yalnız kullanıcının forma yazdığı çift
+        # olabilir. Künye yine 'user', uyuşmazlık yine adıyla; sayı
+        # kullanıcının kendi girdisinin sonucu olarak basılır.
+        assert re.findall(r'data-tps-earned="(\w+)"', html) == ['true']
         assert re.findall(r'data-tps-caller-used="(\w+)"', html) == ['false'], (
             'girilen akı kullanılmadığı hâlde caller kancası "false" değil')
 
@@ -219,10 +226,12 @@ class TestP11S1_03CiftinAyniligi:
             'ekran hâlâ "both read from … station" diyor — koşuma girmeyen '
             'çifti okunmuş gibi gösteriyor')
 
-        # FAIL-CLOSED: kazanılmamış sayı basılmaz.
+        # Sayı kullanıcının girdisinin sonucudur (yukarıdaki not).
+        assert 'comes from the form' in html, (
+            'koşuma giren çiftin formdan geldiği söylenmiyor')
         sayi = '%.2f' % guverte_yaniti['required_thickness_mm']
-        assert sayi not in html, (
-            f'kazanılmamış kalınlık ({sayi} mm) hâlâ kartta')
+        assert sayi in html, (
+            f'kullanıcının girdisinin sonucu ({sayi} mm) kartta yok')
 
     @node_gerekli
     def test_cift_ortusuyorsa_kunye_computed(self, tmp_path, kati_motor,
@@ -268,13 +277,18 @@ class TestP11S1_03CiftinAyniligi:
         assert re.findall(r'data-tps-earned="(\w+)"', html) == ['false']
 
     @node_gerekli
-    def test_motor_okunmadiysa_assumed_korunur(self, tmp_path,
-                                               guverte_yaniti):
-        """Gerileme yok: motor hiç okunmadığında künye ESKİSİ GİBİ
-        ``assumed`` kalır (D16'da kazanılan davranış)."""
+    def test_motor_okunmadiysa_kunye_user(self, tmp_path,
+                                          guverte_yaniti):
+        """Motor hiç okunmadığında künye ``user``dır.
+
+        V307/GÜVERTE-ISIL (kalem 3) — BEKLENTİ DEĞİŞTİ (eski: ``assumed``,
+        earned 'false', "panelin kendi varsayılanları"). Panelin çift
+        varsayılanı kalmadı; motor okunmadan koşuma giren çift formdan
+        (kullanıcıdan) gelir. ``assumed`` türü bu panelde artık üretilmez."""
         html = _panel_ciz(tmp_path, {'kati': guverte_yaniti})['ekran']['kati']
-        assert re.findall(r'data-tps-flux-kind="(\w+)"', html) == ['assumed']
-        assert re.findall(r'data-tps-earned="(\w+)"', html) == ['false']
+        assert re.findall(r'data-tps-flux-kind="(\w+)"', html) == ['user']
+        assert re.findall(r'data-tps-earned="(\w+)"', html) == ['true']
+        assert 'come from the form' in html
 
 
 # ===========================================================================

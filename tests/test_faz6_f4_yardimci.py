@@ -236,9 +236,21 @@ class TestT08UcusGovdesi:
 
     @staticmethod
     def _sablon_alanlari(html):
-        """Şablondaki ``ls-a-*`` girdileri: {id: varsayılan} (uydurma yok)."""
-        return dict(re.findall(
-            r'id="(ls-a-[a-z0-9]+)"[^>]*value="([^"]+)"', html))
+        """Şablondaki ``ls-a-*`` girdileri: {id: varsayılan} (uydurma yok).
+
+        V307/FS-UÇUŞ-2 (16 Kas): kanat planformu/açıklığı ve paraşüt
+        alanları BİLEREK varsayılansızdır (boş = uçtaki kaynaklı kanat
+        kuralı / paraşüt yok); onlar ``''`` ile kümeye girer ve gövdede
+        ``null`` beklenir (boş alan gönderilmez). Küme ölçüsü aynı kalır:
+        şablondaki her ``ls-a-*`` girdisi okunmalı, okunan her alan
+        şablonda olmalı.
+        """
+        out = {}
+        for kimlik, nitelik in re.findall(
+                r'<input id="(ls-a-[a-z0-9]+)"([^>]*)>', html):
+            m = re.search(r'value="([^"]+)"', nitelik)
+            out[kimlik] = m.group(1) if m else ''
+        return out
 
     @staticmethod
     def _okunan_alanlar(js):
@@ -297,6 +309,8 @@ class TestT08UcusGovdesi:
         var veh = {propellant_mass: 18, thrust: 6500, burn_time: 7.5,
                    engine_inert_mass: 7};
         var la = 28.6084;
+        // V307/FS-UÇUŞ: gövde saha boylamını da taşır (longitude_deg: lo).
+        var lo = -80.6043;
         %s
         %s
         %s
@@ -331,6 +345,10 @@ class TestT08UcusGovdesi:
         assert not dizgeler, 'dizge olarak giden alanlar (422 sebebi): %r' % dizgeler
         # Şablondaki varsayılanların TA KENDİSİ (sayı teste kopyalanmaz).
         for anahtar, alan in sorted(eslesme.items()):
+            if sablon[alan] == '':
+                # Varsayılansız alan (V307/FS-UÇUŞ-2): boş → null, sayı yok.
+                assert body[anahtar] is None, (anahtar, body[anahtar])
+                continue
             assert body[anahtar] == pytest.approx(float(sablon[alan])), (
                 '%s şablon varsayılanıyla (%s=%s) uyuşmuyor: %r'
                 % (anahtar, alan, sablon[alan], body[anahtar]))

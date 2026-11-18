@@ -6,6 +6,9 @@
     <!-- Yükleme bayt tavanları (app.py inject_upload_limits; import_ui.js okur;
          V3 güvenlik 5. tur): sayı JS'e kopyalanmaz. -->
     <meta name="hrma-upload-limits" content='{{ upload_limits|tojson }}'>
+    <!-- V307/GÜVERTE-ISIL: ısıl koruma sekmesinin kip başına zorunlu alanları
+         = ucun kapısı (app.py thermal_protection_form_contract); protection_panel.js okur. -->
+    <meta name="hrma-tp-mode-required" content='{{ tp_mode_required|tojson }}'>
     <!-- i18n katmanı: çekirdek + bu sayfanın sözlüğü. Sıra ÖNEMSİZ (register kuyruğu
          var) ama okunabilirlik için çekirdek önce yükleniyor. -->
     <script src="/static/js/i18n.js"></script>
@@ -1865,6 +1868,10 @@
             <div class="panel">
                 <h2 data-i18n="solid.ui.performance_summary">Performance Summary</h2>
                 <div id="performanceMetrics"></div>
+                <!-- V307 KATI-DOĞRULAMA faz 3 (karar 3): teslim performansının
+                     dayanağı. Yalnız çözücünün delivered_performance_basis
+                     bloğundan beslenir; blok yoksa not HİÇ çizilmez. -->
+                <div id="deliveredBasisNote"></div>
             </div>
 
             <!-- Monte Carlo Analizi (Üretim Toleransları) — gerçek backend
@@ -6913,12 +6920,23 @@
                 '<div style="min-width:0;"><div id="mc_hist_isp" class="plot-container plot-compact" style="margin:0;"></div></div>' +
                 '</div>';
 
-            const failWarn = (mc.n_failed_runs > 0)
+            // V307 KATI-DOĞRULAMA faz 3 (karar 3): emniyet sınırında duran
+            // örnekler ayrı sayılır ve adıyla söylenir (çözücü alanı
+            // n_safety_limit_runs; yoksa satır çizilmez).
+            const sinirSatiri = (typeof mc.n_safety_limit_runs === 'number'
+                                 && mc.n_safety_limit_runs > 0)
+                ? '<p data-mc-safety-limit style="margin-top:4px; font-size:13px; color:#ffd166;">'
+                  + TF('solid.js.mc_safety_limit_runs',
+                       { n: mc.n_safety_limit_runs, total: mc.n_failed_runs },
+                       '{n} of these {total} stopped on the simulation safety limit (chamber pressure or burn time) before burnout. They count as failures, and the peak-pressure statistics cover only the runs that burned out.')
+                  + '</p>'
+                : '';
+            const failWarn = ((mc.n_failed_runs > 0)
                 ? '<p style="margin-top:6px; font-size:13px; color:#ffd166;">'
                   + TF('solid.js.mc_failed_runs', { n: mc.n_failed_runs },
                        '{n} runs did not converge (excluded from the statistics).')
                   + '</p>'
-                : '';
+                : '') + sinirSatiri;
 
             // V306/BAYAT (kalem 5): kabul ölçütü cümlesi çözücüde YALNIZ
             // Türkçe ve noktalı ondalıkla kuruluyordu (EN ekranda Türkçe
@@ -7025,24 +7043,137 @@
             }
         }
 
+        // ===== V307 KATI-DOĞRULAMA faz 3 — TESLİM PERFORMANSININ DAYANAĞI =====
+        // Performans Özeti'nin altındaki küçük not. Üç satır: yanma verimi
+        // (varsayım mı, girdi mi), tablo lüle verimi (iki fazlı kaybı içermez),
+        // iki fazlı kayıp (uygulandı / hesaplanamadı). Bütün değerler
+        // results.delivered_performance_basis bloğundan okunur; eksik alan
+        // için sayı yazılmaz, satır atlanır.
+        function deliveredBasisNoteHtml(results) {
+            const b = (results || {}).delivered_performance_basis;
+            if (!b || typeof b !== 'object') return '';
+            const kac = function (x) {
+                return String(x).replace(/&/g, '&amp;').replace(/</g, '&lt;')
+                    .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+            };
+            const sayi = function (v) { return typeof v === 'number' && isFinite(v); };
+            const satirlar = [];
+            const c = b.combustion_efficiency || {};
+            if (sayi(c.value)) {
+                satirlar.push(c.source === 'user_input'
+                    ? TF('solid.basis.combustion_user', { value: fmtNum(c.value, 3) },
+                        'Combustion efficiency {value}: value from the form, not verified.')
+                    : TF('solid.basis.combustion_assumed', { value: fmtNum(c.value, 3) },
+                        'Combustion efficiency {value}: assumed default, not verified.'));
+            }
+            const n = b.nozzle_efficiency_table || {};
+            if (sayi(n.value)) {
+                satirlar.push(n.source === 'request_field'
+                    ? TF('solid.basis.nozzle_form', { value: fmtNum(n.value, 3) },
+                        'Nozzle efficiency {value}: value from the form; it replaces the propellant-table value, and which losses it covers is not known to the solver.')
+                    : TF('solid.basis.nozzle_table', { value: fmtNum(n.value, 3) },
+                        'Nozzle table efficiency {value}: divergence and friction of a 15° cone; the two-phase loss is not part of it (NASA SP-8039).'));
+            }
+            const kin = b.kinetic_efficiency || {};
+            if (kin.source === 'request_field' && sayi(kin.value)) {
+                satirlar.push(TF('solid.basis.kinetic_form', { value: fmtNum(kin.value, 3) },
+                    'Kinetic efficiency {value}: value from the form.'));
+            }
+            const t = b.two_phase_loss || {};
+            if (t.applied_to_isp === true && sayi(t.applied_loss_percent)) {
+                if (t.applied_source === 'user_input') {
+                    satirlar.push(TF('solid.basis.two_phase_user',
+                        { loss: fmtNum(t.applied_loss_percent, 2) },
+                        'Two-phase loss {loss} %: applied from the factor you entered (it replaces the built-in estimate).'));
+                } else {
+                    const bant = Array.isArray(t.applied_loss_band_percent)
+                        && t.applied_loss_band_percent.length === 2
+                        && sayi(t.applied_loss_band_percent[0])
+                        && sayi(t.applied_loss_band_percent[1]);
+                    satirlar.push(bant
+                        ? TF('solid.basis.two_phase_module_band',
+                            { loss: fmtNum(t.applied_loss_percent, 2),
+                              low: fmtNum(t.applied_loss_band_percent[0], 2),
+                              high: fmtNum(t.applied_loss_band_percent[1], 2) },
+                            'Two-phase loss {loss} % (band {low}–{high} %): applied, built-in estimate from NASA SP-8039; not verified for this propellant.')
+                        : TF('solid.basis.two_phase_module',
+                            { loss: fmtNum(t.applied_loss_percent, 2) },
+                            'Two-phase loss {loss} %: applied, built-in estimate from NASA SP-8039; not verified for this propellant.'));
+                }
+            } else if (t.applied_to_isp === false) {
+                if (t.not_applied_reason === 'request_efficiency_supplied'
+                        && sayi(t.not_applied_estimate_percent)) {
+                    // V307 KATI KARAR 0 (b): form lüle / kinetik verim
+                    // gönderiyorsa yerleşik tahmin üstüne binmez (çift sayım).
+                    satirlar.push(TF('solid.basis.two_phase_request_efficiency',
+                        { loss: fmtNum(t.not_applied_estimate_percent, 2) },
+                        'Two-phase loss: the built-in estimate ({loss} %) is not applied, because the nozzle or kinetic efficiency comes from the form. An entered efficiency is taken to cover the two-phase loss already. Clear both fields to use the built-in estimate, or enter your own two-phase loss factor.'));
+                } else if (sayi(t.condensed_mass_fraction) && t.condensed_mass_fraction === 0) {
+                    satirlar.push(T('solid.basis.two_phase_none',
+                        'Two-phase loss: none, this propellant has no condensed phase in its exhaust.'));
+                } else if (t.calculable === false) {
+                    satirlar.push(T('solid.basis.two_phase_not_calculable',
+                        'Two-phase loss: NOT included and cannot be calculated for this propellant or motor size. That is not a zero loss: the real motor delivers less than the values above.'));
+                } else {
+                    satirlar.push(T('solid.basis.two_phase_not_included',
+                        'Two-phase loss: NOT included in the values above.'));
+                }
+            }
+            if (!satirlar.length) return '';
+            const ipucu = T('solid.basis.tip',
+                'What separates the values above from the theoretical ones. Combustion efficiency (0.5 to 1) scales the characteristic velocity: a lower value lowers pressure, thrust and specific impulse and lengthens the burn. The nozzle table efficiency comes from the propellant table and covers divergence and friction. The two-phase loss is the drag of condensed particles in the nozzle; it is applied only where the published correlation covers the propellant and the motor size (condensed fraction up to 40 %, throat from 25.4 mm), and only when the nozzle and kinetic efficiency fields are empty: an entered efficiency is taken to cover it already. Enter your own values in the efficiency fields to replace the defaults; blank fields keep the defaults shown here.');
+            return '<div data-delivered-basis-note style="margin-top:10px; padding:8px 10px;'
+                + ' font-size:12px; line-height:1.5; color:var(--hd-ink-dim, #7d97a5);'
+                + ' border-left:3px solid var(--hd-line, rgba(0,229,255,0.35));">'
+                + '<div style="font-size:13px; color:var(--hd-ink, #cfe8f2);"><strong>'
+                + kac(T('solid.basis.title', 'Basis of the delivered performance'))
+                + '</strong> <div class="tooltip"><div class="tooltip-icon">?</div>'
+                + '<span class="tooltip-text">' + kac(ipucu) + '</span></div></div>'
+                + satirlar.map(function (x) { return '<div>' + kac(x) + '</div>'; }).join('')
+                + '</div>';
+        }
+        function renderDeliveredBasisNote(results) {
+            const kap = document.getElementById('deliveredBasisNote');
+            if (kap) kap.innerHTML = deliveredBasisNoteHtml(results);
+        }
+        // ===== /TESLİM PERFORMANSININ DAYANAĞI =====
+
         function displayResults(results) {
             document.getElementById('results').style.display = 'block';
+            renderDeliveredBasisNote(results);
             
             // Performans metrikleri — hd-metric HUD kartları
             // (app.js displayPerformanceMetrics deseni; HRMAHud yoksa düz metin)
             const metricsDiv = document.getElementById('performanceMetrics');
+            // V307/SEKME-MOTOR (NK3-K-7): test irtifası / ortam basıncı
+            // verildiğinde itki eğrisi o ortamda çözülür; ortalama ve tepe
+            // itki, toplam impuls ve itki katsayısı O ORTAMIN sayılarıdır.
+            // Ölçüldü (L2, 20 000 m; olcum/ui/once_kati_irtifa.json):
+            // "DENİZ SEVİYESİ ISP 224,7" ile etiketsiz "ORTALAMA İTKİ 14718 /
+            // TOPLAM İMPULS 29906 / İTKİ KATSAYISI 1,80" yan yanaydı; deniz
+            // seviyesi impulsu (24 316 N·s) ve deniz seviyesindeki akış
+            // ayrılması (design_ambient.sea_level_flow_separated) ekranda
+            // yoktu. Ortam deniz seviyesi değilse ortama bağlı her kart
+            // ortamını adıyla söyler; deniz seviyesi impulsu ayrı kartta.
+            // Sayıların hepsi çözücünün kendi alanları (design_ambient.*).
+            const _da = results.design_ambient || null;
+            const _testOrtami = !!(_da && _da.is_sea_level === false);
+            const _slAyrildi = !!(_da && _da.sea_level_flow_separated === true);
             const metrics = [
-                { label: T('solid.msg.sea_level_isp', 'Sea Level Isp'), value: results.isp_sea_level, decimals: 1, unit: 's' },
+                { label: (_testOrtami && _slAyrildi)
+                      ? T('solid.msg.sea_level_isp_separated', 'Sea Level Isp (flow separated)')
+                      : T('solid.msg.sea_level_isp', 'Sea Level Isp'),
+                  value: results.isp_sea_level, decimals: 1, unit: 's' },
                 // V306/KATI-MODEL (M-KATI-20): eğrinin çözüldüğü ortam deniz
                 // seviyesi değilse o ortamın Isp'si AYRI kartta, ortamıyla.
                 // Ortamın kendisi (irtifa, basınç) atmosfer alanının altında
                 // tek yerde yazılır (renderSolverAmbientNote).
-                ...((results.design_ambient && results.design_ambient.is_sea_level === false)
+                ...(_testOrtami
                     ? [{ label: T('solid.msg.isp_test_ambient', 'Isp at test ambient'),
                          value: results.isp_design_ambient, decimals: 1, unit: 's' }]
                     : []),
                 { label: T('solid.msg.vacuum_isp', 'Vacuum Isp'), value: results.isp_vacuum, decimals: 1, unit: 's' },
-                { label: T('solid.msg.average_thrust', 'Average Thrust'), value: results.average_thrust, decimals: 0, unit: 'N' },
+                { label: _testOrtami ? T('solid.msg.average_thrust_test_ambient', 'Average Thrust at test ambient') : T('solid.msg.average_thrust', 'Average Thrust'), value: results.average_thrust, decimals: 0, unit: 'N' },
                 // V301/K-C1 (NK-28): katı motorun en kritik iki sayısı. Tepe
                 // itki yanıtın `max_thrust` alanı (yönetici özetinin
                 // 'Maximum Thrust'ı ile aynı); tepe oda basıncı çözücünün
@@ -7050,15 +7181,30 @@
                 // (cidar ve boğaz bu basınçla boyutlanır). Alan yoksa kart
                 // 'n/a' basar; MEOP diye ayrı bir alan YAYIMLANMIYOR, bu
                 // yüzden kart uydurulmadı.
-                { label: T('solid.msg.peak_thrust', 'Peak Thrust'), value: results.max_thrust, decimals: 0, unit: 'N' },
+                { label: _testOrtami ? T('solid.msg.peak_thrust_test_ambient', 'Peak Thrust at test ambient') : T('solid.msg.peak_thrust', 'Peak Thrust'), value: results.max_thrust, decimals: 0, unit: 'N' },
                 { label: T('solid.msg.peak_chamber_pressure', 'Peak Chamber Pressure'), value: (results.throat_sizing || {}).peak_chamber_pressure_bar, decimals: 1, unit: 'bar' },
-                { label: T('solid.msg.burn_time', 'Burn Time'), value: results.burn_time, decimals: 2, unit: 's' },
+                // V307/SEKME-MOTOR (KATI-DOĞRULAMA D4): yayımlanan süre ET
+                // TÜKENME süresidir (anlık tutuşma, eş zamanlı tükeniş; tutuşma
+                // yükselişi ve kuyruk yok). Test kayıtları etki süresini taşır;
+                // kart adını ve tanımını söyler, sayı değişmez.
+                { label: T('solid.msg.burn_time_web', 'Burn Time (web burnout)'), value: results.burn_time, decimals: 2, unit: 's',
+                  tip: 'solid.tip.burn_time_web',
+                  tipEn: T('solid.tip.burn_time_web', 'Web burnout time: from ignition until the propellant web is consumed, with instantaneous ignition and simultaneous burnout of the whole web (the ignition rise and the tail-off are not modelled; the curve drops to zero at burnout). Average thrust = total impulse / this time. Test records usually give the action time (from the 5 % thrust threshold, AEDC-TR-74-83 definition), which includes the ignition rise and the tail-off and is therefore usually a few percent longer: compare the two only on the same definition.') },
                 // V306/RAPOR-HATA (M-KATI-18 / kalem 6b): manşet 'kN·s' ve 1 ondalıkla
                 // İKİ anlamlı basamağa iniyordu (L1 2 125,6 N·s ve KDX-002 2 087,0 N·s
                 // ikisi de '2,1 kN·s'); itki kartlarının kuralıyla (N, tam sayı) basılır.
-                { label: T('solid.msg.total_impulse', 'Total Impulse'), value: results.total_impulse, decimals: 0, unit: 'N·s' },
+                { label: _testOrtami ? T('solid.msg.total_impulse_test_ambient', 'Total Impulse at test ambient') : T('solid.msg.total_impulse', 'Total Impulse'), value: results.total_impulse, decimals: 0, unit: 'N·s' },
+                // Yerden fırlatılan araç için deniz seviyesi impulsu: AYNI
+                // lüle, aynı Pc(t), deniz seviyesi basıncında (çözücünün
+                // design_ambient.total_impulse_sea_level_ns alanı).
+                ...(_testOrtami
+                    ? [{ label: _slAyrildi
+                             ? T('solid.msg.total_impulse_sea_level_separated', 'Total Impulse at sea level (flow separated)')
+                             : T('solid.msg.total_impulse_sea_level', 'Total Impulse at sea level'),
+                         value: _da.total_impulse_sea_level_ns, decimals: 0, unit: 'N·s' }]
+                    : []),
                 { label: T('solid.msg.c_efficiency', 'C* Efficiency'), value: results.detailed_analysis?.performance_metrics?.c_star_efficiency_percent, decimals: 1, unit: '%' },
-                { label: T('solid.msg.thrust_coefficient', 'Thrust Coefficient'), value: results.detailed_analysis?.performance_metrics?.average_thrust_coefficient, decimals: 2, unit: '' },
+                { label: _testOrtami ? T('solid.msg.thrust_coefficient_test_ambient', 'Thrust Coefficient at test ambient') : T('solid.msg.thrust_coefficient', 'Thrust Coefficient'), value: results.detailed_analysis?.performance_metrics?.average_thrust_coefficient, decimals: 2, unit: '' },
                 { label: T('solid.ui.propellant_mass', 'Propellant Mass'), value: results.propellant_mass, decimals: 2, unit: 'kg' }
             ];
 
@@ -7089,10 +7235,12 @@
                             : '<span>n/a</span>';
                         const onBirim = (m.unit === '%' && yuzdeOnde) ? '<small>%</small>' : '';
                         const sonBirim = onBirim ? '' : `<small>${m.unit}</small>`;
+                        const ipucu = (m.tip && window.HRMAHelp)
+                            ? window.HRMAHelp.html(m.tip, m.tipEn) : '';
                         html += `
                             <div class="hd-metric">
                                 <div class="hd-metric-head">
-                                    <div class="hd-metric-label">${m.label}</div>
+                                    <div class="hd-metric-label">${m.label}${ipucu}</div>
                                 </div>
                                 <div class="hd-metric-value">
                                     ${onBirim}${countSpan}${sonBirim}
@@ -7138,6 +7286,19 @@
                 // hüküm ÜRETMEZ, yalnız taşır.
                 metricsDiv.insertAdjacentHTML(
                     'beforeend', twoPhaseStatusBannerHTML(results));
+                // V307/SEKME-MOTOR (NK3-K-7): deniz seviyesi Isp'si ve
+                // impulsu ayrılmış akışla çözüldüyse kartların altında
+                // adıyla (çözücünün design_ambient.sea_level_flow_separated
+                // hükmü; ölçüt çözücünün kesik lüle Summerfield modeli).
+                if (_testOrtami && _slAyrildi) {
+                    metricsDiv.insertAdjacentHTML('beforeend',
+                        '<p data-sl-note="separated" style="margin:6px 0 0 0;'
+                        + ' font-size:0.8rem; line-height:1.35;'
+                        + ' overflow-wrap:anywhere; color:var(--hd-orange, #ff8c33);">'
+                        + T('solid.msg.sea_level_separated_note',
+                            'At sea level this nozzle runs with flow separation (the solver\'s truncated-nozzle Summerfield criterion): the sea-level Isp and the sea-level total impulse above are those of the separated flow. The thrust curve and the cards marked "at test ambient" are solved at the test ambient.')
+                        + '</p>');
+                }
             }
 
             // ÖH D36 · onemli2-kati · E-2: aynı durum, alanın kendi yanında.
@@ -7913,6 +8074,9 @@
                 case 'not_applied_unverified':
                     return ortakMetin('solidtp.status.not_applied_unverified',
                              'not applied: no user multiplier (unverified)');
+                case 'module_estimate_applied':
+                    return ortakMetin('solidtp.status.module_estimate_applied',
+                             'applied: built-in size-corrected estimate (NASA SP-8039 anchors; not verified for this propellant)');
                 default:
                     return ortakMetin('solidtp.status.unknown', 'unknown status: {status}',
                                       { status: String(durum) });
@@ -10146,6 +10310,8 @@
          + besleme sistemi (katıda yalnız water hammer sekmesi görünür) -->
     <script src="/static/js/panels/cooling_panel.js"></script>
     <script src="/static/js/panels/feed_panel.js"></script>
+    <!-- 3.0.7 K5: tank çalkantı modeli bölümü (Besleme → Çalkantı) -->
+    <script src="/static/js/calkanti_panel.js"></script>
     <!-- COMPARE paneli: snapshot tabanlı konfigürasyon karşılaştırması -->
     <script src="/static/js/panels/comparative_panel.js"></script>
     <!-- v2.5.0 G3 panelleri: Monte Carlo belirsizlik (UNCERTAINTY)

@@ -490,10 +490,15 @@ class TestS4BayatOneri:
 @needs_node
 class TestS5BosAlanIkiHal:
     def test_zorunlu_bos_ve_istege_bagli_bos_ayri_not(self, motorlar):
+        # V307/SEKME-GÜVERTE (NK3-H-7): zorunlu-boş örneği oda basıncı;
+        # tazeleme onu yeniden doldurmasın diye ikinci adımın sonucu oda
+        # basıncını yayımlamaz (motorun yayımlamadığı zorunlu büyüklük).
+        pc_yok = dict(motorlar['liquid'])
+        pc_yok.pop('chamber_pressure', None)
         d = dock_senaryo('liquid', [
             {'ad': 'k1', 'eylem': 'init', 'sonuc': motorlar['liquid']},
-            {'ad': 'bos', 'eylem': 'bosalt',
-             'alanlar': [['performance', 'base_heat_flux']]},
+            {'ad': 'bos', 'eylem': 'bosalt', 'sonuc': pc_yok,
+             'alanlar': [['performance', 'chamber_pressure']]},
         ], panel_kimlikleri=['thermal', 'structural', 'performance'],
             anahtar_isaretle=True)
         # V3.0.5 T-ÇAPA-C1 — ÖRNEK DEĞİŞTİ (V301/ÖRNEK-PANEL 178aba381):
@@ -508,8 +513,10 @@ class TestS5BosAlanIkiHal:
         assert opt['kind'] == 'missing'
         assert '⟦dock.src.fieldBlankOptional⟧' in opt['title'], opt['title']
         assert '⟦dock.src.fieldMissing⟧' not in opt['title']
+        # V307/SEKME-GÜVERTE (NK3-H-7): zorunlu örnek oda basıncı (beyanlı
+        # zorunlu); taban ısı akısı artık isteğe bağlı kullanıcı referansı.
         p = d['olcumler'][1]['paneller']['performance']
-        zor = p['cipler']['base_heat_flux']
+        zor = p['cipler']['chamber_pressure']
         assert zor['kind'] == 'missing'
         assert '⟦dock.src.fieldMissing⟧' in zor['title'], zor['title']
         assert '⟦dock.src.fieldBlankOptional⟧' not in zor['title']
@@ -725,8 +732,12 @@ def _sentetik_sivi(**degisiklik):
     # V3.0.5 T-ÇAPA-C1: 'burn_time' — ısıl panelde ZORUNLU alan
     # (V301/ÖRNEK-PANEL 178aba381); bu kurgu süreyi sınamaz, iki koşuda da
     # aynı değeri taşır ki ısıl gövde kurulsun.
+    # V307/SEKME-GÜVERTE (NK3-H-7): yapısal panelin boğaz çapı artık
+    # ZORUNLU (tanım değeri yok; eskiden gizli 0,02 m ile koşuyordu); kurgu
+    # motoru boğazı da yayımlar (sıvı üst düzey boğaz çapı METRE).
     r = {'chamber_pressure': 70.0, 'chamber_temperature': 3500.0,
          'chamber_diameter': 120.0, 'chamber_length': 300.0,
+         'throat_diameter': 0.05,
          'total_mass_flow': 5.5, 'burn_time': 10.0,
          'structural_analysis': {'chamber_structure': {
              'material_key': 'ss_304', 'wall_thickness': 4.0}}}
@@ -757,12 +768,18 @@ def _tanim(pid):
 class TestSartSahteVeriB:
 
     def test_x1_sonlu_varsayilanli_alan_tanim_varsayilanina_doner(self):
-        """(X1) Sonlu varsayılanlı alan (termal ``chamber_pressure``, tanım
-        40) A'da önerilip (70) B'de önerilmeyince TANIM varsayılanına döner
-        — boşa değil; gövde, B ile sıfırdan açılan güvertenin gövdesiyle
-        AYNI (geçmişten bağımsızlık). Denetçi X1: alan hep boşa döner."""
+        """(X1) A'da önerilip (70) B'de önerilmeyen alan TANIM değerine
+        döner; hâl, B ile sıfırdan açılan güvertenin hâliyle AYNI (geçmişten
+        bağımsızlık). Denetçi X1: alan bayat kalır.
+
+        V307/SEKME-GÜVERTE (NK3-H-7): termal ``chamber_pressure``ın tanım
+        değeri artık BOŞ ve alan ZORUNLU (eskiden 40: son hesap motorun oda
+        basıncını yayımlamadığında sekme o gizli 40 bar'la başka bir motoru
+        değerlendiriyordu). Mekanizma aynı — tanım değerine dönüş — ama
+        tanım değeri boş olduğu için B'de istek GÖNDERİLMEZ ve alan adıyla
+        söylenir; sıfırdan açılan güverte de aynı hâlde."""
         tanim = _tanim('thermal')
-        assert tanim['chamber_pressure'] == 40          # kurgu: sonlu varsayılan
+        assert tanim['chamber_pressure'] == ''          # kurgu: tanım değeri yok
         d = dock_senaryo('liquid', [
             {'ad': 'k1', 'eylem': 'init', 'sonuc': SENTETIK_A},
             {'ad': 'k2', 'eylem': 'refresh', 'sonuc': SENTETIK_B},
@@ -776,10 +793,12 @@ class TestSartSahteVeriB:
         # önkoşul: A gerçekten önerdi
         assert k1['alanlar']['chamber_pressure'] == '70', k1['alanlar']
         assert k1['govde']['chamber_pressure'] == 70
-        # B: tanım varsayılanı (ekranda ve gövdede), boş değil
+        # B: tanım değeri (boş); zorunlu alan boş → istek gönderilmez ve
+        # alan adıyla söylenir — sıfırdan açılan güverteyle AYNI hâl.
         assert k2['alanlar']['chamber_pressure'] == str(tanim['chamber_pressure'])
-        assert k2['govde'] is not None, k2['durum']
-        assert k2['govde']['chamber_pressure'] == tanim['chamber_pressure']
+        assert k2['govde'] is None, k2['govde']
+        assert 'Required fields are empty' in k2['durum'], k2['durum']
+        assert 'Chamber Pressure (bar)' in k2['durum'], k2['durum']
         assert k2['govde'] == t['govde'], (k2['govde'], t['govde'])
         assert k2['alanlar'] == t['alanlar']
 
@@ -790,12 +809,15 @@ class TestSartSahteVeriB:
         yazılmazsa alan A'nın malzemesinde bayat kalır."""
         tanim = _tanim('thermal')
         assert tanim['material'] == 'steel'
+        # V307/SEKME-GÜVERTE: B yalnız malzemeyi düşürür (oda basıncı artık
+        # zorunlu alan; düşerse istek hiç kurulmaz — X1).
+        b_malz = _sentetik_sivi(material_key=None)
         d = dock_senaryo('liquid', [
             {'ad': 'k1', 'eylem': 'init', 'sonuc': SENTETIK_A},
-            {'ad': 'k2', 'eylem': 'refresh', 'sonuc': SENTETIK_B},
+            {'ad': 'k2', 'eylem': 'refresh', 'sonuc': b_malz},
         ], panel_kimlikleri=['thermal'])
         taze = dock_senaryo('liquid', [
-            {'ad': 'k', 'eylem': 'init', 'sonuc': SENTETIK_B},
+            {'ad': 'k', 'eylem': 'init', 'sonuc': b_malz},
         ], panel_kimlikleri=['thermal'])
         k1 = d['olcumler'][0]['paneller']['thermal']
         k2 = d['olcumler'][1]['paneller']['thermal']

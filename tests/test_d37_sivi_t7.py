@@ -244,6 +244,26 @@ ESKI_ON_DOLGU = {'channel_width': 2.0, 'channel_height': 3.0,
 REGEN_ZORUNLU_ALANLAR = ['n_channels', 'coolant', 'coolant_inlet_temp',
            'coolant_inlet_pressure', 'channel_width', 'channel_height',
            'wall_thickness']
+#: V307/KIRMIZI-B — SEKME-GÜVERTE kalem 4 (NK3-H-7 ailesi; fcd5869dd):
+#: rejeneratif sekmenin motor büyüklüklerinin gizli tanım değerleri kalktı
+#: (50 bar, 3400 K, boğaz Ø 0,05 m, ε 8, γ 1,2, M 22, soğutucu 2 kg/s); alanlar
+#: boş + zorunlu beyanlı. Kanal devresi alanlarından (yukarıda, kalem 1'in
+#: "kanal devresi yoksa önerilmez" bekçisi de onları kullanır) AYRI tutulur:
+#: bunları motor kanalsız tasarımda da yayımlar ve panel onları önerir.
+GUVERTE_MOTOR_ZORUNLU_ALANLAR = ['chamber_pressure', 'chamber_temperature',
+                                 'throat_diameter', 'expansion_ratio',
+                                 'gamma', 'molecular_weight', 'coolant_mdot']
+#: Bunların güverte etiketleri (EN; durum satırı ve çip bu adı basar).
+GUVERTE_MOTOR_ETIKETLERI = ('Chamber Pressure (bar)', 'Chamber Temperature (K)',
+                            'Throat Diameter (m)', 'Expansion Ratio',
+                            'Gamma (frozen)', 'Molecular Weight (g/mol)',
+                            'Coolant Mass Flow (kg/s)')
+#: Bunlar için kullanıcının elle girdiği değerler (yalnız güverte düzeneğinin
+#: girdisi; istek gönderilmez, hiçbir hesap koşmaz).
+GUVERTE_MOTOR_GIRDILERI = {'chamber_pressure': '50', 'chamber_temperature': '3400',
+                           'throat_diameter': '0.05', 'expansion_ratio': '8',
+                           'gamma': '1.2', 'molecular_weight': '22',
+                           'coolant_mdot': '2'}
 
 
 def _spec_alanlari():
@@ -355,20 +375,25 @@ class TestKaynaksizOnDolgu:
 @node_gerekli
 class TestGuverteZorunluBeyan:
     def test_panel_beyani(self):
+        # V307/KIRMIZI-B — BEKLENTİ DEĞİŞTİ: eski liste yalnız kanal devresinin
+        # yedi alanıydı; SEKME-GÜVERTE kalem 4 (NK3-H-7, fcd5869dd) yedi motor
+        # büyüklüğünü de zorunlu beyana ekledi (gizli tanım değerleri kalktı).
         out = dock_kos(None)
-        assert sorted(out['required']) == sorted(REGEN_ZORUNLU_ALANLAR)
+        assert sorted(out['required']) == sorted(
+            REGEN_ZORUNLU_ALANLAR + GUVERTE_MOTOR_ZORUNLU_ALANLAR)
 
     def test_sonuc_yokken_istek_gitmez_eksikler_adiyla(self):
         out = dock_kos(None)
         assert out['fetchCount'] == 0, out['body']
         for etiket in ('Number of Channels', 'Coolant', 'Coolant Inlet T (K)',
                        'Coolant Inlet P (bar)', 'Channel Width (mm)',
-                       'Channel Height (mm)', 'Liner Thickness (mm)'):
+                       'Channel Height (mm)', 'Liner Thickness (mm)'
+                       ) + GUVERTE_MOTOR_ETIKETLERI:
             assert etiket in out['status'], (etiket, out['status'])
 
     def test_bos_zorunlu_alanin_cipi_zorunlu_notunu_basar(self):
         out = dock_kos(None)
-        for alan in REGEN_ZORUNLU_ALANLAR:
+        for alan in REGEN_ZORUNLU_ALANLAR + GUVERTE_MOTOR_ZORUNLU_ALANLAR:
             cip = out['chips'][alan]
             assert 'request will not be sent' in cip, (alan, cip)
             assert 'endpoint applies its own rule' not in cip, (alan, cip)
@@ -409,12 +434,31 @@ class TestGuverteZorunluBeyan:
     def test_bos_secim_govdeye_gitmez(self):
         # Soğutucu dışındaki her şey elle girildi: istek yalnız boş seçim
         # yüzünden durur.
-        out = dock_kos(None, edits={
+        # V307/KIRMIZI-B — SAHTE YEŞİL ONARILDI. SEKME-GÜVERTE kalem 4'ten
+        # (fcd5869dd) sonra motor büyüklükleri de boş + zorunlu; eski girdiyle
+        # istek ONLAR yüzünden de duruyordu ve 'Coolant' alt dizgesi
+        # 'Coolant Mass Flow (kg/s)' etiketinden karşılanıyordu. ÖLÇÜLDÜ:
+        # soğutucu SEÇİLİ iken de bu test geçiyordu (fetchCount 0, durum
+        # satırında 'Coolant Mass Flow'). Artık motor alanları da girilir ve
+        # eksik listesi TAM OLARAK soğutucudur.
+        out = dock_kos(None, edits=dict({
             'n_channels': '40', 'coolant_inlet_temp': '300',
             'coolant_inlet_pressure': '80', 'channel_width': '3',
-            'channel_height': '2', 'wall_thickness': '2'})
+            'channel_height': '2', 'wall_thickness': '2'},
+            **GUVERTE_MOTOR_GIRDILERI))
         assert out['fetchCount'] == 0, out['body']
-        assert 'Coolant' in out['status']
+        m = re.search(r'Required fields are empty: (.*?)\. The request',
+                      out['status'])
+        assert m, out['status']
+        assert m.group(1).split(', ') == ['Coolant'], out['status']
+        # Kontrol kolu: soğutucu da seçilince aynı girdiyle istek GİDER (yani
+        # yukarıdaki durma gerçekten yalnız boş seçimdendir).
+        dolu = dock_kos(None, edits=dict({
+            'n_channels': '40', 'coolant_inlet_temp': '300',
+            'coolant_inlet_pressure': '80', 'channel_width': '3',
+            'channel_height': '2', 'wall_thickness': '2', 'coolant': 'rp1'},
+            **GUVERTE_MOTOR_GIRDILERI))
+        assert dolu['fetchCount'] == 1, dolu['status']
 
     def test_lh2_sonucunda_istek_motorun_suprkritik_degerleriyle(self,
                                                                  sonuclar):

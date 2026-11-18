@@ -657,22 +657,15 @@ function validateInputs(data) {
         errors.push(T('app.val.dcTooLarge', 'Chamber diameter too large (max 1000mm)'));
     }
     
-    // Finite area combustion validation
-    if (data.combustion_type === 'finite') {
-        const hasContractionRatio = data.contraction_ratio && data.contraction_ratio > 0;
-        const hasMassFlux = data.mass_flux_chamber && data.mass_flux_chamber > 0;
-        
-        if (hasContractionRatio && hasMassFlux) {
-            errors.push(T('app.val.finiteBoth',
-                'For finite area combustion, fill only ONE parameter: either contraction '
-                + 'ratio OR mass flux chamber (not both)'));
-        } else if (!hasContractionRatio && !hasMassFlux) {
-            errors.push(T('app.val.finiteNone',
-                'For finite area combustion, you must fill either contraction ratio '
-                + 'OR mass flux chamber'));
-        }
-    }
-    
+    // V307/SEKME-MOTOR (DİL-HİBRİT §8.1): burada sonlu alanlı yanmada
+    // "daralma oranı YA DA kütle akısı, yalnız biri" kuralı vardı. Sunucuda
+    // böyle bir bağ YOK: daralma oranı boşsa oda geometrisinden türetilir
+    // (hybrid_rocket_engine._resolve_contraction_ratio), kütle akısı ise
+    // sonlu yanmaya değil port boyutlandırmasına girer. Ölçüldü
+    // (docs/scofield/raw/OH/V307/sekme-motor/olcum/k4_sunucu.json): sonlu
+    // tip, iki alan boş -> sunucu 200, finite_area_combustor çözülüyor;
+    // istemci ise isteği reddediyordu. Kural kaldırıldı.
+
     if (errors.length > 0) {
         // V301/DİL (kalem 3): sunucu reddindeki gibi önceki sonuç bu
         // girdilere ait değildir; gizlenir (invalidateStaleResults).
@@ -734,7 +727,9 @@ function displayCalculationResults(results) {
     // bloğundan okunur (cidarı kim verdi / hüküm kazanıldı mı) — motor
     // sözlüğünde o blok YOK.
     displayPerformanceMetrics(results.motor, results);
-    
+    // V307/SEKME-MOTOR: İrtifa Profili sekmesinin sonucu (profil kipinde).
+    try { renderAltitudeProfile(results.motor); } catch (e) { /* panel yoksa */ }
+
     // Display plots
     displayPlots(results.plots);
     
@@ -1746,6 +1741,70 @@ function headlineBasisBlock(motorData) {
         }).join('') + '</div>';
 }
 
+// V307/SEKME-MOTOR (DİL-HİBRİT §8.2) — İRTİFA PROFİLİ TABLOSU.
+// Sayıların hepsi sunucunun motor.altitude_profile_performance bloğundan;
+// burada hesap yok. Ayrılma öngörülen satırda itki/Isp hücresi boş kalır ve
+// nedeni yazılır (sayı uydurulmaz). Blok yoksa (tek irtifa kipi) panel gizli.
+function renderAltitudeProfile(motorData) {
+    const panel = document.getElementById('altitudeProfilePanel');
+    const kap = document.getElementById('altitude_profile_table');
+    if (!panel || !kap) return;
+    const ap = motorData && motorData.altitude_profile_performance;
+    if (!ap || typeof ap !== 'object') {
+        panel.style.display = 'none';
+        kap.innerHTML = '';
+        return;
+    }
+    panel.style.display = 'block';
+    const esc = s2 => String(s2 == null ? '' : s2)
+        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    const hucre = (v, d) => (typeof v === 'number' && isFinite(v)) ? numTxt(v, d) : '—';
+    if (ap.status !== 'computed' || !Array.isArray(ap.rows)) {
+        const neden = ap.reason === 'design_point_flow_separated'
+            ? T('app.altprof.reasonDesignSeparated',
+                'the motor\'s own design point is flow-separated (its thrust coefficient is floored at the separation station), so the attached-flow altitude relation cannot be extended from it')
+            : T('app.altprof.reasonMissing',
+                'the motor result does not carry the nozzle fields this table reads');
+        kap.innerHTML = '<p data-altprof="not-computed" style="margin:4px 0;">'
+            + esc(TF('app.altprof.notComputed', { reason: neden },
+                     'Not computed: {reason}.')) + '</p>';
+        return;
+    }
+    const k = (typeof ap.summerfield_factor === 'number') ? numTxt(ap.summerfield_factor, 2) : '—';
+    const ayrilmaNotu = TF('app.altprof.separatedRow', { k: k },
+        'flow separation predicted (Summerfield: P_e < {k} × p_a); thrust and Isp not computed');
+    const th = '<th style="text-align:left; padding:4px 10px;">';
+    const td = '<td style="text-align:left; padding:3px 10px;">';
+    let html = '<div style="overflow-x:auto;"><table class="results-table" data-altprof="table"'
+        + ' style="width:100%; border-collapse:collapse;"><thead><tr>'
+        + th + esc(T('app.altprof.colAltitude', 'Altitude (m)')) + '</th>'
+        + th + esc(T('app.altprof.colPressure', 'Ambient Pressure (bar)')) + '</th>'
+        + th + esc(T('app.altprof.colThrust', 'Thrust (N)')) + '</th>'
+        + th + esc(T('app.altprof.colIsp', 'Isp at that altitude (s)')) + '</th>'
+        + th + esc(T('app.altprof.colNote', 'Note')) + '</th>'
+        + '</tr></thead><tbody>';
+    ap.rows.forEach(function (r) {
+        const ayrildi = r.flow_separation_predicted === true;
+        html += '<tr data-altprof-row="' + esc(r.altitude_m) + '"'
+            + (ayrildi ? ' data-separated="1"' : '') + '>'
+            + td + hucre(r.altitude_m, 0) + '</td>'
+            + td + hucre(r.ambient_pressure_bar, 4) + '</td>'
+            + td + hucre(r.thrust_n, 1) + '</td>'
+            + td + hucre(r.isp_s, 1) + '</td>'
+            + td + (ayrildi ? esc(ayrilmaNotu) : '') + '</td></tr>';
+    });
+    if (ap.vacuum && typeof ap.vacuum === 'object') {
+        html += '<tr data-altprof-row="vacuum">'
+            + td + esc(T('app.altprof.vacuum', 'Vacuum')) + '</td>'
+            + td + numTxt(0, 4) + '</td>'
+            + td + hucre(ap.vacuum.thrust_n, 1) + '</td>'
+            + td + hucre(ap.vacuum.isp_s, 1) + '</td>'
+            + td + esc(T('app.altprof.vacuumNote', 'the motor\'s own vacuum thrust (p_a = 0)')) + '</td></tr>';
+    }
+    html += '</tbody></table></div>';
+    kap.innerHTML = html;
+}
+
 // Display performance metrics
 // Eski mor inline-gradyan kartlar hd-metric şablonuna taşındı (results_hud.css
 // + hud.js). HUD katmanı yüklü değilse (eski sayfa) düz metne düşülür.
@@ -2531,6 +2590,14 @@ function renderOptionalPlot(panelId, elementId, plotData) {
 }
 
 // Display plots
+// V307/S2-KALINTI (NK3-H-3) — bu /calculate yanıtı Yörünge grafiğini
+// KENDİSİ çizer mi? Tek koşul: displayPlots ve advanced.html'deki bayat
+// grafik sarmalayıcısı aynı işlevi okur (grafik bu hesabın grafiğiyse
+// temizlenmez; temizlik yalnız çizmeyen yanıtta).
+function yanitYorungeyiCizer(plots) {
+    return !!(plots && plots.trajectory && !plots.trajectory.error);
+}
+
 function displayPlots(plots) {
     plots = plots || {};
 
@@ -2599,7 +2666,7 @@ function displayPlots(plots) {
     }
     
     // Trajectory plot
-    if (plots.trajectory && !plots.trajectory.error) {
+    if (yanitYorungeyiCizer(plots)) {
         safePlotCreate('trajectory_plot', plots.trajectory);
         const trajectoryPanel = document.getElementById('trajectoryPanel');
         if (trajectoryPanel) {
@@ -2891,10 +2958,17 @@ function displayDesignReport(motorData, injectorData) {
             <table class="report-table table table-striped">
                 <tbody>
                     <tr><td>${T('common.type', 'Type')}</td><td>${injectorData.type.charAt(0).toUpperCase() + injectorData.type.slice(1)}</td></tr>
+    `;
+    // V307/S2-KALINTI (NK3-H-6): boyutlandırılmamış blokta (gaz besleme)
+    // çıkış hızı / Re / ΔP satırları SAYI basmaz — blok onları yayımlamıyor;
+    // nedeni aşağıdaki tipe özel satır (displayInjectorTable) söyler.
+    if (!(injectorData && injectorData.status === 'not_analyzed')) {
+        html += `
                     <tr><td>${T('app.rep.exitVelocity', 'Exit Velocity')}</td><td>${numTxt(injectorData.exit_velocity, 1)} m/s</td></tr>
                     <tr><td>${T('app.rep.reynolds', 'Reynolds Number')}</td><td>${numTxt(injectorData.reynolds_number, 0)}</td></tr>
                     <tr><td>${T('app.rep.pressureDrop', 'Pressure Drop')}</td><td>${numTxt(injectorData.pressure_drop, 2)} bar</td></tr>
     `;
+    }
     
     // V301/E2 (devir madde 10) — TİPE ÖZEL SATIRLAR TABLODAN, TEK KAYNAK.
     // Eskiden bu blok tipe göre elle yazılmış birkaç satır basıyordu: pintle
@@ -3875,6 +3949,7 @@ document.addEventListener('DOMContentLoaded', function() {
             if (!r || !r.motor) return;
             // Dil değişiminde de künye ile birlikte (r = tam sonuç sözlüğü).
             try { displayPerformanceMetrics(r.motor, r); } catch (e) { /* panel yoksa */ }
+            try { renderAltitudeProfile(r.motor); } catch (e) { /* panel yoksa */ }
             try {
                 if (r.injector) displayDesignReport(r.motor, r.injector);
             } catch (e) { /* rapor yoksa */ }
@@ -4852,6 +4927,35 @@ function displayInjectorTable(injectorData, yalnizSatirlar) {
         : document.querySelector('#injector_table tbody');
     if (!yalnizSatirlar && !injectorTableBody) return;
     injectorData = injectorData || {};
+    // V307/S2-KALINTI (NK3-H-6) — ENJEKTÖR BLOĞU BOYUTLANDIRILMADI.
+    // Gaz fazlı beslemede (``status = 'not_analyzed'``, kod
+    // ``gas_phase_feed_not_modelled``) sunucu delik planı, çıkış hızı, Re ve
+    // ΔP YAYIMLAMAZ; motorun uyarısı da "delik planı verilmiyor" der. Tablo
+    // sayı satırı açmaz ("N/A" dizisi yerine tek satır neden). Koşul ve metin
+    // bu işlevin İÇİNDE: işlevi tek başına kesip koşan düzenekler
+    // (test_v301_enjektor_genel_arayuz) ek yardımcı istemesin.
+    if (injectorData.status === 'not_analyzed') {
+        const neden = (injectorData.reason_code === 'gas_phase_feed_not_modelled')
+            ? T('app.rep.injNotSizedGas',
+                'not sized: the gaseous oxidizer feed is not modelled (the orifice relations are liquid-feed relations), so no hole plan, exit velocity or pressure drop is published; see Warnings')
+            : TF('app.rep.injNotSizedReason', { reason: SRV(String(injectorData.reason || '')) },
+                'not sized: {reason}');
+        const satirlar = [
+            [T('common.type', 'Type'), injectorData.type, '-'],
+            [T('app.rep.injOrificePlan', 'Orifice Plan'), neden, '-'],
+        ];
+        if (yalnizSatirlar) {
+            return { rows: satirlar, common: satirlar.slice(0, 1), specific: satirlar.slice(1) };
+        }
+        injectorTableBody.innerHTML = '';
+        satirlar.forEach(([param, value, unit]) => {
+            const row = injectorTableBody.insertRow();
+            row.insertCell(0).textContent = param;
+            row.insertCell(1).textContent = value;
+            row.insertCell(2).textContent = unit || '-';
+        });
+        return;
+    }
 
     // Sayisal alanlari guvenli bicimle: 0 gecerli bir degerdir ('N/A' degil).
     const fmt = (v, digits) => (typeof v === 'number' && isFinite(v))

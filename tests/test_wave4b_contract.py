@@ -50,6 +50,7 @@ import warnings
 from pathlib import Path
 
 import pytest
+from scipy.special import jnp_zeros
 
 warnings.filterwarnings('ignore')
 
@@ -96,7 +97,9 @@ SLOSH_INPUT = {
     'baffle_width_ratio': 0.15,
     'baffle_depth_ratio': 0.10,
 }
-SLOSH_LAMBDA1 = 1.8412
+# 3.0.7 (V307/K1): kesin J1' kökü (Dodge 2000 Denk. (1.41); scipy); ürün
+# sabiti de artık bu kökü kullanıyor (eskisi 4 basamaklı 1.8412).
+SLOSH_LAMBDA1 = float(jnp_zeros(1, 1)[0])
 
 PRESS_REGULATED_INPUT = {
     'mode': 'regulated',

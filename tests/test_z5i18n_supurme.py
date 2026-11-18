@@ -321,7 +321,11 @@ def test_sozluk_hicbir_ceviri_kuralini_golgelemiyor(liste):
 # ---------------------------------------------------------------------------
 #: Şablonun tek dinamik anahtar kurulumu (launch_site.html:549):
 #: `t('site.src.' + src, src)` — bu aile ADIYLA aranamaz, önekle korunur.
-_DINAMIK_ONEKLER = ('site.src.',)
+#: V307/FS-HARİTA-KÜRE: harita paketi adları (`site.mapPackName.<id>`)
+#: SUNUCUNUN paket listesindeki `name_key` alanından gelir (uç sözleşmesi);
+#: panel anahtarı kendisi kurmaz, listeden okur. Önek yalnız listede gerçekten
+#: bulunan kimlikler için canlıdır (aşağıdaki canlılık sınavı).
+_DINAMIK_ONEKLER = ('site.src.', 'site.mapPackName.')
 
 
 def test_launch_site_sozlugunde_olu_anahtar_yok():
@@ -341,6 +345,10 @@ def test_launch_site_sozlugunde_olu_anahtar_yok():
     # Tüketici yüzeyi: launch_site ile ilgili şablon + JS.
     tuketiciler = [TPL / 'launch_site.html',
                    JS / 'launch_site_globe.js',
+                   # V307/FS-İZLEME: görev izleme ekranı (site.track* anahtarları)
+                   JS / 'launch_site_tracking.js',
+                   # V307/FS-HARİTA-KÜRE: "Harita paketleri" paneli (site.mapPack* anahtarları)
+                   JS / 'launch_site_map_packs.js',
                    JS / 'user_guide.js']
     govde = '\n'.join(_oku(p) for p in tuketiciler if p.exists())
     olu = [k for k in sorted(en)
@@ -362,6 +370,18 @@ def test_launch_site_dinamik_onek_gercekten_kullaniliyor():
     en = sozluk(JS / 'i18n_launch_site.js', 'en')
     aile = [k for k in en if k.startswith('site.src.')]
     assert len(aile) >= 3, 'site.src.* ailesi beklenmedik biçimde küçüldü: %s' % aile
+    # V307/FS-HARİTA-KÜRE: 'site.mapPackName.' önekindeki her anahtar,
+    # uygulamayla gelen paket listesinde bir paketin name_key'idir (ölü ad yok)
+    # ve listedeki her paketin adı sözlükte vardır.
+    import json as _json
+    liste = _json.loads(_oku(REPO / 'hrma' / 'static' / 'map' / 'harita_paketleri.json'))
+    adlar = {p['name_key'] for p in liste['packs']}
+    paket_aile = {k for k in en if k.startswith('site.mapPackName.')}
+    assert paket_aile == adlar, (
+        'site.mapPackName.* ailesi paket listesiyle ayrıştı: yalnız sözlükte %s / yalnız listede %s'
+        % (sorted(paket_aile - adlar), sorted(adlar - paket_aile)))
+    assert "p.name_key" in _oku(JS / 'launch_site_map_packs.js'), (
+        'panel paket adını artık listedeki name_key alanından okumuyor — muafiyet gerekçesi düştü')
 
 
 def test_launch_site_en_tr_paritesi():

@@ -86,9 +86,14 @@ class TestFuzzKipi:
         assert code == 0
 
     def test_her_kural_metod_planda(self, fuzz_sonucu):
+        """Kapsam bütçeden BAĞIMSIZ (3.0.7 SÜREÇ kalem 9): plan sonucun
+        kendi alanıdır, koşu kesilse de eksiksiz yazılır. Eskiden plan
+        koşulan uçlardan (``uclar``) çıkarılıyordu ve yüklü makinede bütçe
+        koşuyu kestiğinde /calculate_solid, /launch-site … "planda yok"
+        görünüyordu (16 Kas, yük 15-50)."""
         from hrma.app import app
         _, result = fuzz_sonucu
-        planned = {(u['rule'], u['method']) for u in result['uclar']}
+        planned = {(u['rule'], u['method']) for u in result['plan']}
         expected = set()
         for rule in app.url_map.iter_rules():
             for method in rule.methods or ():
@@ -102,10 +107,17 @@ class TestFuzzKipi:
         expected = (fuzz.FAST_CASES_PER_ENDPOINT if _mode() == 'hizli'
                     else fuzz.FULL_CASES_PER_ENDPOINT)
         assert per >= expected
-        eksik = [(u['rule'], u['method'], u.get('vaka'))
-                 for u in result['uclar']
-                 if u['kip'] != 'dislandi' and u.get('vaka', 0) < per]
+        # Planın dışlanmayan HER kaydı koşuldu ve tam vaka aldı (kesilen
+        # koşuda koşulmayan uç da eksik sayılır).
+        kosulan = {(u['rule'], u['method']): u.get('vaka', 0)
+                   for u in result['uclar']}
+        eksik = [(u['rule'], u['method'], kosulan.get((u['rule'], u['method'])))
+                 for u in result['plan']
+                 if u['kip'] != 'dislandi'
+                 and kosulan.get((u['rule'], u['method']), 0) < per]
         assert eksik == []
+        assert result['_meta']['plan_tamam'] is True
+        assert result['_meta']['kesildi'] is False
 
     def test_dislanan_her_uc_gerekceli(self, fuzz_sonucu):
         _, result = fuzz_sonucu
@@ -114,10 +126,34 @@ class TestFuzzKipi:
                 assert u.get('gerekce'), u
 
     def test_sure_butcesi_ve_tohum(self, fuzz_sonucu):
+        """Bütçe işin MALİYETİNİ ölçer (3.0.7 SÜREÇ kalem 9).
+
+        Süreç CPU süresi her yerde bütçe altında olmalı. Duvar saati yalnız
+        adanmış koşucuda (CI, ``CI=true``) sert sınırdır: paylaşılan yerel
+        makinede aynı kod yük 15-50 altında 88,8-116 s sürdü — o sayı makinenin
+        yükünü ölçer, kodun değil."""
         _, result = fuzz_sonucu
         meta = result['_meta']
         assert meta['tohum'] == fuzz.FUZZ_DEFAULT_SEED
-        assert meta['sure_s'] <= fuzz.MODE_WALL_BUDGET_S[_mode()]
+        assert meta['cpu_s'] <= fuzz.MODE_CPU_BUDGET_S[_mode()], meta['cpu_s']
+        if os.environ.get('CI') == 'true':
+            assert meta['sure_s'] <= fuzz.MODE_WALL_BUDGET_S[_mode()], meta['sure_s']
+
+    def test_kesme_yalniz_elle_istenince(self, tmp_path):
+        """``--sure-butcesi`` elle verilince koşu kesilir ve ``butce``
+        bulgusu yazılır; plan yine EKSİKSİZ raporlanır."""
+        out = tmp_path / 'kesik.json'
+        subprocess.run(
+            [sys.executable, str(FUZZ_TOOL), '--kip', 'hizli', '--vaka', '1',
+             '--uc', '^/api/(fea|cfd)', '--sure-butcesi', '0.000001',
+             '--gecici-kok', str(tmp_path), '--cikti', str(out)],
+            cwd=str(tmp_path), env=_child_env(), capture_output=True,
+            text=True, timeout=300)
+        result = json.loads(out.read_text(encoding='utf-8'))
+        assert [b['tur'] for b in result['bulgular']] == ['butce']
+        assert result['_meta']['kesildi'] is True
+        assert result['_meta']['plan_tamam'] is False
+        assert len(result['uclar']) < len(result['plan'])
 
     def test_depo_agacina_yazilmadi(self, fuzz_sonucu):
         _, result = fuzz_sonucu

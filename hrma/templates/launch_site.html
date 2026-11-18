@@ -326,16 +326,26 @@
                 <span class="v" id="ls-vehicle-name">--</span>
             </div>
             <div class="ls-field" style="margin-top:6px">
-                <label><span data-i18n="site.vehicleSource">Source</span><span class="tooltip"><span class="tooltip-icon" tabindex="0" role="button" aria-label="?">?</span><span class="tooltip-text" role="tooltip" data-i18n="site.help.vehicleSource">Which vehicle is flown: the last motor calculated on a motor page (handed over through this browser's storage), a saved .hrma project (recalculated on the server, since a project stores only inputs) or the built-in example vehicle. Changing it disables the previous flight until you fly again.</span></span></label>
+                <label><span data-i18n="site.vehicleSource">Source</span><span class="tooltip"><span class="tooltip-icon" tabindex="0" role="button" aria-label="?">?</span><span class="tooltip-text" role="tooltip" data-i18n="site.help.vehicleSource">Which vehicle is flown: the last motor calculated on a motor page (handed over through this browser's storage), a saved .hrma project (recalculated on the server, since a project stores only inputs), a .hrma project file chosen from this computer (read, checked and recalculated on the server; not saved) or the built-in example vehicle. Changing it disables the previous flight until you fly again.</span></span></label>
                 <select id="ls-vehicle-source">
                     <option value="session" data-i18n="site.srcSession">Last motor calculated</option>
                     <option value="project" data-i18n="site.srcProject">Saved project (.hrma)</option>
+                    <option value="file" data-i18n="site.srcFile">Project file from this computer (.hrma)</option>
                     <option value="example" data-i18n="site.srcExample">Example vehicle</option>
                 </select>
             </div>
             <div class="ls-field" id="ls-project-wrap" style="margin-top:6px; display:none">
                 <label><span data-i18n="site.selectProject">Project</span><span class="tooltip"><span class="tooltip-icon" tabindex="0" role="button" aria-label="?">?</span><span class="tooltip-text" role="tooltip" data-i18n="site.help.project">Saved project whose motor is flown; it is recalculated on the server from its stored inputs. Shown only when Source is a saved project.</span></span></label>
                 <select id="ls-project"></select>
+            </div>
+            <!-- V307/FS-UÇUŞ-2 (A3): .hrma dosyasından içe aktarma. Dosya
+                 tarayıcıda yalnız boyu ve uzantısı denetlenip METİN olarak
+                 okunur; ayrıştırma, şema ve sürüm göçü sunucuda deponun
+                 yükleme kapısıyla (projects.load_project_document). Dosya
+                 diske yazılmaz. -->
+            <div class="ls-field" id="ls-file-wrap" style="margin-top:6px; display:none">
+                <label><span data-i18n="site.selectFile">Project file</span><span class="tooltip"><span class="tooltip-icon" tabindex="0" role="button" aria-label="?">?</span><span class="tooltip-text" role="tooltip" data-i18n="site.help.projectFile">A .hrma project file from this computer whose motor is flown. It is checked like a saved project (file type, size limit, project format and version) and its motor is recalculated on the server from the stored inputs; the file is not saved or changed. A file that is not a .hrma project, is larger than the limit or cannot be read is refused by name. Shown only when Source is a project file.</span></span></label>
+                <input id="ls-file" type="file" accept=".hrma">
             </div>
             <div class="ls-hint" id="ls-vehicle-note" style="margin-top:6px"></div>
 
@@ -384,16 +394,40 @@
                     <input id="ls-a-cd0" type="number" step="0.01" value="0.45">
                 </div>
             </div>
-            <div class="ls-row">
+            <!-- V307/FS-UÇUŞ-2 (A1) — KANAT GEOMETRİSİ GİRDİ + KAYNAKLI KURAL.
+                 ÖLÇÜLDÜ (fs-ucus-2/olcum/ucus_once.json): kök/uç veteri ve ok
+                 sabit (0,20/0,10/0,08 m), açıklık alanı 0,11 m doluydu; Ø0,473 m
+                 sıvı ve Ø0,212 m hibrit örnekte statik marj −1,86 / 0,45 kalibre
+                 → "araç kararsız". Dört alan artık kullanıcı girdisidir; boş
+                 alan uçta kaynaklı kuraldan gelir (launch_site_flight) ve uçuştan
+                 sonra kaynağıyla #ls-fin-note'ta yazılır. -->
+            <div class="ls-row" style="align-items:flex-end">
                 <div class="ls-field">
-                    <label><span data-i18n="site.finCount">Fins</span><span class="tooltip"><span class="tooltip-icon" tabindex="0" role="button" aria-label="?">?</span><span class="tooltip-text" role="tooltip" data-i18n="site.help.finCount">Number of fins; must be a whole number ≥ 0 (0 = no fins), otherwise the flight is refused. Empty: not sent — the solver applies its own declared default and names it under the result. Fin root chord 0.20 m, tip chord 0.10 m and sweep 0.08 m are fixed on this page.</span></span></label>
-                    <input id="ls-a-fincount" type="number" step="1" value="4">
+                    <label><span data-i18n="site.finCount">Fins</span><span class="tooltip"><span class="tooltip-icon" tabindex="0" role="button" aria-label="?">?</span><span class="tooltip-text" role="tooltip" data-i18n="site.help.finCount">Number of fins; a whole number of 0 or more (0 = no fins: nothing is sized and the body flies without fins), otherwise the flight is refused by name. Together with the fin size it sets the fin normal force in the Barrowman static margin and therefore the stability verdict. Empty: not sent — the solver applies its own declared default, names it under the result and withholds the stability verdict.</span></span></label>
+                    <input id="ls-a-fincount" type="number" step="1" min="0" value="4">
                 </div>
                 <div class="ls-field">
-                    <label><span data-i18n="site.finSpan">Fin span (m)</span><span class="tooltip"><span class="tooltip-icon" tabindex="0" role="button" aria-label="?">?</span><span class="tooltip-text" role="tooltip" data-i18n="site.help.finSpan">Fin span (m); must be ≥ 0. Empty or not a number: not sent — the solver applies its own declared default and names it under the result.</span></span></label>
-                    <input id="ls-a-finspan" type="number" step="0.01" value="0.11">
+                    <label><span data-i18n="site.finSpan">Fin span (m)</span><span class="tooltip"><span class="tooltip-icon" tabindex="0" role="button" aria-label="?">?</span><span class="tooltip-text" role="tooltip" data-i18n="site.help.finSpan">Fin span (m): height of one fin from the body surface to its tip. It sets how much the fins move the centre of pressure aft, so it drives the static margin and the stability verdict. Empty: the fin rule sizes it — the smallest span that keeps the static margin, full and empty, above the stability threshold from Mach 0 to the highest Mach of the flight; the vehicle is flown with it and the value and its source are shown under the fins. A value you enter is flown as entered; if the vehicle is then not stable, the smallest span that would be is suggested. Accepted: 0 or more.</span></span></label>
+                    <input id="ls-a-finspan" type="number" step="0.01" min="0" data-i18n-placeholder="site.finRulePlaceholder" placeholder="rule">
                 </div>
             </div>
+            <div class="ls-row" style="align-items:flex-end">
+                <div class="ls-field">
+                    <label><span data-i18n="site.finRootChord">Fin root chord (m)</span><span class="tooltip"><span class="tooltip-icon" tabindex="0" role="button" aria-label="?">?</span><span class="tooltip-text" role="tooltip" data-i18n="site.help.finRootChord">Fin root chord (m): length of the fin along the body where it is attached; the fins sit at the tail. With the span it sets the fin normal force and its centre of pressure in the Barrowman static margin. Empty: the fin rule gives it — the example vehicle fin scaled with this body diameter (HRMA choice, shown under the fins); if that root chord is longer than the body behind the nose, the flight is refused by name. Accepted: 0 or more.</span></span></label>
+                    <input id="ls-a-finroot" type="number" step="0.01" min="0" data-i18n-placeholder="site.finRulePlaceholder" placeholder="rule">
+                </div>
+                <div class="ls-field">
+                    <label><span data-i18n="site.finTipChord">Fin tip chord (m)</span><span class="tooltip"><span class="tooltip-icon" tabindex="0" role="button" aria-label="?">?</span><span class="tooltip-text" role="tooltip" data-i18n="site.help.finTipChord">Fin tip chord (m): length of the fin at its outer edge. It changes the fin area and the fin centre of pressure in the Barrowman static margin. Empty: the fin rule gives it from the root chord with the example vehicle fin proportions (HRMA choice, shown under the fins). Accepted: 0 or more.</span></span></label>
+                    <input id="ls-a-fintip" type="number" step="0.01" min="0" data-i18n-placeholder="site.finRulePlaceholder" placeholder="rule">
+                </div>
+            </div>
+            <div class="ls-row">
+                <div class="ls-field">
+                    <label><span data-i18n="site.finSweep">Fin sweep (m)</span><span class="tooltip"><span class="tooltip-icon" tabindex="0" role="button" aria-label="?">?</span><span class="tooltip-text" role="tooltip" data-i18n="site.help.finSweep">Fin sweep (m): distance along the body from the leading edge of the root to the leading edge of the tip. It moves the fin centre of pressure aft and so changes the static margin. Empty: the fin rule gives it from the root chord with the example vehicle fin proportions (HRMA choice, shown under the fins). Accepted: 0 or more.</span></span></label>
+                    <input id="ls-a-finsweep" type="number" step="0.01" min="0" data-i18n-placeholder="site.finRulePlaceholder" placeholder="rule">
+                </div>
+            </div>
+            <div class="ls-hint" id="ls-fin-note" style="margin-top:2px"></div>
             <!-- ÖH D28 / P12bB4-05 — ÖLÇÜLEN KUSUR: uçuş yükü, arayüzde HİÇ
                  alanı olmayan sabit bir 6 m/s / 270° rüzgârı sessizce
                  gönderiyordu. Ölçüldü (aynı araç, yalnız wind_speed
@@ -425,6 +459,34 @@
                     <input id="ls-a-azim" type="number" step="1" value="90">
                 </div>
             </div>
+            <!-- V307/FS-UÇUŞ-2 (A4) — PARAŞÜT: motor sayfalarının yörünge
+                 panelindeki AYNI üç girdi, düzlemsel çözücünün kurtarma
+                 modeliyle aynı kural ve sabitler (launch_site_flight.
+                 descent_flight). Alan boşsa paraşüt yok: balistik iniş. -->
+            <div class="ls-row" style="align-items:flex-end">
+                <div class="ls-field">
+                    <label><span data-i18n="site.chuteArea">Parachute Area (m2)</span><span class="tooltip"><span class="tooltip-icon" tabindex="0" role="button" aria-label="?">?</span><span class="tooltip-text" role="tooltip" data-i18n="site.help.chuteArea">Projected (canopy) area of the recovery parachute (m²), the same input as the trajectory panel of the motor pages. When given, the descent is solved under the parachute with the 2-D trajectory solver's recovery model (body drag until the deploy delay after apogee, then the parachute drag) and the landing speed is shown. Empty: no parachute — the descent is a nose-first ballistic fall (HRMA choice). Accepted: greater than 0; otherwise the flight is refused by name.</span></span></label>
+                    <input id="ls-a-chutearea" type="number" step="0.1" min="0" placeholder="—">
+                </div>
+                <div class="ls-field">
+                    <label><span data-i18n="site.chuteCd">Parachute Cd</span><span class="tooltip"><span class="tooltip-icon" tabindex="0" role="button" aria-label="?">?</span><span class="tooltip-text" role="tooltip" data-i18n="site.help.chuteCd">Parachute drag coefficient referenced to its projected area (dimensionless); it scales the parachute drag and so the descent and landing speed. Read only when a parachute area is given. Empty: the 2-D solver's default (Hoerner, hollow hemisphere, projected area) is used and shown as assumed under the result. Accepted: greater than 0.</span></span></label>
+                    <input id="ls-a-chutecd" type="number" step="0.05" min="0" placeholder="—">
+                </div>
+            </div>
+            <div class="ls-row">
+                <div class="ls-field">
+                    <label><span data-i18n="site.chuteDelay">Deploy Delay after Apogee (s)</span><span class="tooltip"><span class="tooltip-icon" tabindex="0" role="button" aria-label="?">?</span><span class="tooltip-text" role="tooltip" data-i18n="site.help.chuteDelay">Time from apogee to canopy opening (s); during it the vehicle falls with its body drag. Read only when a parachute area is given. Empty: the 2-D solver's default delay is used and shown as assumed under the result. Accepted: 0 or more.</span></span></label>
+                    <input id="ls-a-chutedelay" type="number" step="0.5" min="0" placeholder="—">
+                </div>
+            </div>
+            <!-- V307/FS-KÜÇÜK (kalem 5) — ÇALKANTI: TANKLARIN ARAÇTAKİ YERİ.
+                 Motor sayfasının 6-DOF panelindeki AYNI girdiler ve AYNI blok
+                 (calkanti: motor_type, motor_sonucu, arac_duzeni); hüküm ve
+                 kodlar sunucunun yanıtından. Yalnız sıvı/hibrit araçta ve
+                 motor sonucu bu sayfadayken (kayıtlı proje / proje dosyası)
+                 kurulur; metinler motor sayfasının sözlüğünden (talep üzerine
+                 yüklenir). Katı motorda tek satır. -->
+            <div id="ls-slosh-form" hidden></div>
             <div class="ls-hint" data-i18n="site.airframeHint">Airframe dry mass EXCLUDES the flying inert mass shown above — the solver adds them together.</div>
             <!-- V306/UÇUŞ NR-12: gövde alanlarının HANGİ kaynaktan geldiği
                  (aracın tanımı / kayıtlı proje / motordan türetme kuralı) ve
@@ -451,6 +513,28 @@
                 <div class="ls-kv"><span class="k" data-i18n="site.pressure">Pressure</span><span class="v" id="ls-r-press">--</span></div>
                 <div class="ls-kv"><span class="k" data-i18n="site.earthRotSpeed">Earth rotation speed (info only)</span><span class="v" id="ls-r-erot">--</span></div>
             </div>
+
+            <!-- FS-HARİTA-PAKET — V307/FS-HARİTA-KÜRE (16 Kas 2026): "Harita paketleri".
+                 Liste, onay, ilerleme, iptal ve silme launch_site_map_packs.js'tedir
+                 (depo + panel); küre ve etiket katmanı kurulu paketleri o depodan
+                 okur. İndirme isteği YALNIZ panelin açık onay düğmesinden çıkar;
+                 ilerleme sunucunun bildirdiği baytlardır. Künye düğümü bağlanırken
+                 notlar kutusuna (#ls-notes, karo künyesinin ardına) taşınır ve
+                 yalnız paket bindirmesi ya da paket yer adı ekrandayken görünür.
+                 Gövdesindeki metin i18n EN değeriyle aynıdır (künye emniyet yedeği). -->
+            <div class="ls-sep"></div>
+            <h2 data-i18n="site.mapPacksTitle">Map packs (offline detail)</h2>
+            <div class="ls-hint"><span data-i18n="site.mapPacksHint">Close-range map detail (roads, buildings, water, place names) for the area around a launch site, from OpenStreetMap. Nothing is downloaded until you confirm.</span><span class="tooltip"><span class="tooltip-icon" tabindex="0" role="button" aria-label="?">?</span><span class="tooltip-text" role="tooltip" data-i18n="site.help.mapPacks">A map pack adds OpenStreetMap roads, buildings, water and place names to the globe around one launch site, down to street level (zoom level 15), and works offline once installed. Each pack is one file from HRMA’s own GitHub release; its size, source and licence are shown before you confirm. Outside an installed pack’s box, and with no pack installed, the globe looks as before.</span></span></div>
+            <div class="ls-hint" id="ls-packs-usage" role="status"></div>
+            <details id="ls-packs" class="ls-basis">
+                <summary><span data-i18n="site.mapPacksList">Map pack list</span></summary>
+                <div id="ls-packs-list"></div>
+            </details>
+            <div id="ls-pack-attr" style="margin-top:5px; display:none"
+                 data-i18n="site.mapPackAttribution">OpenStreetMap contributors (ODbL 1.0), Protomaps Basemap schema; offline HRMA map pack</div>
+            <script src="/static/js/launch_site_map_packs.js"></script>
+            <script>document.addEventListener('DOMContentLoaded', function () { if (window.LaunchSiteMapPacks) window.LaunchSiteMapPacks.bind({ liste: 'ls-packs-list', ozet: 'ls-packs-usage', kunye: 'ls-pack-attr', notlar: 'ls-notes', kunyeSonrasi: 'ls-tile-attr' }); });</script>
+            <!-- /FS-HARİTA-PAKET -->
         </div>
 
         <!-- SAĞ: uçuş yolu + oynatım -->
@@ -511,12 +595,15 @@
             <h2 data-i18n="site.summaryHead">Flight summary (whole solution)</h2>
             <div class="ls-kv"><span class="k" data-i18n="site.apogeeReadout">Apogee</span><span class="v" id="ls-apogee">--</span></div>
             <div class="ls-kv"><span class="k" data-i18n="site.rangeReadout">Downrange at end of solution</span><span class="v" id="ls-range">--</span></div>
+            <!-- V307/FS-KÜÇÜK (kalem 5): 6-DOF'un çalkantı bölümü (yanıtın
+                 calkanti bloğu, aynen; kendi hüküm kuralı yok). -->
+            <div id="ls-slosh-out" hidden></div>
 
             <div class="ls-sep"></div>
             <h2 data-i18n="site.legend">Legend</h2>
             <div class="ls-legend">
                 <div class="ls-chip"><span class="sw" style="background:#ff8c33"></span><span data-i18n="site.flightPathLabel">Flight path (solved 6-DOF)</span></div>
-                <div class="ls-chip dash"><span class="sw"></span><span data-i18n="site.groundTrackLabel">Ground track — Earth rotation NOT modelled</span></div>
+                <div class="ls-chip dash"><span class="sw"></span><span data-i18n="site.groundTrackLabel">Ground track — Coriolis included, flat-Earth projection</span></div>
             </div>
             <!-- ÖH D17 / P12aB3-08: çizilen yolun yörünge OLMADIĞI beyanı iki
                  dilde de yazılıydı ama sayfada hiç basılmıyordu; Blue Marble
@@ -541,7 +628,7 @@
 
         <!-- Dürüstlük notları -->
         <div id="ls-notes">
-            <div><span class="warn" data-i18n="site.earthRotNote">Earth rotation and Coriolis are not modelled in v1; the ground track is a flat-Earth projection.</span></div>
+            <div><span class="warn" data-i18n="site.earthRotNote">Earth rotation is in the flight solution: the flight is solved in a frame turning with the Earth — the Coriolis acceleration from the site latitude acts on the ascent and the descent, and the centrifugal part is inside the local gravity (WGS84). The flight equations use a flat Earth (tangent plane at the pad); the drawn path converts north/east to latitude/longitude with the local radii of curvature, a first-order projection whose error grows with downrange.</span></div>
             <!-- ÖH D28 / P12bB4-05 (ikinci ayak) — rüzgâr artık panelde
                  sorulan bir girdi; geriye yükte sabit kalan BEŞ gövde
                  ölçüsü kaldı (burun boyu/tipi, kanatçık kök/uç veteri,
@@ -672,6 +759,18 @@
 <script src="/static/js/launch_site_vectors.js"></script>
 <script src="/static/js/launch_site_labels.js"></script>
 <script src="/static/js/launch_site_globe.js"></script>
+<!-- FS-İZLEME -->
+<!-- V307/FS-İZLEME (9 Kas 2026): görev izleme ekranı. Kap, bağlama anında
+     #ls-stage içine taşınır; aç/kapa düğmesi üst şeride konur. Ekrandaki her
+     sayı çözülmüş uçuşun yanıtından gelir (launch_site_tracking.js başlığı);
+     uçuş yokken ekran açılmaz. Bağlama küre betiğinden SONRA, sayfa
+     betiğinden ÖNCE yapılır: setFlightPath sarmalayıcısı ilk uçuştan önce
+     kurulmuş olur. -->
+<link rel="stylesheet" href="/static/css/launch_site_tracking.css">
+<div id="ls-trk" class="ls-trk" hidden></div>
+<script src="/static/js/launch_site_tracking.js"></script>
+<script>if (window.LaunchSiteTracking) window.LaunchSiteTracking.bind({});</script>
+<!-- /FS-İZLEME -->
 {# ÖH D24 · P4B3-27 — hazır saha listesi TEK KAYNAKTAN (LAUNCH_SITE_PRESETS).
    Veri Jinja ile SAYFAYA gömülür ama JS bloğunun İÇİNE değil: aşağıdaki
    gömülü betik saf JavaScript kalmalı (tests/test_faz6_panel.py
@@ -681,6 +780,9 @@
 {# V306/UÇUŞ NR-12 — "Örnek araç" TEK TANIMDAN (flight_vehicle.EXAMPLE_VEHICLE:
    motor + gövde, HRMA seçimi diye beyanlı). #}
 <script type="application/json" id="ls-example-vehicle">{{ example_vehicle | tojson }}</script>
+{# V307/FS-UÇUŞ-2 (A3): dosyadan içe aktarmanın boy sınırı ve uzantı beyaz
+   listesi deponun sabitlerinden (hrma/utils/projects.py). #}
+<script type="application/json" id="ls-file-import">{{ project_file_import | tojson }}</script>
 <script>
 (function () {
     'use strict';
@@ -736,12 +838,11 @@
     // beyan notunun EN/TR metinlerinde (gömülü metin). İkisi ayrışırsa
     // ekrandaki beyan sessizce yalan olur. Artık tek nesne; not da yükün
     // OKUDUĞU değerlerden basılır (doktrin 4).
+    // V307/FS-UÇUŞ-2 (A1): kanat kök/uç veteri ve oku artık GİRDİDİR (boşsa
+    // uçtaki kaynaklı kural); burada yalnız sorulmayan iki ölçü kalır.
     var LS_FIXED_AIRFRAME = {
         nose_length: 0.50,
         nose_type: 'ogive',
-        fin_root_chord: 0.20,
-        fin_tip_chord: 0.10,
-        fin_sweep: 0.08,
         rail_length: 5
     };
 
@@ -749,15 +850,12 @@
         var n = el('ls-fixed-airframe-note');
         if (!n) return;
         n.textContent = tf('site.fixedAirframeNote', {
-            nose: LS_FIXED_AIRFRAME.nose_length.toFixed(2),
-            root: LS_FIXED_AIRFRAME.fin_root_chord.toFixed(2),
-            tip: LS_FIXED_AIRFRAME.fin_tip_chord.toFixed(2),
-            sweep: LS_FIXED_AIRFRAME.fin_sweep.toFixed(2),
-            rail: String(LS_FIXED_AIRFRAME.rail_length)
-        }, 'Nose (ogive, {nose} m), fin root/tip chord ({root}/{tip} m), '
-           + 'fin sweep ({sweep} m) and rail length ({rail} m) are fixed in '
-           + 'this view and are not asked for: they enter the Barrowman '
-           + 'static margin and therefore the stability verdict above.');
+            nose: fmtNum_(LS_FIXED_AIRFRAME.nose_length, 2),
+            rail: fmtNum_(LS_FIXED_AIRFRAME.rail_length, 0)
+        }, 'Nose (ogive, {nose} m) and rail length ({rail} m) are fixed in '
+           + 'this view and are not asked for: the nose enters the Barrowman '
+           + 'static margin and therefore the stability verdict above; the '
+           + 'rail sets the speed at which the vehicle leaves guidance.');
     }
 
     // ---- Küreyi başlat ----
@@ -894,9 +992,13 @@
         } catch (e) { return null; }
     })();
     var currentVehicle = null;
+    // V307/FS-KÜÇÜK (kalem 5): aracın motor sonucu (6-DOF çalkantı bloğu).
+    var currentMotorResult = null;
     // Araç metinlerini dil değişiminde YENİDEN basabilmek için son not
     // saklanır (aşağıdaki renderVehicleText'e bak).
-    var currentVehicleNote = null;      // {key, fallback} | null
+    // V307/FS-KÜÇÜK (kalem 4): parametreli ret metni için {fn} de olabilir
+    // (köprünün refusalText'i; dil değişince yeniden kurulur).
+    var currentVehicleNote = null;      // {key, fallback} | {fn} | null
 
     // T08 (2026-08-03) — İSİM ÇAKIŞMASI: bu kapsamda İKİ ayrı `num` bildirimi
     // vardı; okuyucu num(id, fb) burada, biçimlendirici num(v, d) ise
@@ -941,8 +1043,10 @@
         }
         var note = el('ls-vehicle-note');
         if (note) {
-            var msg = currentVehicleNote
-                ? t(currentVehicleNote.key, currentVehicleNote.fallback) : '';
+            var msg = !currentVehicleNote ? ''
+                : (typeof currentVehicleNote.fn === 'function'
+                    ? (currentVehicleNote.fn() || '')
+                    : t(currentVehicleNote.key, currentVehicleNote.fallback));
             // ÖH defter P4B3-19 / P4B3-20 — ATIL KÜTLE KÜNYESİ ARTIK
             // MODÜLÜN ÖLÇTÜĞÜ KÜNYEDİR, sabit cümle DEĞİL.
             // ÖNCE: bu blok her tahminde SABİT 0,25 x propelan cümlesini
@@ -1022,10 +1126,20 @@
     // araçtan kaldı" diye işaretlenir ve notta adıyla yazılır. Gövde
     // çapının motor zarfından küçük olması artık sessizce büyütülmez: uç
     // uçuşu adıyla reddeder (airframe_fit_conflicts).
+    // V307/FS-UÇUŞ-2 (A1): kanat alanları kayıtlı projenin gövde tanımından
+    // (``inputs.airframe``, uçta ``vehicle.airframe`` diye AYNEN döner;
+    // anahtar adları 6-DOF ucunun alan adlarıdır) dolar — `ham: true`.
+    // Kaynakta yoksa kanat ölçüleri BOŞALIR (uçtaki kural); kanat sayısı
+    // boşaltılmaz (`koru`): formdaki görünür değer kalır.
     var GOVDE_ALANLARI = [
         { id: 'ls-a-bodydia', anahtar: 'body_diameter_m', basamak: 3 },
         { id: 'ls-a-bodylen', anahtar: 'body_length_m', basamak: 2 },
-        { id: 'ls-a-drymass', anahtar: 'airframe_dry_mass_kg', basamak: 2 }
+        { id: 'ls-a-drymass', anahtar: 'airframe_dry_mass_kg', basamak: 2 },
+        { id: 'ls-a-fincount', anahtar: 'fin_count', basamak: 0, ham: true, koru: true },
+        { id: 'ls-a-finspan', anahtar: 'fin_span', basamak: 3, ham: true },
+        { id: 'ls-a-finroot', anahtar: 'fin_root_chord', basamak: 3, ham: true },
+        { id: 'ls-a-fintip', anahtar: 'fin_tip_chord', basamak: 3, ham: true },
+        { id: 'ls-a-finsweep', anahtar: 'fin_sweep', basamak: 3, ham: true }
     ];
     var govdeNotu = null;   // dil değişiminde yeniden basılır
     function alanEtiketi(id) {
@@ -1038,10 +1152,16 @@
         var g = (v && v.airframe_resolved && typeof v.airframe_resolved === 'object')
             ? v.airframe_resolved : null;
         var kalan = [];
+        var hamGovde = (v && v.airframe && typeof v.airframe === 'object') ? v.airframe : null;
         GOVDE_ALANLARI.forEach(function (a) {
             var e = el(a.id);
             if (!e) return;
-            var deger = g ? num_(g[a.anahtar]) : null;
+            var deger = a.ham ? (hamGovde ? num_(hamGovde[a.anahtar]) : null)
+                : (g ? num_(g[a.anahtar]) : null);
+            if (a.koru && deger === null && e.dataset.elle !== '1') {
+                e.classList.remove('ls-onceki-kaynak');
+                return;
+            }
             if (a.anahtar === 'body_length_m' && deger === null && g
                     && num_(g.length_behind_nose_m) !== null) {
                 deger = LS_FIXED_AIRFRAME.nose_length + num_(g.length_behind_nose_m);
@@ -1070,6 +1190,8 @@
                 'Airframe: the example vehicle\'s own definition (HRMA choice; a demonstration vehicle, not a real rocket).'));
         } else if (g.kaynak === 'project') {
             p.push(t('site.airframeFromProject', 'Airframe: from the saved project.'));
+        } else if (g.kaynak === 'file') {
+            p.push(t('site.airframeFromFile', 'Airframe: from the project file.'));
         } else if (g.kaynak === 'derived') {
             var d = num_(g.govde && g.govde.body_diameter_m);
             var lb = num_(g.govde && g.govde.length_behind_nose_m);
@@ -1106,15 +1228,394 @@
         });
     });
 
-    function applyVehicle(v, noteKey, noteFallback) {
+    function applyVehicle(v, noteKey, noteFallback, motorSonucu) {
         currentVehicle = v || null;
-        currentVehicleNote = noteKey ? { key: noteKey, fallback: noteFallback } : null;
+        // V307/FS-KÜÇÜK (kalem 5): aracın motor sonucu (kayıtlı proje / dosya
+        // kaynağında köprünün yeniden hesabı; yoksa null).
+        currentMotorResult = (v && motorSonucu && typeof motorSonucu === 'object')
+            ? motorSonucu : null;
+        currentVehicleNote = (typeof noteKey === 'function') ? { fn: noteKey }
+            : (noteKey ? { key: noteKey, fallback: noteFallback } : null);
         setRO('ls-v-thrust', v && v.thrust, 0);
         setRO('ls-v-burntime', v && v.burn_time, 2);
         setRO('ls-v-propmass', v && v.propellant_mass, 2);
         setRO('ls-v-inertmass', v && v.engine_inert_mass, 2);
         govdeyiKaynaktanKur(v);
         renderVehicleText();
+        calkantiFormunuKur();
+    }
+
+    // =====================================================================
+    // V307/FS-KÜÇÜK (kalem 5) — 6-DOF'A ÇALKANTI BLOĞU (ÇALKANTI-ARAYÜZ DEVİR)
+    //
+    // ÖLÇÜLDÜ (docs/scofield/raw/OH/V307/fs-kucuk/olcum/api_sonra_calkanti.json,
+    // örnek sıvı, Ø0,5 × 3,6 m gövde): motor sayfasının 6-DOF'u tankları
+    // bağlayıp hüküm veriyordu (ÇALKANTI KAYNAKLI KARARSIZLIK, pencere 3,37–30 s);
+    // Fırlatma Sahası aynı aracı çalkantısız çözüyordu (iki sayfa, iki hüküm).
+    // Sayfa artık motor sayfasıyla AYNI bloğu gönderir: {motor_type,
+    // motor_sonucu, arac_duzeni} (calkanti_panel.js sixdofBlok'un alanları);
+    // motor sonucu köprünün yeniden hesabından (/api/flight-vehicle,
+    // include_motor_result). Hüküm, pencereler ve kodlar yanıtın calkanti
+    // bloğundan AYNEN basılır; bu sayfada hüküm kuralı YOKTUR. Metinler ve kod
+    // tabloları motor sayfasınınkiler (i18n_common.js + calkanti_panel.js,
+    // talep üzerine yüklenir; açılış yükü değişmez).
+    // =====================================================================
+    var CALKANTI_BETIKLERI = [
+        { src: '/static/js/i18n_common.js', hazir: function () {
+            return !!(window.I18N && I18N.has && I18N.has('panel.calkanti.sd.fYer')); } },
+        { src: '/static/js/calkanti_panel.js', hazir: function () { return !!window.HRMACalkanti; } }
+    ];
+    var calkantiKuyrugu = null;
+    function calkantiHazir(cb) {
+        var eksik = CALKANTI_BETIKLERI.filter(function (b) { return !b.hazir(); });
+        if (!eksik.length) { cb(); return; }
+        if (calkantiKuyrugu) { calkantiKuyrugu.push(cb); return; }
+        calkantiKuyrugu = [cb];
+        var bekleyen = eksik.length;
+        // onload ve onerror AYNI geri çağrım: betik inmezse de kuyruk boşalır
+        // (metin yüklenemedi diye adıyla yazılır; sağır ekran yok).
+        function bitti() {
+            if (--bekleyen > 0) return;
+            var kuyruk = calkantiKuyrugu || [];
+            calkantiKuyrugu = null;
+            kuyruk.forEach(function (f) { try { f(); } catch (e) { /* biri ötekini düşürmesin */ } });
+        }
+        eksik.forEach(function (b) {
+            var tag = document.createElement('script');
+            tag.src = b.src; tag.async = false;
+            tag.onload = bitti; tag.onerror = bitti;
+            document.head.appendChild(tag);
+        });
+    }
+    // Motor türü -> tank kimlikleri ve sıra seçenekleri (motor sayfasının
+    // 6-DOF formuyla aynı; calkanti_panel.js sixdofForm).
+    var CALKANTI_TANKLARI = { liquid: ['oksitleyici', 'yakit'], hybrid: ['n2o'] };
+    var CALKANTI_SIRALARI = {
+        liquid: [['', 'panel.calkanti.sd.siraYok', 'Not entered (slosh is not coupled)'],
+                 ['oksitleyici,yakit', 'panel.calkanti.sd.siraOksOnde', 'Oxidizer forward, fuel aft'],
+                 ['yakit,oksitleyici', 'panel.calkanti.sd.siraYakitOnde', 'Fuel forward, oxidizer aft']],
+        hybrid: [['', 'panel.calkanti.sd.siraYok', 'Not entered (slosh is not coupled)'],
+                 ['n2o', 'panel.calkanti.sd.siraN2o', 'N₂O tank directly ahead of the motor']]
+    };
+    var CALKANTI_TANK_ADI = {
+        oksitleyici: ['panel.calkanti.tank.oksitleyici', 'Oxidizer tank'],
+        yakit: ['panel.calkanti.tank.yakit', 'Fuel tank'],
+        n2o: ['panel.calkanti.tank.n2o', 'N₂O tank']
+    };
+    var CALKANTI_DURUMU = {
+        BAGLANDI: ['panel.calkanti.sd.durum.BAGLANDI', 'All tanks coupled to the 6-DOF.'],
+        KISMI: ['panel.calkanti.sd.durum.KISMI', 'Some tanks coupled; the others are listed with their reasons.'],
+        BAGLANMADI: ['panel.calkanti.sd.durum.BAGLANMADI', 'No tank coupled; the flight above is the rigid one.'],
+        UYGULANMAZ: ['panel.calkanti.sd.durum.UYGULANMAZ', 'There is no liquid propellant in a solid motor; slosh does not apply.']
+    };
+    function calkantiTankAdi(tid) {
+        var a = CALKANTI_TANK_ADI[tid];
+        return a ? t(a[0], a[1]) : String(tid);
+    }
+    function htmlKac(s) {
+        return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    }
+    function calkantiIpucu(key, metin) {
+        return '<span class="tooltip"><span class="tooltip-icon" tabindex="0" role="button" aria-label="?">?</span>'
+            + '<span class="tooltip-text" role="tooltip" data-i18n="' + key + '">' + htmlKac(t(key, metin)) + '</span></span>';
+    }
+    function calkantiMotoru() {
+        var mt = currentVehicle && currentVehicle.motor_type;
+        return (mt === 'liquid' || mt === 'hybrid' || mt === 'solid') ? mt : null;
+    }
+    // Form: katıda tek satır; sıvı/hibritte motor sonucu varsa tank yeri
+    // girdileri (her birinin "?" ipucu motor sayfasınınkiyle aynı metin),
+    // yoksa nedeni. Örnek araç (motor türü yok): bölüm yok.
+    var calkantiFormSirasi = 0;
+    function calkantiFormunuKur() {
+        var kok = el('ls-slosh-form');
+        if (!kok) return;
+        var benim = ++calkantiFormSirasi;
+        kok.innerHTML = ''; kok.hidden = true;
+        var mt = calkantiMotoru();
+        if (!mt) return;
+        calkantiHazir(function () {
+            if (benim !== calkantiFormSirasi) return;
+            var html = '<div class="ls-sep"></div><h2 data-i18n="panel.calkanti.sd.formBaslik">'
+                + htmlKac(t('panel.calkanti.sd.formBaslik', 'Slosh — where the tanks sit in the vehicle (optional)')) + '</h2>';
+            if (mt === 'solid') {
+                html += '<div class="ls-hint" data-i18n="panel.calkanti.katiSatir">'
+                    + htmlKac(t('panel.calkanti.katiSatir', 'There is no liquid propellant in a solid motor; slosh does not apply.')) + '</div>';
+            } else if (!currentMotorResult) {
+                html += '<div class="ls-hint" data-i18n="site.sloshNoMotorResult">'
+                    + htmlKac(t('site.sloshNoMotorResult', 'Slosh is coupled when the motor result is on this page: choose a saved project or a project file as the source (a motor carried from a motor page brings no tank data here). The flight is solved rigid.')) + '</div>';
+            } else {
+                html += '<div class="ls-hint" data-i18n="site.sloshFormNote" style="margin-bottom:6px">'
+                    + htmlKac(t('site.sloshFormNote', 'The motor and the flight model do not publish where the tanks sit; without a location the tanks are not coupled and the flight stays rigid. The tanks are the motor\'s own cylinders (a tank geometry uploaded on the motor page is not carried to this page).')) + '</div>'
+                    + '<div class="ls-row"><div class="ls-field"><label><span data-i18n="panel.calkanti.sd.fYer">'
+                    + htmlKac(t('panel.calkanti.sd.fYer', 'Tank location source')) + '</span>'
+                    + calkantiIpucu('panel.calkanti.help.sd_yer', 'Where the tank positions come from. Sequential arrangement (default, declared): the tanks sit directly ahead of the motor without gaps, in the order you choose, inside this vehicle\'s body (the flight model\'s body rule; tank length is the inner length, wall and cap thickness ignored). Tank bottom stations: you give each tank\'s bottom station in metres from the nose. It sets the slosh arm ξ about the vehicle centre of gravity. Order or station not entered: the tank is not coupled.')
+                    + '</label><select id="ls-clk-yer" style="font-size:12px">'
+                    + '<option value="ardisik" data-i18n="panel.calkanti.sd.yerArdisik">' + htmlKac(t('panel.calkanti.sd.yerArdisik', 'Sequential arrangement (declared)')) + '</option>'
+                    + '<option value="istasyon" data-i18n="panel.calkanti.sd.yerIstasyon">' + htmlKac(t('panel.calkanti.sd.yerIstasyon', 'Tank bottom stations (m from the nose)')) + '</option>'
+                    + '</select></div></div>'
+                    + '<div class="ls-row" data-ls-clk="ardisik"><div class="ls-field"><label><span data-i18n="panel.calkanti.sd.fSira">'
+                    + htmlKac(t('panel.calkanti.sd.fSira', 'Order from nose to tail')) + '</span>'
+                    + calkantiIpucu('panel.calkanti.help.sd_sira', 'Order of the tanks from the nose to the tail for the sequential arrangement. It decides which tank is further from the centre of gravity, which changes the slosh moment arm. Not entered: the tanks are not coupled and the 6-DOF result is the rigid one. Each tank of the motor appears once.')
+                    + '</label><select id="ls-clk-sira" style="font-size:12px">'
+                    + CALKANTI_SIRALARI[mt].map(function (o) {
+                        return '<option value="' + o[0] + '" data-i18n="' + o[1] + '">' + htmlKac(t(o[1], o[2])) + '</option>';
+                    }).join('') + '</select></div></div>';
+                CALKANTI_TANKLARI[mt].forEach(function (tid) {
+                    var a = CALKANTI_TANK_ADI[tid];
+                    html += '<div class="ls-row" data-ls-clk="istasyon" style="display:none"><div class="ls-field"><label>'
+                        + '<span data-i18n="' + a[0] + '">' + htmlKac(t(a[0], a[1])) + '</span> — '
+                        + '<span data-i18n="panel.calkanti.sd.fIstasyon">' + htmlKac(t('panel.calkanti.sd.fIstasyon', 'bottom station x (m)')) + '</span>'
+                        + calkantiIpucu('panel.calkanti.help.sd_istasyon', 'Station of the tank bottom (the tank end facing the tail) in metres from the nose, positive toward the tail. It sets the slosh moment arm ξ about the vehicle centre of gravity. Accepted: the tank top at or behind the nose cone, the bottom at or ahead of the body length, the tank no wider than the body, no overlap with another tank; otherwise the tank is not coupled and the reason is named. Blank: this tank is not coupled.')
+                        + '</label><input id="ls-clk-x-' + tid + '" type="number" step="0.01" min="0" value=""></div></div>';
+                });
+                html += '<div class="ls-hint" id="ls-clk-durum"></div>';
+            }
+            kok.innerHTML = html;
+            kok.hidden = false;
+            var yer = el('ls-clk-yer');
+            if (yer) {
+                var goster = function () {
+                    // .ls-row display:flex olduğu için `hidden` niteliği yetmez.
+                    Array.prototype.forEach.call(kok.querySelectorAll('[data-ls-clk]'), function (e) {
+                        e.style.display = (e.getAttribute('data-ls-clk') === yer.value) ? '' : 'none';
+                    });
+                    calkantiDurumYaz();
+                };
+                yer.addEventListener('change', goster);
+                Array.prototype.forEach.call(kok.querySelectorAll('select, input'), function (e) {
+                    e.addEventListener('change', calkantiDurumYaz);
+                    e.addEventListener('input', calkantiDurumYaz);
+                    // Tank yeri değişti: eski uçuş başka bir tank yeriyle çözüldü —
+                    // uçuşun tamamı geçersiz (araç değişimindeki kural).
+                    e.addEventListener('change', function () {
+                        if (!window.LaunchSiteFlightResult && !calkantiSonVeri) return;
+                        setFlightControlsEnabled(false);
+                        ucusSonucunuGecersizKil('slosh_location_changed');
+                    });
+                });
+                goster();
+            }
+        });
+    }
+    // Formdaki düzen (motor sayfasının sdDuzen kuralı) ya da null (girilmedi).
+    // Sayı olmayan istasyon girdisi sessizce yok sayılmaz: 'gecersiz'.
+    function calkantiDuzeni() {
+        var yer = el('ls-clk-yer');
+        if (!yer) return null;
+        if (yer.value === 'ardisik') {
+            var s = el('ls-clk-sira');
+            return (s && s.value) ? { ardisik: { sira: s.value.split(',') } } : null;
+        }
+        var ist = {}, gecersiz = [];
+        (CALKANTI_TANKLARI[calkantiMotoru()] || []).forEach(function (tid) {
+            var e = el('ls-clk-x-' + tid);
+            if (!e || String(e.value).trim() === '') return;
+            var v = Number(String(e.value).replace(',', '.'));
+            if (isFinite(v)) ist[tid] = v; else gecersiz.push(e.id);
+        });
+        if (gecersiz.length) return { gecersiz: gecersiz };
+        return Object.keys(ist).length ? { tank_istasyonlari: ist } : null;
+    }
+    function calkantiDurumYaz() {
+        var d = el('ls-clk-durum');
+        if (!d) return;
+        var duzen = calkantiDuzeni();
+        d.textContent = (duzen && !duzen.gecersiz)
+            ? t('panel.calkanti.sd.yerVar', 'Tank location entered; the next 6-DOF run couples slosh to the flight.')
+            : t('panel.calkanti.sd.yerYok', 'Tank location not entered; slosh is not coupled to the 6-DOF (no position is assumed).');
+    }
+    // 6-DOF isteğinin çalkantı bloğu: motor sayfasının sixdofBlok'uyla aynı
+    // alanlar; yalnız sıvı/hibrit, motor sonucu ve yer varken. Dönüş: blok |
+    // null | {gecersiz: [alan id]} (uçuş adıyla durur).
+    function calkantiBloguKur() {
+        var mt = calkantiMotoru();
+        if ((mt !== 'liquid' && mt !== 'hybrid') || !currentMotorResult) return null;
+        var duzen = calkantiDuzeni();
+        if (!duzen) return null;
+        if (duzen.gecersiz) return duzen;
+        return { motor_type: mt, motor_sonucu: currentMotorResult, arac_duzeni: duzen };
+    }
+
+    // Yanıtın calkanti bloğu (yoksa nedeni) sağ panelde; sayılar ve kodlar
+    // yanıttan, metinler motor sayfasının tablolarından. Doğrusal sınır
+    // aşıldıysa bağlaşık koşunun apoje / max α'sı "doğrusal model geçerliliği
+    // dışında" diye işaretlenir (HUKUM_SOZLESMESI §5), rijit koşu yanında.
+    var calkantiGecerlilikDisi = null;   // {t, rk} | null
+    var calkantiSonVeri = null;          // {d, g}: dil değişiminde yeniden basım
+    var calkantiCizimSirasi = 0;
+    function calkantiSonucunuBas(d, gonderildi) {
+        var kok = el('ls-slosh-out');
+        var benim = ++calkantiCizimSirasi;
+        // Önceki uçuşun "geçerlilik dışında" işareti apoje okumasında kalmaz.
+        if (calkantiGecerlilikDisi) {
+            var eskiApo = el('ls-apogee');
+            if (eskiApo) { eskiApo.textContent = '--'; eskiApo.title = ''; }
+        }
+        calkantiGecerlilikDisi = null;
+        calkantiSonVeri = d ? { d: d, g: gonderildi } : null;
+        var eskiUyari = document.querySelectorAll('#ls-status .ls-slosh-uyari');
+        Array.prototype.forEach.call(eskiUyari, function (e) { e.remove(); });
+        if (!kok) return;
+        kok.textContent = ''; kok.hidden = true;
+        var mt = calkantiMotoru();
+        if (!d || (mt !== 'liquid' && mt !== 'hybrid')) return;
+        calkantiHazir(function () {
+            if (benim !== calkantiCizimSirasi) return;
+            var H = window.HRMACalkanti;
+            var parca = document.createDocumentFragment();
+            function ekle(metin, sinif, etiket) {
+                var e = document.createElement(etiket || 'div');
+                e.className = sinif || 'ls-hint';
+                e.textContent = metin;
+                parca.appendChild(e);
+                return e;
+            }
+            function kv(k, v) {
+                var r = document.createElement('div'); r.className = 'ls-kv';
+                var a = document.createElement('span'); a.className = 'k'; a.textContent = k;
+                var b = document.createElement('span'); b.className = 'v'; b.textContent = v;
+                r.appendChild(a); r.appendChild(b); parca.appendChild(r);
+            }
+            function hk(tablo, kod) {
+                var a = H && H._HK && H._HK[tablo] && H._HK[tablo][kod];
+                return a ? t(a[0], a[1]) : t('panel.calkanti.kodTaninmadi',
+                    'A reason code this screen does not know was returned; the result is not shown as valid.');
+            }
+            function kodMetni(kod) {
+                return (H && H._kodMetni) ? H._kodMetni(kod) : t('panel.calkanti.kodTaninmadi',
+                    'A reason code this screen does not know was returned; the result is not shown as valid.');
+            }
+            function sy(v, d) { return fmtNum(num_(v), d); }
+            function ns(v, b) {
+                var x = num_(v);
+                return (x === null) ? '—' : fmtNum_(Number(x.toPrecision(b || 4)));
+            }
+            ekle('', 'ls-sep');
+            ekle(t('panel.calkanti.sd.baslik', 'Stability — slosh subsection'), '', 'h2');
+            ekle(t('panel.calkanti.sd.kunye', 'Passive vehicle: the TVC/autopilot control loop is not modelled; for a guided vehicle this coupling is the main risk, and the hand-off table is meant for the vehicle team\'s GNC tool.'), 'ls-hint ls-note-warn');
+            if (!H) {
+                ekle(t('site.sloshTextsUnavailable', 'The slosh texts could not be loaded on this page; the slosh result is not shown. Use the 6-DOF panel of the motor page.'), 'ls-hint ls-note-warn');
+            }
+            var c = d.calkanti;
+            if (!c || !H) {
+                if (H) {
+                    ekle(currentMotorResult
+                        ? t('panel.calkanti.sd.yerYok', 'Tank location not entered; slosh is not coupled to the 6-DOF (no position is assumed).')
+                        : t('site.sloshNoMotorResult', 'Slosh is coupled when the motor result is on this page: choose a saved project or a project file as the source (a motor carried from a motor page brings no tank data here). The flight is solved rigid.'));
+                }
+                kok.appendChild(parca); kok.hidden = false;
+                return;
+            }
+            var dk = CALKANTI_DURUMU[c.durum];
+            if (dk) ekle(t(dk[0], dk[1]));
+            var h = c.slosh_stability || null;
+            var asildi = !!(h && h.dogrusal_sinir && h.dogrusal_sinir.asildi);
+            if (h) {
+                var hd = H._HK.hukum && H._HK.hukum[h.genel_hukum];
+                var rozet = ekle(t('panel.calkanti.hk.rozet', 'SLOSH STABILITY') + ': ' + hk('hukum', h.genel_hukum),
+                    'ls-slosh-rozet');
+                rozet.setAttribute('data-hukum', String(h.genel_hukum));
+                rozet.style.cssText = 'font-size:12px; font-weight:600; margin:4px 0;'
+                    + ' color:' + ((hd && hd[2] === 'err') ? 'var(--hd-red, #ff5d73)'
+                        : (hd && hd[2] === 'ok') ? 'var(--hd-green, #2dd4a8)' : 'var(--hd-ink-dim, #7d97a5)') + ';';
+                ekle(hk('gerekce', h.gerekce_kodu));
+                if (Array.isArray(h.sebep) && h.sebep.length) {
+                    ekle(t('panel.calkanti.hk.sebepBaslik', 'Why no verdict could be given:') + ' '
+                        + h.sebep.map(function (k) { return hk('sebep', k); }).join('; '));
+                }
+                (Array.isArray(h.pencereler) ? h.pencereler : []).forEach(function (w, i) {
+                    if (i === 0) ekle(t('panel.calkanti.hk.pencereBaslik', 'Slosh-instability windows during the burn'), 'ls-hint ls-slosh-baslik');
+                    var kenar = [w.t1_kenar, w.t2_kenar].indexOf('DEGERLENDIRME_SINIRI') >= 0
+                        ? ' (' + hk('kenar', 'DEGERLENDIRME_SINIRI') + ')' : '';
+                    kv(t('panel.calkanti.hk.thAralik', 'Interval t1 – t2 (s)'), sy(w.t1, 3) + ' – ' + sy(w.t2, 3) + kenar);
+                    kv(t('panel.calkanti.hk.thMaxRe', 'Largest Re(λ) (1/s) at t (s)'), ns(w.max_re, 4) + ' @ ' + sy(w.t_max_re, 3));
+                    kv(t('panel.calkanti.hk.thMod', 'Unstable mode / tank'), hk('mod', w.mod) + (w.tank_id ? ' — ' + calkantiTankAdi(w.tank_id) : ''));
+                    kv(t('panel.calkanti.hk.thZetaMin', 'Required ζ_min'), (w.zeta_min === null || w.zeta_min === undefined)
+                        ? t('panel.calkanti.hk.zetaUstu', 'not reached even at 0.5')
+                        : sy(w.zeta_min, 4) + (w.zeta_min_dogrulandi === false
+                            ? ' (' + t('panel.calkanti.hk.dogrulanmadi', 'not verified at every sample') + ')' : ''));
+                    kv(t('panel.calkanti.hk.thZetaGercek', 'Actual ζ'), ns(w.zeta_gercek, 3));
+                    var bu = num_(w.buyume_ussu);
+                    kv(t('panel.calkanti.hk.thBuyume', 'Growth exponent ∫Re dt'), (bu === null) ? '—'
+                        : tf('panel.calkanti.hk.buyumeKat', { x: ns(bu, 4), k: ns(Math.exp(bu), 3) },
+                            '{x} (amplitude grows at most ×{k})'));
+                });
+                var ds = h.dogrusal_sinir;
+                if (ds && ds.asildi) {
+                    var kutu = ekle(tf('panel.calkanti.hk.dogrusalAsildi', {
+                        t: sy(ds.t_ilk_asim_s, 3), tank: ds.tank_id_ilk_asim ? calkantiTankAdi(ds.tank_id_ilk_asim) : '—',
+                        sinir: sy(ds.sinir, 2), oncesi: ns(ds.max_eta_R_sinir_oncesi, 4) },
+                        'The wall wave amplitude passed the linear limit η/R = {sinir} at t = {t} s ({tank}). From that point on the slosh amplitude, force and moment, and the apogee and angle of attack of the coupled run are outside the validity of the linear model: they are not real values and are marked as such. Largest η/R before the limit: {oncesi}.'),
+                        'ls-hint ls-slosh-sinir');
+                    kutu.style.cssText = 'border:1px solid var(--hd-red, #ff5d73); border-radius:8px; padding:6px 8px; margin:6px 0;';
+                } else if (ds) {
+                    ekle(tf('panel.calkanti.hk.dogrusalIcinde', { m: ns(ds.max_eta_R, 3), sinir: sy(ds.sinir, 2) },
+                        'The wall wave amplitude stayed inside the linear limit (largest η/R = {m}; limit {sinir}).'));
+                }
+            }
+            (Array.isArray(c.tanklar) ? c.tanklar : []).forEach(function (tk) {
+                var bagli = tk.durum === 'BAGLANDI';
+                var m = calkantiTankAdi(tk.tank_id) + ': ' + (bagli ? t('panel.calkanti.sd.tankBagli', 'coupled')
+                    : t('panel.calkanti.sd.tankBaglanmadi', 'not coupled'));
+                if (bagli && num_(tk.x_tank_taban_m) !== null) {
+                    m += ' — ' + tf('panel.calkanti.sd.tankYer', { x: sy(tk.x_tank_taban_m, 3) }, 'tank bottom at x = {x} m from the nose');
+                }
+                if (num_(tk.yuklenen_sivi_kg) !== null) {
+                    m += ' — ' + tf('panel.calkanti.sd.tankKutle', { m: sy(tk.yuklenen_sivi_kg, 3) }, 'loaded liquid {m} kg');
+                }
+                // Bağlanmama sebepleri satırda; beyanlar ve uçuş boyu tank
+                // kodları açılır bölümde (motor sayfasıyla aynı kodlar, aynı metin).
+                var sebepler = (tk.sebep || []);
+                if (sebepler.length) m += '. ' + sebepler.map(kodMetni).join(' ');
+                ekle(m, bagli ? 'ls-hint' : 'ls-hint ls-note-warn').setAttribute('data-tank', String(tk.tank_id));
+                var beyan = (tk.beyan || []).filter(function (k) { return sebepler.indexOf(k) < 0; });
+                ((c.tank_durum_kodlari || {})[tk.tank_id] || []).forEach(function (k) {
+                    if (beyan.indexOf(k) < 0 && sebepler.indexOf(k) < 0) beyan.push(k); });
+                if (beyan.length) {
+                    var det = document.createElement('details');
+                    det.className = 'ls-basis ls-hint';
+                    det.setAttribute('data-tank-kod', String(tk.tank_id));
+                    var oz = document.createElement('summary');
+                    oz.textContent = tf('panel.calkanti.sd.tankKodlar', { tank: calkantiTankAdi(tk.tank_id) },
+                        '{tank}: reasons and declarations');
+                    var ic = document.createElement('div');
+                    ic.textContent = beyan.map(kodMetni).join(' ');
+                    det.appendChild(oz); det.appendChild(ic);
+                    parca.appendChild(det);
+                }
+            });
+            var rk = c.rijit_karsilastirma;
+            var sm = d.summary || {};
+            if (rk) {
+                var gd = t('panel.calkanti.hk.gecersizIz', 'outside the validity of the linear model');
+                kv(t('panel.calkanti.sd.apoje', 'Apogee, coupled / rigid'),
+                    (asildi ? gd : fmtKmM(num_(sm.apogee))) + ' / ' + fmtKmM(num_(rk.apogee)));
+                kv(t('panel.calkanti.sd.maxAlfa', 'Max angle of attack, coupled / rigid'),
+                    (asildi ? gd : sy(sm.max_alpha_deg, 3) + '°') + ' / ' + sy(rk.max_alpha_deg, 3) + '°');
+            }
+            if (asildi) {
+                calkantiGecerlilikDisi = { t: num_(h.dogrusal_sinir.t_ilk_asim_s), rk: rk || null };
+                var uyari = tf('panel.calkanti.hk.anaUyari', {
+                    t: sy(h.dogrusal_sinir.t_ilk_asim_s, 3), apo: rk ? sy(rk.apogee, 1) : '—',
+                    alfa: rk ? sy(rk.max_alpha_deg, 3) : '—' },
+                    'Slosh coupling left the validity of the linear model at t = {t} s: the apogee, angle of attack and flight verdict of this coupled run after that time are not real values. Rigid run: apogee {apo} m, largest angle of attack {alfa}°.');
+                var st = el('ls-status');
+                if (st) {
+                    // Durum satırına ÖĞE olarak eklenir (kanat önerisi düğmesi silinmez).
+                    var su = document.createElement('div');
+                    su.className = 'ls-slosh-uyari';
+                    su.style.cssText = 'color:var(--hd-red, #ff5d73); margin-top:4px;';
+                    su.textContent = uyari;
+                    st.appendChild(su);
+                }
+                var apo = el('ls-apogee');
+                if (apo) { apo.textContent = gd; apo.title = uyari; }
+            }
+            kok.appendChild(parca);
+            kok.hidden = false;
+        });
     }
 
     // ÖH D21 / P12aB4-22 — köprünün KENDİ API'si kullanılır. Eskiden burada
@@ -1142,14 +1643,12 @@
         }
         // V306/UÇUŞ-3 (SIVI-SOĞUTMA DEVİR): son hesabın aracı motor kütlesi
         // yayımlanmadığı için kurulmadı — eski araç uçurulmaz, nedeni yazılır.
+        // V307/FS-KÜÇÜK (kalem 4): metin köprünün TEK işlevinden
+        // (FlightHandoff.refusalText; motor kütlesi / soğutma devresi / deniz
+        // seviyesi itkisi yok) — motor sayfasıyla aynı cümle.
         if (durum.status === 'refused') {
-            if (durum.refusal && durum.refusal.cause === 'cooling_circuit_not_solved') {
-                applyVehicle(null, 'flight.refusedCooling',
-                    'No flight: the engine mass is not published for this calculation because the regenerative cooling circuit was not solved, so no vehicle is built and nothing is flown. Fix the cooling design and calculate again.');
-            } else {
-                applyVehicle(null, 'flight.refusedEngineMass',
-                    'No flight: this engine calculation does not publish the engine mass, so no vehicle is built and nothing is flown.');
-            }
+            var kopruReddi = durum.refusal || {};
+            applyVehicle(null, function () { return FlightHandoff.refusalText(kopruReddi); });
             return false;
         }
         var v = doc && (doc.vehicle || doc);
@@ -1167,23 +1666,45 @@
         return false;
     }
 
+    // V307/FS-UÇUŞ — PROJE KAYNAĞI HİÇBİR ŞEY YÜKLEMİYORDU. ÖLÇÜLDÜ
+    // (~/HRMA-calisma/2026-11-09/FS-UCUS/saha_once.json yol_b, üç motor):
+    // Kaynak = "Kayıtlı proje" seçilince liste ZAMAN UYUMSUZ doluyor, proje
+    // aracı ise AYNI ANDA boş seçimle isteniyordu (`loadProjectVehicle('')`
+    // → `if (!name) return`): /api/flight-vehicle HİÇ çağrılmadı, açılır
+    // listede ilk proje seçili GÖRÜNÜYOR ama yüklenmiyordu, araç '--' ve
+    // not hâlâ "bu oturumda motor hesaplanmadı" diyordu. Listedeki ilk
+    // projeyi istemek için başka bir projeyi seçip geri dönmek gerekiyordu.
+    // Artık liste bir Promise'tir; seçili proje liste dolunca yüklenir.
+    // Dönüş: seçili proje adı (önceki seçim listede varsa o), yoksa null.
     function loadProjectList() {
-        fetch('/api/projects').then(function (r) { return r.json(); }).then(function (d) {
+        var onceki = el('ls-project').value;
+        return fetch('/api/projects').then(function (r) {
+            if (!r.ok) throw new Error('projects ' + r.status);
+            return r.json();
+        }).then(function (d) {
             var sel = el('ls-project'); sel.innerHTML = '';
             var items = (d && (d.projects || d.items)) || [];
+            var adlar = [];
             items.forEach(function (p) {
                 var o = document.createElement('option');
                 o.value = (typeof p === 'string') ? p : (p.name || p.id);
                 o.textContent = o.value;
                 sel.appendChild(o);
+                adlar.push(o.value);
             });
             if (!items.length) {
                 var o = document.createElement('option');
                 o.textContent = t('site.noProjects', 'No saved projects');
                 o.disabled = true; sel.appendChild(o);
+                return null;
             }
-        }).catch(function () { /* çevrimdışı: liste boş kalır */ });
+            if (onceki && adlar.indexOf(onceki) >= 0) sel.value = onceki;
+            return sel.value || null;
+        });
     }
+    // Araç seçimi isteklerinin sırası: geç gelen eski yanıt yeni seçimin
+    // aracını ezmez (kullanıcı kaynağı değiştirdiyse yanıt atılır).
+    var aracSecimi = 0;
 
     // ÖH D30 · P12bB4-15 — UCUN KENDİ GEREKÇESİ EKRANA İNER.
     // ÖLÇÜLDÜ (a3/once.json B4_15_*): bu işlev yanıtın HTTP durumunu hiç
@@ -1212,31 +1733,62 @@
         return p.join(' · ');
     }
 
+    // V307/FS-KÜÇÜK (kalem 4): köprünün ADLI retleri (motor kütlesi
+    // yayımlanmadı; vakum/irtifa tasarımında deniz seviyesi itkisi yok)
+    // kayıtlı proje ve dosya kaynağında da motor sayfasıyla AYNI metinle
+    // (FlightHandoff.refusalText) basılır; makine izi durum satırının
+    // ipucunda. Adlı ret değilse false (genel ret yolu sürer).
+    function kopruAdliReddi(d, httpDurum) {
+        if (!d || !window.FlightHandoff || !FlightHandoff.refusalText
+                || !Array.isArray(FlightHandoff.REFUSAL_CODES)
+                || FlightHandoff.REFUSAL_CODES.indexOf(d.error) < 0) return false;
+        applyVehicle(null, function () { return FlightHandoff.refusalText(d); });
+        setStatus('');
+        var durumEl = el('ls-status');
+        if (durumEl) durumEl.title = '/api/flight-vehicle · HTTP ' + httpDurum
+            + ' · ' + String(d.error) + (d.cause ? ' · ' + String(d.cause) : '');
+        return true;
+    }
+
     function loadProjectVehicle(name) {
-        if (!name) return;
+        // V307/FS-UÇUŞ: boş ad SESSİZCE yutulmaz — araç yok, nedeni yazılır.
+        if (!name) {
+            applyVehicle(null, 'site.flightNoProjectToLoad',
+                'No saved project to fly — save a motor as a project on a motor page, or choose another source. No vehicle is selected.');
+            return;
+        }
+        var benim = ++aracSecimi;
+        // Yükleme sürerken önceki kaynağın aracı/notu ekranda kalmaz.
+        applyVehicle(null, 'site.flightProjectLoading',
+            'Recomputing the selected project on the server — the vehicle appears here when it is ready.');
         setStatus(t('site.recomputing', 'Recomputing motor from project…'));
         var httpDurum = 0;
         fetch('/api/flight-vehicle', {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ source: 'project', name: name })
+            // V307/FS-KÜÇÜK (kalem 5): motor sonucu da istenir (6-DOF çalkantı
+            // bloğunun motor_sonucu; motor sayfasının currentResults'ı).
+            body: JSON.stringify({ source: 'project', name: name, include_motor_result: true })
         }).then(function (r) {
             httpDurum = r.status;
             // Gövde JSON değilse (500 HTML hata sayfası) zincir KOPMAZ;
             // durum kodu yine de kullanıcıya ulaşır.
             return r.json().catch(function () { return null; });
         }).then(function (d) {
+            if (benim !== aracSecimi) return;   // kullanıcı başka araç seçti
             if (d && d.status === 'success' && d.vehicle) {
                 applyVehicle(d.vehicle, 'site.projectVehicleLoaded',
-                    'Recomputed from the saved project.');
+                    'Recomputed from the saved project.', d.motor_result);
                 setStatus('');
                 return;
             }
+            if (kopruAdliReddi(d, httpDurum)) return;
             // V301/UÇUŞ C-25: hesaplanamayan proje yerine ÖRNEK ARAÇ
             // uçurulmaz; araç boş kalır, ucun kendi gerekçesi durum satırında.
             applyVehicle(null, 'site.projectLoadFailed',
                 'Project could not be recomputed — no vehicle is selected; the reason is shown below.');
             setStatus(projeHataNedeni(httpDurum, d, name));
         }).catch(function () {
+            if (benim !== aracSecimi) return;
             applyVehicle(null, 'site.projectLoadFailed',
                 'Project could not be recomputed — no vehicle is selected; the reason is shown below.');
             setStatus(projeHataNedeni(httpDurum, null, name));
@@ -1246,15 +1798,138 @@
     el('ls-vehicle-source').addEventListener('change', function () {
         var mode = this.value;
         el('ls-project-wrap').style.display = (mode === 'project') ? '' : 'none';
+        el('ls-file-wrap').style.display = (mode === 'file') ? '' : 'none';
         setFlightControlsEnabled(false);   // araç değişti: eski uçuş geçersiz
+        ucusSonucunuGecersizKil('vehicle_changed');
+        var benim = ++aracSecimi;
         if (mode === 'session') loadSessionVehicle(false);
         else if (mode === 'example') applyVehicle(EXAMPLE_VEHICLE, 'site.exampleSelected',
             'Example vehicle — not a motor you calculated.');
-        else { loadProjectList(); loadProjectVehicle(el('ls-project').value); }
+        else if (mode === 'file') {
+            // V307/FS-UÇUŞ-2 (A3): dosya seçilmişse o yüklenir; yoksa seçim istenir.
+            var dosya = el('ls-file').files && el('ls-file').files[0];
+            if (dosya) loadFileVehicle(dosya);
+            else applyVehicle(null, 'site.fileChoose',
+                'Choose a .hrma project file — its motor is recalculated on the server. No vehicle is selected yet.');
+        }
+        else {
+            // V307/FS-UÇUŞ: liste dolunca SEÇİLİ proje yüklenir (yukarıdaki
+            // loadProjectList notu); o arada eski kaynağın notu kalmaz.
+            applyVehicle(null, 'site.flightProjectListLoading',
+                'Reading the saved projects…');
+            loadProjectList().then(function (ad) {
+                if (benim !== aracSecimi || el('ls-vehicle-source').value !== 'project') return;
+                loadProjectVehicle(ad);
+            }).catch(function () {
+                if (benim !== aracSecimi) return;
+                applyVehicle(null, 'site.flightProjectListFailed',
+                    'The saved project list could not be read — no vehicle is selected.');
+            });
+        }
     });
     el('ls-project').addEventListener('change', function () {
         setFlightControlsEnabled(false);
+        ucusSonucunuGecersizKil('vehicle_changed');
         loadProjectVehicle(this.value);
+    });
+
+    // V307/FS-UÇUŞ-2 (A3 + D3) — .hrma DOSYASINDAN İÇE AKTARMA.
+    // Tarayıcı kapıları (uç yine denetler): uzantı beyaz listesi ve boy sınırı
+    // deponun sabitlerinden (#ls-file-import); dosya METİN olarak okunur,
+    // ayrıştırma/şema/göç sunucuda (projects.load_project_document), motor
+    // kayıtlı projeyle aynı yoldan yeniden hesaplanır. Dosya kaydedilmez.
+    var DOSYA_KAPISI = (function () {
+        try {
+            var d = document.getElementById('ls-file-import');
+            var v = d ? JSON.parse(d.textContent) : null;
+            return (v && typeof v.max_bytes === 'number' && Array.isArray(v.extensions)) ? v : null;
+        } catch (e) { return null; }
+    })();
+    var DOSYA_RETLERI = {
+        invalid_project_file_name: ['site.fileRejectedType',
+            'This is not a .hrma project file — choose a file saved by HRMA. No vehicle is selected.'],
+        project_file_too_large: ['site.fileRejectedSize',
+            'The project file is larger than the {limit} limit — it is not read. No vehicle is selected.'],
+        invalid_project_file: ['site.fileRejectedContent',
+            'The project file could not be read as an HRMA project (not valid JSON, or not the HRMA project format and version) — no vehicle is selected; the reason is in the tooltip of this line.']
+    };
+    function dosyaRetMetni(kod, d) {
+        var r = DOSYA_RETLERI[kod];
+        if (!r) return null;
+        return tf(r[0], { limit: DOSYA_KAPISI ? fmtBytes(DOSYA_KAPISI.max_bytes) : '--' }, r[1]);
+    }
+    function loadFileVehicle(dosya) {
+        var benim = ++aracSecimi;
+        var durumEl = el('ls-status');
+        if (durumEl) durumEl.title = '';
+        var ad = String((dosya && dosya.name) || '');
+        // Kapı yoksa (şablon verisi okunamadı) dosya OKUNMAZ (fail-closed).
+        if (!DOSYA_KAPISI) {
+            applyVehicle(null, 'site.fileRejectedNoGate',
+                'The file import limits could not be read — the file is not read. No vehicle is selected.');
+            return;
+        }
+        var uzanti = DOSYA_KAPISI.extensions.some(function (u) {
+            return ad.toLowerCase().slice(-u.length) === u;
+        });
+        if (!uzanti) {
+            applyVehicle(null, 'site.fileRejectedType', DOSYA_RETLERI.invalid_project_file_name[1]);
+            return;
+        }
+        if (!(dosya.size <= DOSYA_KAPISI.max_bytes)) {
+            applyVehicle(null, null, null);
+            setStatus(dosyaRetMetni('project_file_too_large'));
+            return;
+        }
+        applyVehicle(null, 'site.fileReading', 'Reading and recalculating the project file on the server…');
+        var okuyucu = new FileReader();
+        okuyucu.onerror = function () {
+            if (benim !== aracSecimi) return;
+            applyVehicle(null, 'site.fileUnreadable',
+                'The file could not be read from this computer — no vehicle is selected.');
+        };
+        okuyucu.onload = function () {
+            if (benim !== aracSecimi) return;
+            var httpDurum = 0;
+            fetch('/api/flight-vehicle', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ source: 'file', file_name: ad,
+                                       document_text: String(okuyucu.result),
+                                       include_motor_result: true })
+            }).then(function (r) {
+                httpDurum = r.status;
+                return r.json().catch(function () { return null; });
+            }).then(function (d) {
+                if (benim !== aracSecimi) return;
+                if (d && d.status === 'success' && d.vehicle) {
+                    applyVehicle(d.vehicle, 'site.fileVehicleLoaded',
+                        'Recomputed from the project file.', d.motor_result);
+                    setStatus('');
+                    return;
+                }
+                if (kopruAdliReddi(d, httpDurum)) return;
+                applyVehicle(null, 'site.projectLoadFailed',
+                    'Project could not be recomputed — no vehicle is selected; the reason is shown below.');
+                var kendi = dosyaRetMetni(d && d.error, d);
+                setStatus(kendi || projeHataNedeni(httpDurum, d, ad));
+                if (kendi && durumEl) durumEl.title = '/api/flight-vehicle · HTTP '
+                    + httpDurum + ' · ' + String((d && (d.message || d.error)) || '');
+            }).catch(function () {
+                if (benim !== aracSecimi) return;
+                applyVehicle(null, 'site.projectLoadFailed',
+                    'Project could not be recomputed — no vehicle is selected; the reason is shown below.');
+                setStatus(projeHataNedeni(httpDurum, null, ad));
+            });
+        };
+        okuyucu.readAsText(dosya);
+    }
+    el('ls-file').addEventListener('change', function () {
+        setFlightControlsEnabled(false);
+        ucusSonucunuGecersizKil('vehicle_changed');
+        var dosya = this.files && this.files[0];
+        if (dosya) loadFileVehicle(dosya);
+        else applyVehicle(null, 'site.fileChoose',
+            'Choose a .hrma project file — its motor is recalculated on the server. No vehicle is selected yet.');
     });
 
     // ---- A3: uçuş gerektiren kontroller çözüm gelene kadar kapalı ----
@@ -1580,6 +2255,33 @@
             return t('site.airframeDryMassNegative',
                 'Airframe dry mass cannot be negative. Nothing was flown.');
         }
+        // V307/FS-UÇUŞ-2 (A4): paraşüt girdilerinin kabul aralığı (ipucunun
+        // söylediği; uçta aynı kural ikinci kapıdır). Alan yokken Cd ya da
+        // gecikme okunmaz — sessizce yok sayılmaz, adıyla söylenir. Alanlar
+        // burada ham okunur (gövdeye giden TEK okuma body nesnesindedir).
+        function hamAlan(id) {
+            var n = parseFloat((el(id) || {}).value);
+            return isFinite(n) ? n : null;
+        }
+        var alan = hamAlan('ls-a-chutearea'), cdP = hamAlan('ls-a-chutecd'),
+            gecikme = hamAlan('ls-a-chutedelay');
+        if (alan === null && (cdP !== null || gecikme !== null)) {
+            alanIsaretle('ls-a-chutearea');
+            return t('site.chuteNeedsArea',
+                'Parachute Cd and deploy delay are read only with a parachute area — enter the area or clear them. Nothing was flown.');
+        }
+        if (alan !== null && !(alan > 0)) {
+            alanIsaretle('ls-a-chutearea');
+            return t('site.chuteAreaInvalid', 'Parachute area must be greater than 0. Nothing was flown.');
+        }
+        if (cdP !== null && !(cdP > 0)) {
+            alanIsaretle('ls-a-chutecd');
+            return t('site.chuteCdInvalid', 'Parachute Cd must be greater than 0. Nothing was flown.');
+        }
+        if (gecikme !== null && gecikme < 0) {
+            alanIsaretle('ls-a-chutedelay');
+            return t('site.chuteDelayInvalid', 'The deploy delay cannot be negative. Nothing was flown.');
+        }
         return null;
     }
     // Sunucunun 6-DOF ucu boş bırakılan gövde/çevre alanına kendi beyanlı
@@ -1614,8 +2316,31 @@
         dry_mass: 'ls-a-drymass', cd0: 'ls-a-cd0', fin_count: 'ls-a-fincount',
         fin_span: 'ls-a-finspan', wind_speed: 'ls-a-windspeed',
         wind_direction_deg: 'ls-a-winddir', launch_elevation_deg: 'ls-a-elev',
-        launch_azimuth_deg: 'ls-a-azim'
+        launch_azimuth_deg: 'ls-a-azim',
+        // V307/FS-UÇUŞ-2: kanat planformu ve paraşüt alanları.
+        fin_root_chord: 'ls-a-finroot', fin_tip_chord: 'ls-a-fintip',
+        fin_sweep: 'ls-a-finsweep', parachute_area: 'ls-a-chutearea',
+        parachute_cd: 'ls-a-chutecd', parachute_deploy_delay: 'ls-a-chutedelay'
     };
+    // V307/FS-UÇUŞ-2: bu kulvarın adlı retleri etkin dilde (sunucu cümlesi
+    // EN'dir; sayılar yanıtın alanlarından gelir).
+    function kendiRetMetni(d) {
+        if (!d || typeof d.error !== 'string') return null;
+        if (d.error === 'fin_rule_not_met') {
+            var r = d.fin_rule || {};
+            return tf('site.finRuleNotMet', {
+                max: fmtNum(num_(r.search_max_span_m), 3) },
+                'No fin span up to {max} m keeps the static margin above the stability threshold with these fin chords and this body. Enter the fin geometry, lengthen the fin chords or the body, or move mass forward. Nothing was flown.');
+        }
+        if (d.error === 'fin_rule_root_chord_does_not_fit') {
+            var f = (Array.isArray(d.invalid_fields) && d.invalid_fields[0]) || {};
+            return tf('site.finRuleRootTooLong', {
+                root: fmtNum(num_(f.root_chord_m), 3),
+                room: fmtNum(num_(f.available_m), 3) },
+                'The fin root chord from the fin rule ({root} m) is longer than the body behind the nose ({room} m), so the fins cannot be placed. Enter the fin root chord or lengthen the body. Nothing was flown.');
+        }
+        return null;
+    }
     function ucRetMetni(d, durum) {
         var p = [t('site.solveError', 'The flight solver returned an error.')];
         if (d && typeof d.message === 'string' && d.message) p.push(srv(d.message));
@@ -1634,6 +2359,334 @@
         return p.join(' · ');
     }
 
+    // =====================================================================
+    // V307/FS-UÇUŞ — UÇUŞ SONUCU SÖZLEŞMESİ: window.LaunchSiteFlightResult
+    //
+    // ÖLÇÜLDÜ (saha_once.json): çözümün sayfadaki tek tüketicisi küreydi
+    // (`globe.setFlightPath(d.series)`); enlem/boylam, Mach, dinamik basınç,
+    // olay zamanları ve iniş HİÇBİR istemci nesnesinde yoktu, izleme ekranı
+    // okuyacak bir yer bulamıyordu. Sonuç artık TEK nesnede yayımlanır ve
+    // her değişimde `hrma:launch-site-flight` olayı (detail = nesne ya da
+    // null) atılır. Nesnedeki her sayı ucun yanıtından ya da uca GİDEN
+    // gövdeden gelir; sayfada hesaplanan/uydurulan sayı yoktur. Şema:
+    // docs/scofield/raw/OH/V307/fs-ucus/RAPOR.md §Sözleşme.
+    //   schema   'hrma.launch_site.flight_result/1'
+    //   samples  sunucu izi (time_s, phase, latitude_deg, longitude_deg,
+    //            altitude_agl_m, altitude_msl_m, north_m, east_m,
+    //            downrange_m, speed_mps, mach, dynamic_pressure_pa)
+    //   events   [{key: liftoff|burnout|max_q|apogee|landing, t_s, ...}]
+    //   descent  {model, status: solved|not_solved, reason?, impact?}
+    // Araç değişince / uçuş reddedilince nesne null olur (eski uçuş geçersiz).
+    // =====================================================================
+    var UCUS_SONUCU_SEMASI = 'hrma.launch_site.flight_result/1';
+    window.LaunchSiteFlightResult = null;
+    function ucusSonucuOlayi(sonuc) {
+        try {
+            document.dispatchEvent(new CustomEvent('hrma:launch-site-flight',
+                { detail: sonuc }));
+        } catch (e) { /* olay yoksa tüketici window.LaunchSiteFlightResult'ı okur */ }
+    }
+    // Uçuş isteklerinin sırası: geçersiz kılınan (araç değişti) ya da daha
+    // yeni bir uçuşla geçilen isteğin yanıtı sonuç olarak yayımlanmaz.
+    var ucusSirasi = 0;
+    // Eski uçuş geçersiz: sözleşme null, küredeki yol ve sonuç okumaları
+    // temizlenir (başka araca ait bir yol/apoje ekranda kalmaz).
+    function ucusSonucunuGecersizKil(neden) {
+        ucusSirasi++;
+        var vardi = !!window.LaunchSiteFlightResult;
+        window.LaunchSiteFlightResult = null;
+        if (globe && typeof globe.clearFlightPath === 'function') globe.clearFlightPath();
+        var zaman = el('ls-time');
+        if (zaman) { zaman.disabled = true; zaman.value = 0; }
+        ['ls-alt', 'ls-speed', 'ls-downrange', 'ls-apogee', 'ls-range'].forEach(function (id) {
+            var e = el(id); if (e) { e.textContent = '--'; e.title = ''; }
+        });
+        var olay = el('ls-events'); if (olay) olay.innerHTML = '';
+        kanatNotunuBas(null);    // V307/FS-UÇUŞ-2: eski uçuşun kanat künyesi kalmaz
+        calkantiSonucunuBas(null);   // V307/FS-KÜÇÜK: eski uçuşun çalkantı bölümü kalmaz
+        if (vardi) ucusSonucuOlayi(null);
+        return neden;
+    }
+    function ucusSonucuKur(d, veh, body, la, lo, h0, kararsiz, govdeKuru) {
+        var iz = (d && d.track && typeof d.track === 'object') ? d.track : null;
+        var sm = d.summary || {};
+        var ucusItkisi = (veh.flight_thrust && typeof veh.flight_thrust === 'object')
+            ? veh.flight_thrust : null;
+        var egri = body.thrust_curve || null;
+        return {
+            schema: UCUS_SONUCU_SEMASI,
+            status: 'solved',
+            solved_at: new Date().toISOString(),
+            playback_allowed: !kararsiz,
+            site: {
+                latitude_deg: la, longitude_deg: lo, elevation_m: h0,
+                elevation_source: (typeof body.launch_altitude === 'number')
+                    ? 'site_resolved' : 'solver_default'
+            },
+            vehicle: {
+                source: veh.source || null,
+                motor_name: veh.motor_name || null,
+                motor_type: veh.motor_type || null,
+                thrust_n: num_(veh.thrust),
+                burn_time_s: num_(veh.burn_time),
+                thrust_source: (ucusItkisi && ucusItkisi.curve_source)
+                    || (egri ? 'thrust_curve' : 'constant'),
+                thrust_curve: egri ? { time_s: egri.time.slice(), thrust_n: egri.thrust.slice() } : null,
+                propellant_loaded_kg: num_(veh.propellant_mass),
+                propellant_flown_kg: body.propellant_mass,
+                engine_inert_mass_kg: num_(veh.engine_inert_mass),
+                airframe_dry_mass_kg: govdeKuru,
+                dry_mass_kg: body.dry_mass,
+                liftoff_mass_kg: body.dry_mass + body.propellant_mass,
+                body_diameter_m: (typeof body.body_diameter === 'number') ? body.body_diameter : null,
+                body_length_m: (typeof body.body_length === 'number') ? body.body_length : null,
+                engine_od_m: num_(veh.engine_od_m),
+                engine_length_m: num_(veh.engine_length_m)
+            },
+            // Uca giden gövdenin KENDİSİ (ne uçtuğunun tek kaydı). V307/FS-KÜÇÜK:
+            // çalkantı bloğunun motor sonucu (0,5–3 MB) kayda kopyalanmaz; yerine
+            // bayrak (blok alanları ve düzen aynen kalır).
+            request: (function () {
+                var kayit = JSON.parse(JSON.stringify(body, function (k, v) {
+                    return (k === 'motor_sonucu') ? undefined : v; }));
+                if (kayit.calkanti) kayit.calkanti.motor_sonucu_gonderildi = true;
+                return kayit;
+            })(),
+            solver: {
+                endpoint: '/api/six-dof-analysis', model: 'six_dof',
+                end_reason: sm.end_reason || null,
+                stable: (typeof sm.stable === 'boolean') ? sm.stable : null,
+                static_margin_full: num_(sm.static_margin_full),
+                static_margin_empty: num_(sm.static_margin_empty),
+                defaults_applied: Array.isArray(d.defaults_applied) ? d.defaults_applied : [],
+                series_sampling: d.series_sampling || null,
+                track_schema: iz ? iz.schema : null
+            },
+            summary: sm,
+            samples: iz ? iz.samples : null,
+            sampling: iz ? iz.sampling : null,
+            events: iz && Array.isArray(iz.events) ? iz.events : [],
+            descent: iz ? iz.descent : null,
+            geodetic: iz ? iz.geodetic : null,
+            frame: iz ? iz.frame : null
+        };
+    }
+    // Küre çizimi için seri: sunucu izinden (yükseliş + varsa iniş). İz yoksa
+    // (eski sunucu) 6-DOF serisinin kendisi — davranış eskisi gibi.
+    function cizimSerisi(d) {
+        var iz = d && d.track;
+        var o = iz && iz.samples;
+        if (!o || !Array.isArray(o.time_s) || !o.time_s.length) return d.series;
+        return { time: o.time_s, north: o.north_m, east: o.east_m,
+                 altitude: o.altitude_agl_m, speed: o.speed_mps,
+                 altitude_datum: (iz.frame && iz.frame.altitude_agl) || d.series.altitude_datum };
+    }
+    // İnişin durumu durum satırına (çözüldüyse modeli, çözülmediyse nedeni).
+    function inisNotu(d) {
+        var x = d && d.track && d.track.descent;
+        if (!x) return '';
+        if (x.status === 'solved' && x.model === 'parachute_point_mass') {
+            // V307/FS-UÇUŞ-2 (A4): değerler yanıtın kurtarma bloğundan; boş
+            // bırakılan Cd/gecikme düzlemsel çözücünün varsayımıdır (işaretli).
+            var k = x.recovery || {}, v = k.assumed || {}, im = x.impact || {};
+            var isaret = ' (' + t('site.chuteAssumed', 'assumed') + ')';
+            return tf('site.flightDescentParachute', {
+                area: fmtNum(num_(k.parachute_area_m2), 2),
+                cd: fmtNum(num_(k.parachute_cd), 2) + (v.cd ? isaret : ''),
+                delay: fmtNum(num_(k.parachute_deploy_delay_s), 1) + ' s' + (v.deploy_delay ? isaret : ''),
+                landing: fmtNum(num_(im.speed_mps), 1) },
+                'Descent under the parachute, with the recovery model of the 2-D trajectory solver: {area} m² at Cd {cd}, opening {delay} after apogee; the vehicle lands at {landing} m/s.')
+                + (k.deployed === false ? ' ' + t('site.chuteNotDeployed',
+                    'The vehicle reached the ground before the parachute opened.') : '');
+        }
+        if (x.status === 'solved') {
+            return t('site.flightDescentSolved',
+                'Descent shown to the ground: point-mass ballistic fall from the ascent end, no recovery system (HRMA choice, not a recovery model).');
+        }
+        var anahtar = {
+            vehicle_not_statically_stable: ['site.flightDescentUnstable',
+                'Descent not solved: the vehicle is not statically stable, so the nose-first ballistic fall does not apply — the path ends where the 6-DOF ascent ends.'],
+            ascent_did_not_end_at_apogee: ['site.flightDescentNoApogee',
+                'Descent not solved: the 6-DOF ascent did not end at apogee — the path ends where the ascent ends.'],
+            ground_not_reached_within_limit: ['site.flightDescentTimeLimit',
+                'Descent not solved: the vehicle did not reach the ground within the solver time limit.']
+        }[x.reason];
+        return anahtar ? t(anahtar[0], anahtar[1])
+            : t('site.flightDescentNotSolved', 'Descent not solved — the path ends where the 6-DOF ascent ends.');
+    }
+
+    // V307/FS-UÇUŞ-2 (A1/A2) — UÇAN KANADIN KAYNAKLI KÜNYESİ. Her alan yanıtın
+    // fin_geometry bloğundan değeri ve kaynağıyla (formdaki değer / kural /
+    // çözücü varsayılanı); marjlar ve eşik kaynağı aynı bloktan. Sayfada
+    // sayı hesaplanmaz. Araç değişince ya da uçuş geçersiz olunca silinir.
+    var sonKanatGeometrisi = null;
+    // Kaynak kodu -> metin anahtarı (tam anahtarlar; dinamik önek yok).
+    // Tanınmayan kod HAM yazılır (uydurma etiket yok).
+    var KANAT_KAYNAK_ANAHTARI = {
+        supplied: 'site.finSrc.supplied', rule_planform: 'site.finSrc.rule_planform',
+        rule_static_margin: 'site.finSrc.rule_static_margin',
+        solver_default: 'site.finSrc.solver_default', no_fins: 'site.finSrc.no_fins'
+    };
+    var KANAT_ALAN_KIMLIGI = {
+        fin_count: 'ls-a-fincount', fin_root_chord: 'ls-a-finroot',
+        fin_tip_chord: 'ls-a-fintip', fin_sweep: 'ls-a-finsweep',
+        fin_span: 'ls-a-finspan'
+    };
+    function kanatNotunuBas(fg) {
+        sonKanatGeometrisi = (fg && typeof fg === 'object') ? fg : null;
+        var n = el('ls-fin-note');
+        if (!n) return;
+        n.textContent = '';
+        if (!sonKanatGeometrisi) return;
+        var alanlar = fg.fields || {};
+        // Aynı kaynaktan gelen ardışık alanlar tek grupta, kaynak bir kez yazılır;
+        // etiketin birim eki ("(m)") değerin yanında tekrarlanmaz.
+        var gruplar = [];
+        ['fin_count', 'fin_root_chord', 'fin_tip_chord', 'fin_sweep', 'fin_span'].forEach(function (ad) {
+            var a = alanlar[ad];
+            if (!a || typeof a !== 'object') return;
+            var etiket = (alanEtiketi(KANAT_ALAN_KIMLIGI[ad]) || ad).replace(/\s*\([^)]*\)\s*$/, '');
+            var deger = (ad === 'fin_count') ? fmtNum(num_(a.value), 0)
+                : fmtNum(num_(a.value), 3) + ' m';
+            var son = gruplar[gruplar.length - 1];
+            if (son && son.kaynak === a.source) son.ogeler.push(etiket + ' ' + deger);
+            else gruplar.push({ kaynak: a.source, ogeler: [etiket + ' ' + deger] });
+        });
+        var parcalar = gruplar.map(function (g) {
+            return g.ogeler.join(', ') + ' ('
+                + (KANAT_KAYNAK_ANAHTARI[g.kaynak] ? t(KANAT_KAYNAK_ANAHTARI[g.kaynak], g.kaynak) : g.kaynak) + ')';
+        });
+        var kr = fg.criterion || {};
+        var bant = Array.isArray(kr.band_cal) ? kr.band_cal : [];
+        var metin = t('site.finNoteHead', 'Fins flown:') + ' ' + parcalar.join(' · ') + '. '
+            + tf('site.finMarginNote', {
+                full: fmtNum(num_(fg.margin_full_cal), 2),
+                empty: fmtNum(num_(fg.margin_empty_cal), 2),
+                min: fmtNum(num_(fg.min_margin_over_mach_range_cal), 3),
+                mach: fmtNum(num_(kr.mach_range_max), 2),
+                thr: fmtNum(num_(kr.threshold_cal), 0) },
+                'Static margin {full} / {empty} calibre (full / empty) at Mach 0; lowest {min} calibre from Mach 0 to Mach {mach}. Stability threshold: above {thr} calibre.')
+            + ' ' + t('site.finThresholdSource',
+                'Source of the threshold: S. Niskanen, OpenRocket technical documentation (2013), section 2.4, p. 12 — rule of thumb among model rocketeers, centre of pressure about 1–2 calibres behind the centre of gravity; HRMA uses the lower end.');
+        if (fg.above_band_upper && bant.length === 2) {
+            metin += ' ' + tf('site.finAboveBand', { upper: fmtNum(num_(bant[1]), 0) },
+                'The margin at Mach 0 is above the upper end of that range ({upper} calibre): the vehicle turns into the wind more strongly (information, not an error). Fins sized for a supersonic flight show this, because fins are less effective at supersonic speed.');
+        }
+        // V307/FS-UÇUŞ-2 (ana model kararı, 16 Kas): kuralın açıklığı kanat
+        // HEDEFİNE (bandın ortası, HRMA seçimi) göre; 4·d içinde sağlanamadıysa
+        // eşiğe düşülür ve bu adıyla yazılır. Sayılar yanıtın ölçütünden.
+        if (alanlar.fin_span && alanlar.fin_span.source === 'rule_static_margin') {
+            metin += ' ' + ((kr.target_met === false)
+                ? tf('site.finTargetFallback', {
+                    target: fmtNum(num_(kr.target_cal), 1),
+                    max: fmtNum(num_(kr.search_max_calibers), 0),
+                    thr: fmtNum(num_(kr.threshold_cal), 0) },
+                    'The fin target of {target} calibre could not be met on this body within a span of {max} body diameters; the lower limit of {thr} calibre was used.')
+                : tf('site.finTargetMet', { target: fmtNum(num_(kr.target_cal), 1) },
+                    'The span is sized for the fin target: lowest static margin over the flight at least {target} calibre (middle of that range; HRMA choice that leaves room for the uncertainty of the estimated centre of gravity).'));
+        }
+        if (fg.criterion_met_over_mach_range === false) {
+            metin += ' ' + t('site.finCriterionNotMet',
+                'With these fins the static margin falls to the threshold or below somewhere in the flight Mach range.');
+        }
+        n.textContent = metin;
+        var kuralVar = Object.keys(alanlar).some(function (k) {
+            return alanlar[k] && /^rule_/.test(alanlar[k].source || '');
+        });
+        if (kuralVar) {
+            var det = document.createElement('details');
+            det.className = 'ls-basis';
+            var oz = document.createElement('summary');
+            oz.textContent = t('site.finRuleBasisHead', 'Fin rule basis');
+            var ic = document.createElement('div');
+            var pr = fg.planform_rule || {};
+            ic.textContent = tf('site.finRuleBasis', {
+                root: fmtNum(num_(pr.example_root_chord_m), 2),
+                tip: fmtNum(num_(pr.example_tip_chord_m), 2),
+                sweep: fmtNum(num_(pr.example_sweep_m), 2),
+                d: fmtNum(num_(pr.example_body_diameter_m), 2),
+                target: fmtNum(num_(kr.target_cal), 1),
+                max: fmtNum(num_(kr.search_max_calibers), 0),
+                thr: fmtNum(num_(kr.threshold_cal), 0) },
+                'Missing chords: the example vehicle fin (root/tip chord {root}/{tip} m, sweep {sweep} m on its {d} m body) scaled with this body diameter — an HRMA choice, not a sourced design rule; a chord you enter is kept and the missing ones follow from it. Missing span: the smallest span that keeps the lowest static margin, full and empty, from Mach 0 to the highest Mach of the flight at or above the fin target of {target} calibre (middle of the source range; HRMA choice that leaves room for the uncertainty of the estimated centre of gravity) — if no span up to {max} body diameters reaches it, above the {thr}-calibre threshold, and this is stated. Same Barrowman model with its Mach correction, same centre of gravity; the vehicle is flown with it, and if that flight is faster the span is sized again and flown again.');
+            det.appendChild(oz);
+            det.appendChild(ic);
+            n.appendChild(det);
+        }
+    }
+
+    // V307/FS-UÇUŞ — KANAT AÇIKLIĞI ÖNERİSİ. ÖLÇÜLDÜ (saha_once.json): türetilmiş
+    // gövdede kanat kök/uç veteri ve oku sabit, açıklık alanı 0,11 m kalıyordu;
+    // Ø0,473 m sıvı ve Ø0,212 m hibrit örnekte statik marj −1,86 / 0,45
+    // kalibre → "kararsız, oynatma kapalı". Uç, aynı Barrowman modeli (Mach
+    // düzeltmesiyle) ve aynı ağırlık merkeziyle statik marjı uçuşun Mach
+    // aralığında 1 kalibrenin üstünde tutan en küçük açıklığı bulur, aracı o
+    // açıklıkla AYNI girdilerde yeniden uçurup çözücünün hükmünü yazar
+    // (fin_sizing.verification). Sayfa öneriyi ve hükmü yazar; düğme yalnız
+    // hüküm 'stable' ise çıkar ve alanı doldurur; kendiliğinden uygulanmaz,
+    // sonuç kullanıcının yeniden uçuşuyla gelir (sahte kararlılık yok).
+    function kanatOnerisiniBas(fs) {
+        if (!fs || typeof fs !== 'object') return;
+        var durumEl = el('ls-status');
+        if (!durumEl) return;
+        var kutu = document.createElement('div');
+        kutu.className = 'ls-fin-oneri';
+        kutu.style.marginTop = '4px';
+        var acik = num_(fs.min_fin_span_m);
+        var metin = document.createElement('span');
+        if (acik === null) {
+            metin.textContent = (fs.reason === 'no_fins_to_size')
+                ? t('site.flightFinNoFins', 'No fins to size: with no fins the body cannot meet the stability criterion — add fins.')
+                : (fs.reason === 'static_criterion_already_met_at_current_span')
+                    ? tf('site.flightFinAlreadyMet', { target: fmtNum(num_(fs.margin_target_used_cal), 1) },
+                        'The fin span already keeps the lowest static margin at or above {target} calibre over this flight\'s Mach range; the instability comes from the flight itself (angle of attack) — check the launch angle, wind and mass distribution.')
+                    : tf('site.flightFinNotFound', { max: fmtNum(num_(fs.search_max_span_m), 2) },
+                        'No fin span up to {max} m with these fin chords meets the stability criterion (static margin above 1 calibre, full and empty): lengthen the fin chords or the body, or move mass forward.');
+            kutu.appendChild(metin);
+            durumEl.appendChild(kutu);
+            return;
+        }
+        var dg = (fs.verification && typeof fs.verification === 'object') ? fs.verification : {};
+        var kararli = (dg.status === 'flown' && dg.verdict === 'stable');
+        var ucusNotu = '';
+        if (dg.status === 'flown') {
+            ucusNotu = kararli
+                ? tf('site.flightFinFlownStable', { apogee: fmtKmM(num_(dg.apogee_m)) },
+                    'Flown with this span on the same inputs: the solver verdict is stable, apogee {apogee}.')
+                : t('site.flightFinFlownUnstable',
+                    'Flown with this span on the same inputs: still not stable — the fins alone do not fix this vehicle; change the fin chords, the body or the mass distribution.');
+        }
+        metin.textContent = tf('site.flightFinSuggest', {
+            span: fmtNum_(acik, 3),
+            mach: fmtNum(num_(fs.mach_range_max), 2),
+            target: fmtNum(num_(fs.margin_target_used_cal), 1),
+            now: fmtNum(num_(fs.current_margin_full_cal), 2) },
+            'Static margin now {now} calibre. With the same fin count and chords, the smallest fin span that keeps the lowest static margin (full and empty) from Mach 0 to {mach} at or above {target} calibre is {span} m (same Barrowman model with its Mach correction).')
+            + ((fs.target_met === false) ? ' ' + tf('site.finTargetFallback', {
+                target: fmtNum(num_(fs.target_margin_cal), 1),
+                max: fmtNum(num_(fs.search_max_calibers), 0),
+                thr: fmtNum(num_(fs.margin_target_used_cal), 0) },
+                'The fin target of {target} calibre could not be met on this body within a span of {max} body diameters; the lower limit of {thr} calibre was used.') : '')
+            + (ucusNotu ? ' ' + ucusNotu : '') + ' '
+            + t('site.flightFinNotApplied', 'A suggestion — not applied until you use it and fly again.') + ' ';
+        kutu.appendChild(metin);
+        if (!kararli) { durumEl.appendChild(kutu); return; }
+        var dugme = document.createElement('button');
+        dugme.type = 'button';
+        dugme.className = 'ls-btn ls-fin-oneri-al';
+        dugme.style.cssText = 'width:auto; padding:2px 10px; margin-top:4px;';
+        dugme.textContent = t('site.flightFinUse', 'Use this fin span');
+        dugme.addEventListener('click', function () {
+            var alan = el('ls-a-finspan');
+            if (alan) alan.value = acik.toFixed(3);
+            ucusSonucunuGecersizKil('fin_span_changed');
+            setFlightControlsEnabled(false);
+            setStatus(t('site.flightFinApplied', 'Fin span set — fly again to solve the flight with it.'));
+        });
+        kutu.appendChild(dugme);
+        durumEl.appendChild(kutu);
+    }
+
     el('ls-fly').addEventListener('click', function () {
         var la = parseFloat(el('ls-lat').value), lo = parseFloat(el('ls-lon').value);
         if (!isFinite(la) || !isFinite(lo)) return;
@@ -1649,11 +2702,13 @@
         var red = ucusReddi(veh);
         if (red) {
             setFlightControlsEnabled(false);
+            ucusSonucunuGecersizKil('refused');
             setStatus(red);
             return;
         }
         el('ls-fly').disabled = true;
         setStatus(t('site.launching', 'Solving flight…'));
+        calkantiSonucunuBas(null);   // V307/FS-KÜÇÜK: önceki uçuşun çalkantı bölümü ve işareti kalkar
         // V306/UÇUŞ-2 — UÇAN İTKİ TEK KURALDAN (flight_vehicle.
         // motor_flight_thrust; motor sayfalarının Yörünge ve 6-DOF panelleri
         // de bunu uçurur). N₂O kendinden basınçlı tankta boşalma eğrisi uçar;
@@ -1671,7 +2726,8 @@
             : ((ucusItki && ucusItki.curve_source === 'motor_blowdown'
                 && ucusItki.propellant_loaded_kg > ucusItki.propellant_consumed_kg)
                 ? ucusItki.propellant_loaded_kg - ucusItki.propellant_consumed_kg : 0);
-        var dryTotal = fieldNum('ls-a-drymass') + num_(veh.engine_inert_mass) + tanktaKalan;
+        var govdeKuru = fieldNum('ls-a-drymass');   // istek anındaki değer (sözleşme)
+        var dryTotal = govdeKuru + num_(veh.engine_inert_mass) + tanktaKalan;
 
         var body = {
             body_diameter: fieldNum('ls-a-bodydia'),
@@ -1687,10 +2743,13 @@
             burn_time: num_(veh.burn_time),
             cd0: fieldNum('ls-a-cd0'),
             fin_count: fieldNum('ls-a-fincount'),
-            fin_root_chord: LS_FIXED_AIRFRAME.fin_root_chord,
-            fin_tip_chord: LS_FIXED_AIRFRAME.fin_tip_chord,
+            fin_root_chord: fieldNum('ls-a-finroot'),
+            fin_tip_chord: fieldNum('ls-a-fintip'),
             fin_span: fieldNum('ls-a-finspan'),
-            fin_sweep: LS_FIXED_AIRFRAME.fin_sweep,
+            fin_sweep: fieldNum('ls-a-finsweep'),
+            // V307/FS-UÇUŞ-2 (A1): boş kanat alanı uçta kaynaklı kuraldan
+            // gelir; yanıtın fin_geometry bloğu her alanın kaynağını yazar.
+            fin_geometry_rule: 'static_margin',
             launch_elevation_deg: fieldNum('ls-a-elev'),
             launch_azimuth_deg: fieldNum('ls-a-azim'),
             rail_length: LS_FIXED_AIRFRAME.rail_length,
@@ -1699,6 +2758,16 @@
             // B1 — Coriolis: çözücü saha enlemini alınca Dünya dönüşünü
             // modelleyebilir (düz-Dünya varsayımı kalkar).
             latitude_deg: la,
+            // V307/FS-UÇUŞ: boylam + iniş modeli → yanıtta `track` (enlem/
+            // boylam izi, iniş, olaylar; launch_site_flight.flight_track).
+            longitude_deg: lo,
+            descent_model: 'ballistic',
+            // V307/FS-UÇUŞ-2 (A4): paraşüt alanı girilmişse iniş paraşütlüdür
+            // (aşağıda descent_model 'parachute'); Cd ve gecikme boşsa uç
+            // düzlemsel çözücünün varsayılanını 'assumed' bayrağıyla yazar.
+            parachute_area: fieldNum('ls-a-chutearea'),
+            parachute_cd: fieldNum('ls-a-chutecd'),
+            parachute_deploy_delay: fieldNum('ls-a-chutedelay'),
             // V301/UÇUŞ NK-47: motor zarfı. "Gövde bu motoru taşıyabilir
             // mi" hükmü 6-DOF ucunda TEK işlevle verilir
             // (flight_vehicle.airframe_fit_conflicts); motor sayfalarının
@@ -1713,6 +2782,7 @@
         // Boş alan (null) GÖNDERİLMEZ: uç kendi beyanlı varsayılanını adıyla
         // uygular (defaults_applied) — sayfada gizli sayı yok.
         Object.keys(body).forEach(function (k) { if (body[k] === null) delete body[k]; });
+        if (typeof body.parachute_area === 'number') body.descent_model = 'parachute';
         // ÖH defter P4B3-01 — SAHA RAKIMI ÇÖZÜCÜYE GEÇMELİ.
         // Çözücü ve uç launch_altitude alanını zaten kabul ediyor
         // (app.py /api/six-dof-analysis) ve atmosfer artık MUTLAK irtifadan
@@ -1730,7 +2800,22 @@
         if (veh.thrust_curve && veh.thrust_curve.time && veh.thrust_curve.time.length) {
             body.thrust_curve = veh.thrust_curve;
         }
+        // V307/FS-KÜÇÜK (kalem 5): motor sayfasıyla AYNI çalkantı bloğu (sıvı /
+        // hibrit, motor sonucu bu sayfada ve tank yeri girildiyse). Sayı
+        // olmayan istasyon girdisi sessizce düşmez: uçuş adıyla durur.
+        var calkantiBlogu = calkantiBloguKur();
+        if (calkantiBlogu && calkantiBlogu.gecersiz) {
+            calkantiBlogu.gecersiz.forEach(alanIsaretle);
+            el('ls-fly').disabled = false;
+            setFlightControlsEnabled(false);
+            ucusSonucunuGecersizKil('refused');
+            setStatus(t('site.sloshStationInvalid',
+                'A tank bottom station is not a number — enter metres from the nose or leave it blank (that tank is then not coupled). Nothing was flown.'));
+            return;
+        }
+        if (calkantiBlogu) body.calkanti = calkantiBlogu;
         var ucDurum = 0;
+        var benimUcus = ++ucusSirasi;
         fetch('/api/six-dof-analysis', {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(body)
@@ -1739,17 +2824,27 @@
             return r.json().catch(function () { return null; });
         }).then(function (d) {
             el('ls-fly').disabled = false;
+            // V307/FS-UÇUŞ: istek sürerken araç değiştiyse bu yanıt eski
+            // araca aittir — çizilmez, yayımlanmaz.
+            if (benimUcus !== ucusSirasi) return;
             if (!d || d.status !== 'success' || !d.series) {
                 setFlightControlsEnabled(false);
+                ucusSonucunuGecersizKil('solver_error');
                 // V301/UÇUŞ NK-47: ucun adlı reddi (ör. airframe_cannot_carry_
                 // engine) gerekçesi ve alanlarıyla basılır; gövde alanı işaretlenir.
                 if (d && Array.isArray(d.invalid_fields)) {
                     d.invalid_fields.forEach(function (f) {
                         if (f && f.field === 'body_diameter') alanIsaretle('ls-a-bodydia');
                         if (f && f.field === 'body_length') alanIsaretle('ls-a-bodylen');
+                        // V307/FS-UÇUŞ-2: kanat ve paraşüt alanları da işaretlenir.
+                        if (f && UC_ALAN_KIMLIGI[f.field]
+                                && /^(fin_|parachute_)/.test(f.field)) {
+                            alanIsaretle(UC_ALAN_KIMLIGI[f.field]);
+                        }
                     });
                 }
-                setStatus(ucRetMetni(d, ucDurum)); return;
+                var genelRet = ucRetMetni(d, ucDurum);   // ipucu (makine izi) de kurulur
+                setStatus(kendiRetMetni(d) || genelRet); return;
             }
             // A3 — KARARLILIK KAPISI (istemcide Barrowman TEKRARLANMAZ):
             // çözücü zaten static_margin_full / stable / end_reason döndürüyor.
@@ -1765,18 +2860,50 @@
                     'Vehicle is aerodynamically unstable (static margin < 1 cal) — '
                     + 'playback disabled. Increase fin span or move mass forward.'));
             }
+            // V307/FS-UÇUŞ: çizilen yol sunucu izidir (yükseliş + çözüldüyse
+            // yere kadar iniş); iniş çözüldüyse bitiş işaretçisi 'yere iniş'.
+            var inisVar = !!(d.track && d.track.descent && d.track.descent.status === 'solved');
+            var seri = cizimSerisi(d);
             globe.opts.burnTime = body.burn_time;
-            globe.opts.endReason = d.summary.end_reason;
-            globe.opts.playbackSpeed = Math.max(1, (d.summary.apogee_time || 20) / 12);
+            globe.opts.endReason = inisVar ? 'ground' : d.summary.end_reason;
+            // V307/FS-KÜÇÜK (kalem 1): paraşüt açılışı işaretçisi sunucunun
+            // `deploy` olayından (yoksa null: işaretçi yok, satır yok).
+            var acilisOlayi = (d.track && Array.isArray(d.track.events))
+                ? d.track.events.filter(function (e) { return e && e.key === 'deploy'; })[0] : null;
+            globe.opts.deployTime = (acilisOlayi && num_(acilisOlayi.t_s) !== null) ? acilisOlayi.t_s : null;
+            var tSon = (seri.time && seri.time.length) ? seri.time[seri.time.length - 1] : null;
+            globe.opts.playbackSpeed = Math.max(1, (tSon || d.summary.apogee_time || 20) / 12);
             var h0 = globe._siteElevM || 0;
-            globe.setFlightPath(d.series, la, lo, h0);
-            el('ls-time').disabled = false;
-            renderEvents();
+            // Sözleşme ÇİZİMDEN ÖNCE yayımlanır: küre kurulamasa da (WebGL
+            // yok) çözülen uçuş tüketicilere ulaşır; çizim hatası sonucu
+            // düşürmez, adıyla yazılır.
+            window.LaunchSiteFlightResult = ucusSonucuKur(d, veh, body, la, lo,
+                (typeof body.launch_altitude === 'number') ? body.launch_altitude : 0, unstable,
+                govdeKuru);
+            ucusSonucuOlayi(window.LaunchSiteFlightResult);
+            // Küre kurulamadıysa (WebGL yok) setFlightPath ya atar ya da hiçbir
+            // şey çizmeden döner; ikisinde de yol YOKTUR (ölçüldü: WebGL
+            // kapalıyken `globe._flight` null, oynatma düğmeleri açılıyordu).
+            var cizildi = true;
+            try {
+                globe.setFlightPath(seri, la, lo, h0);
+                cizildi = !!globe._flight;
+            } catch (cizimHatasi) {
+                cizildi = false;
+            }
+            el('ls-time').disabled = !cizildi;
+            if (cizildi) renderEvents();
             // v3.0.1 (NK-48): burada koşulsuz setStatus('') vardı ve az
             // yukarıda yazılan "araç kararsız — oynatma kapalı" iletisini
             // aynı karede siliyordu; kullanıcı kapalı düğmeleri gerekçesiz
             // görüyordu. İleti yalnız kararlı araçta temizlenir.
             if (!unstable) setStatus('');
+            if (!cizildi) {
+                setFlightControlsEnabled(false);
+                var cizimEl = el('ls-status');
+                var cizimMetni = t('site.globeError', 'The 3D globe could not be started (WebGL required).');
+                cizimEl.textContent = cizimEl.textContent ? cizimEl.textContent + ' ' + cizimMetni : cizimMetni;
+            }
             // V301/UÇUŞ C-25: sunucunun boş alana uyguladığı beyanlı
             // varsayılanlar (defaults_applied) durum satırına EKLENİR —
             // kararsızlık iletisini silmez.
@@ -1789,11 +2916,17 @@
                 alanIsaretle('ls-a-bodydia');
                 var c0 = sigmaz[0] || {};
                 var sigmazMetni = tf('site.propellantDoesNotFit', {
-                    need: fmtNum_(num_(c0.propellant_volume_m3) || 0, 3),
-                    have: fmtNum_(num_(c0.body_volume_available_m3) || 0, 3) },
+                    need: fmtNum(num_(c0.propellant_volume_m3), 3),
+                    have: fmtNum(num_(c0.body_volume_available_m3), 3) },
                     'The propellant tanks need {need} m³ but this body holds at most {have} m³ behind the nose and in front of the engine: the propellant does not fit. Lengthen or widen the body.');
                 var dEl = el('ls-status');
                 dEl.textContent = dEl.textContent ? dEl.textContent + ' ' + sigmazMetni : sigmazMetni;
+            }
+            var inisMetni = inisNotu(d);
+            if (inisMetni) {
+                var inisEl = el('ls-status');
+                inisEl.textContent = inisEl.textContent
+                    ? inisEl.textContent + ' ' + inisMetni : inisMetni;
             }
             var varsayilanNotu = sunucuVarsayilanMetni(d);
             if (varsayilanNotu) {
@@ -1801,12 +2934,22 @@
                 durumEl.textContent = durumEl.textContent
                     ? durumEl.textContent + ' ' + varsayilanNotu : varsayilanNotu;
             }
+            // V307/FS-UÇUŞ-2 (A1/A2): uçan kanadın değer + kaynak künyesi.
+            kanatNotunuBas(d.fin_geometry);
+            // V307/FS-UÇUŞ — KARARSIZ ARAÇTA ÖNERİLEN DÜZELTME (en sona: üstteki
+            // satırlar textContent ile yazıldığı için düğme ancak sonda kalır).
+            kanatOnerisiniBas(d.fin_sizing);
+            // V307/FS-KÜÇÜK (kalem 5): 6-DOF'un çalkantı bölümü (yanıtın
+            // calkanti bloğu, aynen; blok gönderilmediyse nedeni).
+            calkantiSonucunuBas(d, !!body.calkanti);
             // Özet satırları panelin altında kalmasın (NK-69): çözüm gelince
             // sağ panel özet bloğunu görünür alana kaydırır.
             var ozet = el('ls-range');
             if (ozet && ozet.scrollIntoView) ozet.scrollIntoView({ block: 'nearest' });
         }).catch(function () {
             el('ls-fly').disabled = false;
+            if (benimUcus !== ucusSirasi) return;
+            ucusSonucunuGecersizKil('solver_error');
             setStatus(t('site.solveError', 'The flight solver returned an error.'));
         });
     });
@@ -1855,7 +2998,9 @@
         if (s.downrange != null) el('ls-downrange').textContent = fmtKmM(s.downrange);
         // Tüm-çözüm özeti: kaydırıcıyla değişmez, ayrı blokta duruyor.
         // Apoje de AYNI datumda okunur (çözücünün `apogee_datum` sözleşmesi).
-        if (s.apogee != null) {
+        // V307/FS-KÜÇÜK (kalem 5): çalkantı bağlaşık koşusu doğrusal sınırı
+        // aştıysa apoje "doğrusal model geçerliliği dışında" (calkantiSonucunuBas).
+        if (s.apogee != null && !calkantiGecerlilikDisi) {
             el('ls-apogee').textContent =
                 fmtKmM(s.apogeeAgl != null ? s.apogeeAgl : s.apogee);
             el('ls-apogee').title = tf('site.altDatumTip',
@@ -1870,21 +3015,73 @@
         var box = el('ls-events'); box.innerHTML = '';
         var evs = globe._events || [];
         var labels = { liftoff: 'site.liftoff', burnout: 'site.burnout',
-            apogee: 'site.apogee', impact: 'site.impact', end: 'site.end' };
+            apogee: 'site.apogee', deploy: 'site.deploy', impact: 'site.impact', end: 'site.end' };
+        // V307/FS-KÜÇÜK (kalem 1-2): iniş çözüldüyse model sınırı notu iniş
+        // satırlarının BAŞINDA (6-DOF çözücü apojede biter; iniş ayrı model).
+        // Paraşüt açılışı satırı sunucu olayının zamanı, irtifası ve hızıyla.
+        var ucusSonucu = window.LaunchSiteFlightResult;
+        var inis = (ucusSonucu && ucusSonucu.descent && ucusSonucu.descent.status === 'solved')
+            ? ucusSonucu.descent : null;
+        var kurtarma = (inis && inis.recovery) || null;
+        var inisNotuKondu = false;
+        function inisSinirNotu() {
+            var n = document.createElement('div');
+            n.className = 'ls-hint ls-ev-model';
+            n.textContent = tf('site.descentModelNote', {
+                model: (inis.model === 'parachute_point_mass')
+                    ? t('site.descentModelParachute', 'point-mass descent under the parachute, with the recovery model of the 2-D trajectory solver')
+                    : t('site.descentModelBallistic', 'point-mass ballistic fall, nose first, no recovery system (HRMA choice)') },
+                'The 6-DOF solver ends at apogee; the descent below comes from a separate model: {model}.');
+            box.appendChild(n);
+            inisNotuKondu = true;
+        }
+        // V307/FS-UÇUŞ-2 (A5) — YANMA SONU TEK TANIM: uçurulan itki girdisinin
+        // bittiği an (çözücü itkiyi o anda sıfırlar; = "Yanma süresi" alanı).
+        // Zaman ve irtifa sunucunun olay listesinden (tam çözünürlük);
+        // kürenin işaretçisi yalnız rengi ve sırayı verir. Kürenin 'impact'i
+        // sunucunun 'landing' olayıdır.
+        var sunucu = {};
+        var sonuc = window.LaunchSiteFlightResult;
+        ((sonuc && Array.isArray(sonuc.events)) ? sonuc.events : []).forEach(function (s) {
+            if (s && typeof s.key === 'string') sunucu[s.key] = s;
+        });
+        var ITKI_KAYNAGI = (sonuc && sonuc.vehicle && sonuc.vehicle.thrust_source) || null;
+        // İtki kaynağı kodu -> metin anahtarı (tam anahtarlar; tanınmayan kod HAM).
+        var ITKI_KAYNAGI_ANAHTARI = {
+            motor_thrust_curve: 'site.thrustSrc.motor_thrust_curve',
+            motor_blowdown: 'site.thrustSrc.motor_blowdown',
+            motor_regulated: 'site.thrustSrc.motor_regulated',
+            motor_constant: 'site.thrustSrc.motor_constant',
+            thrust_curve: 'site.thrustSrc.thrust_curve', constant: 'site.thrustSrc.constant'
+        };
         evs.forEach(function (e) {
             var row = document.createElement('div'); row.className = 'ls-ev';
             var dot = document.createElement('span'); dot.className = 'dot';
             dot.style.background = '#' + e.color.toString(16).padStart(6, '0');
             var name = document.createElement('span');
-            // DÜRÜSTLÜK: yanma sonu işaretçisi ÇÖZÜCÜ çıktısı değil, kullanıcının
-            // girdiği yanma süresinden (globe.opts.burnTime = body.burn_time)
-            // türetiliyor. Etiket bunu söyler, aksi hâlde ölçülmüş bir olay sanılır.
+            var s = sunucu[e.key === 'impact' ? 'landing' : e.key] || null;
             name.textContent = t(labels[e.key] || e.key, e.key)
                 + (e.key === 'burnout'
-                    ? ' · ' + t('site.burnoutFromInput', 'from input burn time')
+                    ? ' · ' + t('site.burnoutFlownThrust', 'end of the flown thrust')
+                      + (ITKI_KAYNAGI ? ' (' + (ITKI_KAYNAGI_ANAHTARI[ITKI_KAYNAGI]
+                          ? t(ITKI_KAYNAGI_ANAHTARI[ITKI_KAYNAGI], ITKI_KAYNAGI) : ITKI_KAYNAGI) + ')' : '')
                     : '');
+            if (e.key === 'deploy' && kurtarma && num_(kurtarma.parachute_deploy_delay_s) !== null) {
+                name.textContent += ' · ' + tf('site.deployAfterApogee', {
+                    delay: fmtNum_(kurtarma.parachute_deploy_delay_s, 1)
+                        + ((kurtarma.assumed && kurtarma.assumed.deploy_delay)
+                            ? ' (' + t('site.chuteAssumed', 'assumed') + ')' : '') },
+                    '{delay} s after apogee');
+            }
             var tm = document.createElement('span'); tm.className = 't';
-            tm.textContent = fmtNum_(e.t, 1) + ' s · ' + fmtKmM(e.alt);
+            tm.textContent = s
+                ? fmtNum_(s.t_s, 1) + ' s · ' + fmtKmM(s.altitude_agl_m)
+                : fmtNum_(e.t, 1) + ' s · ' + fmtKmM(e.alt);
+            // Paraşüt açılışında hız da (sunucu olayının kendi alanı).
+            if (e.key === 'deploy' && s && num_(s.speed_mps) !== null) {
+                tm.textContent += ' · ' + fmtNum_(s.speed_mps, 1) + ' m/s';
+            }
+            if (inis && !inisNotuKondu && (e.key === 'deploy' || e.key === 'impact')) inisSinirNotu();
             row.appendChild(dot); row.appendChild(name); row.appendChild(tm);
             box.appendChild(row);
         });
@@ -1929,7 +3126,10 @@
         // getInfo() çıktısından gelir (varlık künyesi); yoksa satır basılmaz.
         // Bu yorumda kesme işareti YOK: şablon bekçisi tırnak sayar.
         var sd = (v && v.durum === 'hazir') ? v.sinirDuzeltmesi : null;
-        var sig = [notAcik, olcek, etiketHazir, cizgiNE, dil, !!sd].join('|');
+        // V307/FS-HARİTA: yakın ölçek yer adları (GeoNames, CC BY 4.0) ekranda
+        // en az bir etiketle görünürken atıf zorunludur.
+        var geoAtif = !!(li && li.detay && li.detay.durum === 'hazir' && li.detay.gorunur > 0);
+        var sig = [notAcik, olcek, etiketHazir, cizgiNE, dil, !!sd, geoAtif].join('|');
         if (!force && sig === mapNoteSig) return;
         mapNoteSig = sig;
         var vn = el('ls-vecnote'), na = el('ls-ne-attr');
@@ -1967,6 +3167,10 @@
                 parca.push(tf('site.nameCorrections', { n: fmtNum_(ad.yer + ad.ulke, 0) },
                     'Place and country names corrected to Turkish official usage: {n}.'));
         }
+        if (geoAtif)
+            parca.push(t('site.mapGeonamesAttribution',
+                'Close-range place names: GeoNames (geonames.org), CC BY 4.0. Shown with '
+                + 'their local name when no Turkish or English name is in the data.'));
         if (sd && sd.cizgi > 0)
             parca.push(tf('site.boundaryCorrections', { n: fmtNum_(sd.cizgi, 0) },
                 'Disputed boundary lines removed in Crimea: {n} (official view of '
@@ -2002,7 +3206,9 @@
     // harita-detay K4 — doku büyütme notu (yukarıdaki #ls-texmag açıklaması).
     // Metin yalnız imza değişince yeniden basılır; textContent ile.
     var TEXMAG_ANAHTARI = { bm_local: 'site.textureMagnifiedPackaged',
-                            bluemarble: 'site.textureMagnifiedOnline' };
+                            bluemarble: 'site.textureMagnifiedOnline',
+                            // V307/FS-HARİTA: yakın zoom ayrıntı katmanı.
+                            landsat_weld: 'site.tileDetailMagnified' };
     var texMagSig = '';
     function renderTextureMagNote(info, force) {
         var n = el('ls-texmag');
@@ -2047,6 +3253,10 @@
         I18N.apply(document.body); renderEvents(); relabelPresets();
         renderVehicleText(); renderTileUsage(); renderFixedAirframeNote();
         renderAirframeNote();   // V306/UÇUŞ NR-12
+        kanatNotunuBas(sonKanatGeometrisi);   // V307/FS-UÇUŞ-2
+        // V307/FS-KÜÇÜK: çalkantı bölümü çalışma anında kuruluyor (data-i18n
+        // yok); son uçuşun yanıtından etkin dilde yeniden basılır.
+        if (calkantiSonVeri) calkantiSonucunuBas(calkantiSonVeri.d, calkantiSonVeri.g);
         renderMapNotes(true);
         texMagSig = '';
         // ÖH D20 / P12aB3-07: oynat/duraklat düğmesinin erişilebilir adı

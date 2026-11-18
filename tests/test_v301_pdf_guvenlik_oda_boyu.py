@@ -19,6 +19,9 @@ MD = {'motor_type': 'solid', 'chamber_pressure': 40.0,
       'chamber_diameter': 106.0,
       'chamber_wall_policy': {'wall_thickness_m': 0.0022},
       'propellant_mass': 5.47, 'burn_time': 3.1427, 'thrust': 3890.35,
+      # V307/GÜVERTE-ISIL kalem 4: PDF güvenlik bölümünde de oda sıcaklığı
+      # zorunlu (3000 K varsayılanı kalktı); eski örtük değer açık yazıldı.
+      'chamber_temperature': 3000.0,
       'propellant_type': 'apcp'}
 
 

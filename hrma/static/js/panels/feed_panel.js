@@ -1183,6 +1183,14 @@
             });
             applyTabSuggestions(tab, pane);
         });
+        // 3.0.7 (V307/ÇALKANTI-ARAYÜZ, K5): tank çalkantı modeli bölümü
+        // Çalkantı sekmesinin altına (calkanti_panel.js); katı motorda sekme
+        // yok, bölümün başına tek satır "çalkantı uygulanmaz".
+        if (window.HRMACalkanti) {
+            const sp = root.querySelector('.feed-pane[data-pane="slosh"]');
+            if (sp) window.HRMACalkanti.mount(sp);
+            else if (window.AnalysisDock.getMotorType() === 'solid') window.HRMACalkanti.mountSolid(root);
+        }
         return true;
     }
 
@@ -1244,6 +1252,8 @@
         // sekmeler burada yeniden tohumlanır (dock alanı yok: {} döner).
         fromResults: function () {
             try { applyAllTabSuggestions(); } catch (e) { /* tohum yoksa alan boş kalır */ }
+            // 3.0.7 (K5): yeni motor sonucu → eski tank modeli sonucu bayat.
+            try { if (window.HRMACalkanti) window.HRMACalkanti.motorDegisti(); } catch (e) { /* bölüm yok */ }
             return {};
         },
         render: function () { mountFeedTools(); },

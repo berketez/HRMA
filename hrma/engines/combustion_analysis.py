@@ -26,7 +26,8 @@ except ImportError:
     CANTERA_AVAILABLE = False
 
 from hrma.constants import (G_0, R_UNIVERSAL, PA_PER_BAR, BAR_PER_PA,
-                            isa_pressure, isa_temperature)
+                            isa_pressure, isa_pressure_geometric,
+                            isa_temperature_geometric)
 
 logger = logging.getLogger(__name__)
 
@@ -4124,9 +4125,10 @@ class CombustionAnalyzer:
 
         rows = []
         for altitude in altitudes:
-            # Standard atmosphere — merkezi ISA yardımcıları (hrma.constants)
-            T = isa_temperature(altitude)              # K
-            P = isa_pressure(altitude) * BAR_PER_PA    # bar
+            # Standard atmosphere — merkezi ISA yardımcıları (hrma.constants);
+            # V307/İRTİFA-TEK: tablo irtifası GEOMETRİK (geopotansiyele çevrilir).
+            T = isa_temperature_geometric(altitude)              # K
+            P = isa_pressure_geometric(altitude) * BAR_PER_PA    # bar
             thrust = eta_v * mdot * v_exit + (P_e_pa - P * PA_PER_BAR) * A_e
             isp = thrust / (mdot * G_0) if mdot > 0 else 0.0
             rows.append({

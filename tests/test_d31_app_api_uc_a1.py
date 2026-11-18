@@ -20,6 +20,9 @@ def istemci():
 SAFETY_TABANI = {
     'chamber_pressure': 50, 'propellant_mass': 50,
     'chamber_diameter': 0.1, 'wall_thickness': 0.005,
+    # V307/GÜVERTE-ISIL kalem 4: oda sıcaklığı zorunlu (3000 K
+    # varsayılanı kalktı); eski örtük değer açık, sayılar bit-aynı.
+    'chamber_temperature': 3000.0,
 }
 YAPISAL_TABANI = {
     'chamber_pressure': 50, 'chamber_diameter': 0.1, 'chamber_length': 0.5,

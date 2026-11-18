@@ -1,0 +1,12 @@
+{
+ "places_detail": {
+  "file": "places_detail.json",
+  "bytes": 3513252,
+  "sha256": "fccd4b36cd6f07288192ad47b5e28ade5f9c9ba130a79dc672da982de626adf5"
+ },
+ "source": "GeoNames gazetteer extract cities5000 (https://download.geonames.org/export/dump/cities5000.zip)",
+ "archive_sha256": "550ec920954e46b7d2ff004354857383db49db4b07d848a0de80cb07b13117dd",
+ "downloaded_utc": "2026-11-09T14:28:57Z",
+ "license": "CC BY 4.0 (https://creativecommons.org/licenses/by/4.0/)",
+ "attribution": "GeoNames (www.geonames.org), CC BY 4.0"
+}
