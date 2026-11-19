@@ -213,9 +213,17 @@ def test_k2_alt_sinir_asilinca_hukum_ve_adli_uyari(client):
 #: (aynı commit, yerel Darwin'de çapa bit-aynı). Tolerans YOK: her platform
 #: kendi ölçülmüş değerine birebir eşit olmalı; çapası olmayan platformda
 #: test adıyla KIRMIZI verir (sessiz atlama yok), değer ölçülüp eklenir.
+#: V307/CI-KIRMIZI (18 Kas): Linux çapası CI'ın SABİT hesap ortamının
+#: değeridir (``tools/ci_hesap_kunyesi.py`` ``SABIT_ORTAM``: OpenBLAS Zen,
+#: numpy AVX512 kapalı; prosedür §10.6 kural 9). Eski …1872 AVX512'li
+#: koşucunun (OpenBLAS Cooperlake) değeriydi; sabitsiz koşucuya göre
+#: değişiyordu. CI 44290629774 künyesi: sabitli değer 16/16 dilimde ve üç
+#: işlemci modelinde (AMD EPYC 7763, AMD EPYC 9V45, Intel Xeon 6975P-C)
+#: bit-aynı 0,005312855644371993 (``BELİRLENİMCİLİK TAMAM``); sabitsizde
+#: AVX512'li iki model …1872, EPYC 7763 …1993. Çapa sabitli ortama aittir.
 K2_KARTUS_FEA_CAPASI = {
     ('Darwin', 'arm64'): 0.5312855644370211,
-    ('Linux', 'x86_64'): 0.5312855644371872,
+    ('Linux', 'x86_64'): 0.5312855644371993,
 }
 
 

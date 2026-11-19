@@ -793,7 +793,7 @@ class RegressionAnalyzer:
                 _mdot_basis = (
                     'not computed: fuel production needs rho_f, '
                     'port_diameter and grain_length. No value was '
-                    'substituted, because a fabricated zero would read as '
+                    'substituted, because a zero in its place would read as '
                     '"this grain produces no fuel".')
             return {
                 'r_dot': r_dot, 'G_ox': G_ox, 'G_fuel': 0.0,

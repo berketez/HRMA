@@ -641,6 +641,7 @@ def test_k3_rapor_pdf_ayni_sayi(client, mt):
             return S(ad, 'PDF "%s" (bulunamadı)' % (etiket or desen), None, 'YARIM', 0)
         return S(ad, 'PDF "%s"' % (etiket or desen), bul[0], 'YARIM', bul[1])
     if mt == 'solid':
+        from hrma.export.pdf_generator import PDFReportGenerator
         satirlar = [S('tepe itki [N]', 'ana.max_thrust', s.get('max_thrust')),
                     pdf('tepe itki [N]', 'Maximum Thrust'),
                     S('Isp [s]', 'ana.specific_impulse', s.get('specific_impulse')),
@@ -648,7 +649,9 @@ def test_k3_rapor_pdf_ayni_sayi(client, mt):
                     S('Pc [bar]', 'ana.chamber_pressure', s.get('chamber_pressure')),
                     pdf('Pc [bar]', 'Chamber Pressure'),
                     S('yanma süresi [s]', 'ana.burn_time', s.get('burn_time')),
-                    pdf('yanma süresi [s]', 'Burn Time'),
+                    # 3.0.7 SEKME-MOTOR C2: katı PDF etiketi 'web burnout' adını taşır
+                    # (yayımlanan sayı web tükenme süresidir); tek kaynak üreticinin sabiti.
+                    pdf('yanma süresi [s]', PDFReportGenerator.SOLID_BURN_TIME_LABEL),
                     S('toplam impuls [N·s]', 'ana.total_impulse', s.get('total_impulse')),
                     pdf('toplam impuls [N·s]', 'Total Impulse'),
                     pdf('toplam impuls [N·s]', None, r'Total impulse \(N·s\):\s*([0-9.]+)'),

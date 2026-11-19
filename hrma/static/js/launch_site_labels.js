@@ -123,9 +123,62 @@
     var ULKE_YAZI = { agirlik: 500, boyut: 12 };
 
     var BASKENT_SINIFI = 'Admin-0 capital';
-    var TUR_SEHIR = 0, TUR_BASKENT = 1, TUR_ULKE = 2;
+    // V307/FS-HARİTA-KÜRE: TUR_RAMPA = paketten fırlatma kompleksi/rampa adı
+    // (geometrisi şehir noktasıyla aynı; sınıf adı ls-lbl-pad).
+    var TUR_SEHIR = 0, TUR_BASKENT = 1, TUR_ULKE = 2, TUR_RAMPA = 3;
 
     var YER_ALANLARI = ['lon', 'lat', 'name', 'name_en', 'name_tr', 'min_zoom', 'featurecla'];
+
+    /* V307 / FS-HARİTA (9 Kas 2026) — YAKIN ÖLÇEK YER ADLARI (GeoNames).
+       ÖLÇÜLDÜ (kanıt ~/HRMA-calisma/2026-11-09/FS-HARITA/olcum/once):
+       Natural Earth places.json 7.342 yer taşır (Türkiye 83); İstanbul'a
+       25 km'den bakınca ekranda yalnız 'İstanbul', Cape Canaveral'da 0
+       etiket vardı. NE'nin MIN_ZOOM alanı z_web 9'da biter (dosyadaki en
+       büyük değer), yani o ölçeğin ötesinde NE'nin gösterecek yeni yeri
+       yoktur. Ana model kararı (9 Kas): GeoNames cities5000 (70.019 yer,
+       CC BY 4.0) paketlenir ve YALNIZ z_web, NE'nin kendi en büyük
+       MIN_ZOOM değerini AŞINCA aday olur (eşik veriden okunur, icat
+       edilmez). Sıra dosya sırasıdır (nüfus azalan); yoğunluğu mevcut
+       çakışma ızgarası ve 150 etiket tavanı belirler. Veri ilk gerektiği an
+       (tembel) kanıtla okunur: ayrı manifestteki bayt + sha256 tutmazsa
+       katman 'hata' olur, NE etiketleri etkilenmez. Aynı ad (aksan ve
+       büyük/küçük harf katlanmış) ekranda zaten varsa ikinci kez basılmaz
+       (NE 'Istanbul' ile GeoNames 'Istanbul' aynı şehirdir). Veride Türkçe
+       ya da İngilizce ad yoktur: yerel ad basılır (künyede yazılı). */
+    var DETAY_MANIFEST = 'places_detail_manifest.json';
+    var DETAY_ALANLARI = ['lon', 'lat', 'name', 'pop', 'cc', 'fcode'];
+    var DETAY_KOVA_DERECE = 1;        // enlem/boylam kova açıklığı (yakın ölçek)
+    var DETAY_BASKENT_KODU = 'PPLC';  // GeoNames özellik kodu: ülke başkenti
+
+    /* V307 / FS-HARİTA-KÜRE (16 Kas 2026) — İNDİRİLEN PAKETTEN YER ADLARI.
+       Kurulu bir harita paketi (LaunchSiteMapPacks.kuruluKutular) görünen
+       bölgeyle kesişiyorsa yer adları (yerleşim, mahalle) ve fırlatma
+       kompleksi/rampa adları sunucunun etiket ucundan okunur (uç sözleşmesi
+       brif_16kas/FS_HARITA_VERI_FAZ2.md). Ad politikası (karar K6) SUNUCUDA
+       uygulanır; istemci yalnız dili ('tr' | 'en') gönderir ve gelen adı
+       basar. İstek düzeyi görünümün GERÇEK Web Mercator düzeyidir (kürenin
+       kare yükü f.zMercator = z_web + log2(cos φ); ölçeğin tek sahibi küre),
+       tabana yuvarlanır, sözleşmenin 0..15 aralığına kırpılır; yer, kendi
+       rank (OSM min_zoom) değeri bu düzeyden küçük ya da eşitken adaydır
+       (NE/GeoNames ile aynı histerezis). Paket adları NE ve GeoNames'ten
+       SONRA yarışır; aynı ad (katlanmış) ekranda varsa ikinci kez basılmaz.
+       Yoğunluk mevcut ızgara ve etiket tavanıyla sınırlıdır. Devreye girme
+       eşiği GeoNames'inkiyle aynıdır (z_web > NE'nin en büyük MIN_ZOOM'u). */
+    var PAKET_ETIKET_UCU = '/api/map-packs/labels';
+    var PAKET_Z_TAVANI = 15;          // uç sözleşmesi: z = 0..15 (Web Mercator)
+    var PAKET_ISTEK_ARASI_MS = 300;   // iki etiket isteği arası en az süre
+    var PAKET_KUTU_PAYI = 0.1;        // görünen kutu her yönde bu oranla genişletilir
+    // Web Mercator enlem sınırı, tanımından (EPSG:3857: atan(sinh π)).
+    var PAKET_MERC_ENLEM = Math.atan(Math.sinh(Math.PI)) * 180 / Math.PI;
+    var PAKET_RAMPA_TURLERI = ['launch_complex', 'launchpad', 'spaceport'];
+
+    // Ad karşılaştırma biçimi: NFD + birleşik işaretler atılır, Türkçe
+    // noktasız ı -> i, küçük harf. Yalnız tekrar sınavı içindir.
+    function adKatla(a) {
+        var s = String(a || '');
+        if (s.normalize) s = s.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+        return s.replace(/\u0131/g, 'i').toLowerCase();
+    }
 
     // Manifestteki varlık dosya adı izin listesi (karar §28-33; F1 denetimi
     // Ş4). '/', '..' ve mutlak yol bu desenden geçemez, istek baseUrl
@@ -313,6 +366,18 @@
         this._yazi = null;            // {sehir, ulke} CSS font tanımı
         this._engeller = [];
         this._engelZamani = -Infinity;
+        // V307/FS-HARİTA: yakın ölçek katmanı (tembel yüklenir).
+        this.detay = { durum: 'bekliyor', hata: null, yerSayisi: 0, kunye: null, gorunur: 0,
+                       tekrarGizli: 0 };
+        // V307/FS-HARİTA-KÜRE: indirilen paket yer adları (istekle güncellenir).
+        this.paket = { durum: 'yok', hata: null, sayi: 0, gorunur: 0, z: null, kesildi: false,
+                       istek: 0, dil: null };
+        this._paketSon = null;        // {imza, dil, z, kutu} son UYGULANAN istek
+        this._paketYolda = false;     // istek yolda
+        this._paketZaman = -Infinity;
+        this._paketZKisit = PAKET_Z_TAVANI;
+        this._pKimlik = [];           // paket bölgesindeki kayıtların kimliği
+        this._Tp = null;              // paket bölgesinin ilk dizini
     }
 
     // Panel kutuları (engel). Okuma DOM yerleşimi ister; kare başına değil,
@@ -471,6 +536,12 @@
         this._genislik = new Float32Array(T).fill(NaN);
         this._yuvaOf = new Int16Array(T).fill(-1);
         this._esiksiz = esiksiz;
+        this._T0 = T;                          // NE yer + ülke sayısı (ayrıntı katmanı bunun ardından)
+        // NE yer kayıtlarının EN BÜYÜK MIN_ZOOM değeri: ayrıntı katmanının
+        // devreye girdiği ölçek (veriden; places.json'da 9).
+        var neTavan = -Infinity;
+        for (i = 0; i < N; i++) if (zAlt[i] === zAlt[i] && zAlt[i] > neTavan) neTavan = zAlt[i];
+        this._neZTavan = neTavan;
 
         var p = yerler.provenance || {}, pu = ulkeler.provenance || {};
         var surum = /v\d+(?:\.\d+)*/.exec(String(p.source || ''));
@@ -575,7 +646,8 @@
             m.left = '0px';
         } else {
             var cap = (tur === TUR_BASKENT) ? HALKA_PX : NOKTA_PX;
-            y.el.className = (tur === TUR_BASKENT) ? 'ls-lbl ls-lbl-capital' : 'ls-lbl ls-lbl-city';
+            y.el.className = (tur === TUR_BASKENT) ? 'ls-lbl ls-lbl-capital'
+                : (tur === TUR_RAMPA ? 'ls-lbl ls-lbl-city ls-lbl-pad' : 'ls-lbl ls-lbl-city');
             y.el.style.font = this._yazi.sehir;
             n.display = 'block';
             n.width = cap + 'px'; n.height = cap + 'px';
@@ -679,6 +751,16 @@
                 aday[n++] = this._anahtar(M + k, onceki[k]); // ülkelerden sonra dosya sırası
             }
         }
+        // V307/FS-HARİTA: yakın ölçek (GeoNames) adayları.
+        var dt = this.detay;
+        if (dt.durum === 'bekliyor' && z > this._neZTavan) this._detayYukle();
+        if (dt.durum === 'hazir') n = this._detayAdaylari(z, cx, cy, cz, d, R, n, e, W, H);
+        // V307/FS-HARİTA-KÜRE: indirilen paketten yer adları. İstek yalnız
+        // GeoNames katmanı sonuçlandıktan sonra (dizin bölgesi onun ardında).
+        if (dt.durum === 'hazir' || dt.durum === 'hata') {
+            this._paketIstegi(f, z);
+            n = this._paketAdaylari(f, cx, cy, cz, R, n, e);
+        }
         sayac.aday = n;
         var sirali = aday.subarray(0, n);
         sirali.sort();                            // tipli dizi: sayısal artan
@@ -689,7 +771,7 @@
         var gosterilenKalan = 0;
         for (i = 0; i < n; i++) {
             var pp = sirali[i] % this.T;
-            if (onceki[(pp < M) ? N + pp : pp - M]) gosterilenKalan++;
+            if (onceki[this._oncelikK(pp)]) gosterilenKalan++;
         }
         var tavan = etiketTavani(f.metersPerPixel, d, f.globalViewDist);
         sayac.tavanDegeri = tavan;
@@ -701,9 +783,18 @@
             if (en && en[2] > en[0] && en[3] > en[1]) izgara.ekle(kenaraYasla(en, W, H, ek));
         }
         sayac.engel = engeller.length;
+        var T0 = this._T0, katli = this._katli, yerlesikAd = this._yerlesikAd || (this._yerlesikAd = {});
+        var tekrar = 0, detayGorunur = 0, paketGorunur = 0, Tp = this._Tp;
+        for (var ka in yerlesikAd) delete yerlesikAd[ka];
         for (i = 0; i < n; i++) {
             var p = sirali[i] % this.T;           // anahtardan öncelik sırası
-            k = (p < M) ? N + p : p - M;
+            k = this._oncelikK(p);
+            // V307/FS-HARİTA: aynı ad ekranda zaten varsa (NE ile GeoNames
+            // aynı şehir) ikinci kez basılmaz. Yalnız şehir/başkent sınanır.
+            if (katli && this.tur[k] !== TUR_ULKE) {
+                var kAd = katli[k];
+                if (kAd && yerlesikAd[kAd]) { tekrar++; continue; }
+            }
             if (onceki[k]) gosterilenKalan--;
             if (yer.length + (onceki[k] ? 0 : gosterilenKalan) >= tavan) { sayac.tavan++; continue; }
             var px = xyz[3 * k] * R, py = xyz[3 * k + 1] * R, pz = xyz[3 * k + 2] * R;
@@ -726,9 +817,402 @@
             izgara.ekle(r);
             simdiki[k] = 1;
             yer.push({ k: k, x: sx, y: sy, tur: tur, x0: r[0], y0: r[1], x1: r[2], y1: r[3] });
+            if (katli && tur !== TUR_ULKE && katli[k]) yerlesikAd[katli[k]] = 1;
+            // V307/FS-HARİTA-KÜRE: paket bölgesi [Tp, T) GeoNames'ten ayrı sayılır.
+            if (Tp !== null && k >= Tp) paketGorunur++;
+            else if (k >= T0) detayGorunur++;
         }
         sayac.gorunur = yer.length;
+        this.detay.gorunur = detayGorunur;
+        this.detay.tekrarGizli = tekrar;
+        this.paket.gorunur = paketGorunur;
         this._takas();
+    };
+
+    // Öncelik -> kayıt dizini. [0, M) ülkeler -> N + p; [M, T0) NE yerleri
+    // -> p - M; [T0, T) yakın ölçek (GeoNames) -> p (dizin = öncelik).
+    LaunchSiteLabels.prototype._oncelikK = function (p) {
+        var M = this.M, N = this.N;
+        return (p < M) ? N + p : (p < this._T0 ? p - M : p);
+    };
+
+    // V307/FS-HARİTA — yakın ölçek katmanını kanıtla oku (tek sefer).
+    LaunchSiteLabels.prototype._detayYukle = function () {
+        var self = this, dt = this.detay;
+        if (dt.durum !== 'bekliyor') return;
+        dt.durum = 'yukleniyor';
+        this._getir(DETAY_MANIFEST, 'json').then(function (m) {
+            if (!m || !m.places_detail) throw new Error('manifest_detay');
+            return self._kanitliOku(m.places_detail, 'places_detail');
+        }).then(function (veri) {
+            if (self._disposed) return;
+            self._detayKur(veri);
+            dt.durum = 'hazir';
+            self.invalidate();
+        }).catch(function (e) {
+            if (self._disposed) return;
+            dt.durum = 'hata';
+            dt.hata = String(e && e.message || e);
+        });
+    };
+
+    // Dizinleri NE + ülke kayıtlarının ARDINA genişletir; mevcut kayıtların
+    // dizini, sırası ve gösterim durumu değişmez.
+    LaunchSiteLabels.prototype._detayKur = function (veri) {
+        var dD = alanDizini(veri, DETAY_ALANLARI, 'places_detail');
+        var G = veri.rows.length, T0 = this._T0, T = T0 + G, i, k, r;
+        function buyut(eski, Tur, n, dolgu) {
+            var y = new Tur(n);
+            y.set(eski);
+            if (dolgu !== undefined) y.fill(dolgu, eski.length);
+            return y;
+        }
+        this.xyz = buyut(this.xyz, Float64Array, 3 * T);
+        this.tur = buyut(this.tur, Uint8Array, T);
+        this.zAlt = buyut(this.zAlt, Float32Array, T, this._neZTavan);
+        this.zUst = buyut(this.zUst, Float32Array, T, Infinity);
+        this.lat = buyut(this.lat, Float32Array, T);
+        this.lon = buyut(this.lon, Float32Array, T);
+        this._onceki = buyut(this._onceki, Uint8Array, T);
+        this._simdiki = buyut(this._simdiki, Uint8Array, T);
+        this._aday = new Float64Array(T);
+        this._genislik = buyut(this._genislik, Float32Array, T, NaN);
+        this._yuvaOf = buyut(this._yuvaOf, Int16Array, T, -1);
+        var katli = new Array(T), donustur = this.opts.latLonToXYZ, kovalar = new Map();
+        for (k = 0; k < this.N; k++) {
+            // NE yerinin karşılaştırma adı: o anki dilde basılacak ad değil,
+            // üç adın her biri (aşağıda GeoNames adı bunlardan birine eşitse
+            // tekrar sayılır). Tek anahtar tutulur: İngilizce ad (yoksa NAME).
+            katli[k] = adKatla(this.adEn[k] || this.ad[k]);
+        }
+        var neAdlar = {};
+        for (k = 0; k < this.N; k++) {
+            neAdlar[adKatla(this.ad[k])] = katli[k];
+            neAdlar[adKatla(this.adTr[k])] = katli[k];
+        }
+        this._neAdlar = neAdlar;      // V307/FS-HARİTA-KÜRE: paket adları da aynı eşlemeyle katlanır
+        for (i = 0; i < G; i++) {
+            r = veri.rows[i]; k = T0 + i;
+            var la = r[dD.lat], lo = r[dD.lon];
+            this.lat[k] = la; this.lon[k] = lo;
+            donustur(la, lo, 1, this.xyz, 3 * k);
+            this.tur[k] = (r[dD.fcode] === DETAY_BASKENT_KODU) ? TUR_BASKENT : TUR_SEHIR;
+            this.ad.push(r[dD.name]); this.adEn.push(''); this.adTr.push('');
+            var ka = adKatla(r[dD.name]);
+            katli[k] = neAdlar[ka] || ka;
+            var kk = Math.min(179, Math.max(0, Math.floor(la + 90))) * 360
+                   + Math.min(359, Math.max(0, Math.floor(lo + 180)));
+            var liste = kovalar.get(kk);
+            if (!liste) { liste = []; kovalar.set(kk, liste); }
+            liste.push(k);                     // dosya sırası = nüfus azalan
+        }
+        this._katli = katli;
+        this._detayKovalar = kovalar;
+        this.T = T;
+        var p = veri.provenance || {};
+        this.detay.yerSayisi = G;
+        this.detay.kunye = { kaynak: p.source || null, lisans: p.license || null,
+                             atif: p.attribution || null, indirme: p.downloaded_utc || null,
+                             arsivSha256: p.archive_sha256 || null,
+                             esikZWeb: this._neZTavan,
+                             shaDogrulandi: this._shaDogrulandi ? this._shaDogrulandi.places_detail : null };
+    };
+
+    // Yakın ölçek adayları: kameranın altındaki noktanın çevresinde, ufuk
+    // başlığına değen 1°'lik kovalar; yalnız ekranda (NDC) olanlar aday olur.
+    // z_web NE tavanını aşmadıkça yeni aday yok; gösterilen etiket
+    // Z_HISTEREZIS kadar geç kaybolur (NE yerleriyle aynı kural).
+    LaunchSiteLabels.prototype._detayAdaylari = function (z, cx, cy, cz, d, R, n, e, W, H) {
+        var esik = this._neZTavan, onceki = this._onceki, aday = this._aday, xyz = this.xyz;
+        var yeniAday = z > esik;
+        if (!yeniAday && !(z > esik - Z_HISTEREZIS)) return n;
+        var D2R = Math.PI / 180, ux = cx / d, uy = cy / d, uz = cz / d;
+        var lat0 = Math.asin(Math.max(-1, Math.min(1, uy))) / D2R;
+        var lon0 = Math.atan2(-uz, ux) / D2R;
+        var cap = Math.acos(R / d) / D2R + DETAY_KOVA_DERECE;
+        var la0 = Math.max(-90, lat0 - cap), la1 = Math.min(90, lat0 + cap);
+        var kutup = la0 <= -90 || la1 >= 90;
+        var cosMin = Math.cos(Math.max(Math.abs(la0), Math.abs(la1)) * D2R);
+        var yari = kutup ? 180 : Math.min(180, cap / Math.max(cosMin, 1e-6));
+        var nS = (yari >= 180) ? 360 : Math.min(360, 2 * Math.ceil(yari) + 2);
+        var s0 = (nS === 360) ? 0 : Math.floor(lon0 - yari + 180);
+        var r0 = Math.max(0, Math.floor(la0 + 90)), r1 = Math.min(179, Math.floor(la1 + 90));
+        var kovalar = this._detayKovalar, sayac = this._sayac;
+        for (var rr = r0; rr <= r1; rr++) {
+            for (var j = 0; j < nS; j++) {
+                var ss = (((s0 + j) % 360) + 360) % 360;
+                var liste = kovalar.get(rr * 360 + ss);
+                if (!liste) continue;
+                for (var i = 0; i < liste.length; i++) {
+                    var k = liste[i];
+                    if (!yeniAday && !onceki[k]) continue;
+                    var x = xyz[3 * k], y = xyz[3 * k + 1], w = xyz[3 * k + 2];
+                    if (!ufuktaGorunur(x, y, w, cx, cy, cz, R)) continue;
+                    var px = x * R, py = y * R, pz = w * R;
+                    var cw = e[3] * px + e[7] * py + e[11] * pz + e[15];
+                    if (!(cw > 0)) { sayac.ekranDisi++; continue; }
+                    var nx = (e[0] * px + e[4] * py + e[8] * pz + e[12]) / cw;
+                    var ny = (e[1] * px + e[5] * py + e[9] * pz + e[13]) / cw;
+                    if (nx < -1 || nx > 1 || ny < -1 || ny > 1) { sayac.ekranDisi++; continue; }
+                    aday[n++] = this._anahtar(k, onceki[k]);
+                }
+            }
+        }
+        return n;
+    };
+
+    /* V307/FS-HARİTA-KÜRE — görünen ZEMİN kutusu. Ekranın 3×3 noktasından
+       (köşeler, kenar ortaları, merkez) kamera ışını küreyle kesiştirilir;
+       kesişen noktaların enlem/boylam kutusu ve merkez ışınının enlemi döner.
+       Ufkun ötesine (gökyüzüne) giden ışın sayılmaz. Hiç kesişme yoksa ya da
+       kutu 180°'den geniş boylam taşıyorsa (tarih çizgisi) null: istek yok. */
+    function gorunenKutu(cam, R) {
+        var m = cam.matrixWorld && cam.matrixWorld.elements;
+        var pi = cam.projectionMatrixInverse && cam.projectionMatrixInverse.elements;
+        if (!m || !pi) return null;
+        var cx = cam.position.x, cy = cam.position.y, cz = cam.position.z;
+        var w = Infinity, s = Infinity, e = -Infinity, n = -Infinity, say = 0, merkezLat = null;
+        var R2D = 180 / Math.PI;
+        for (var a = -1; a <= 1; a++) {
+            for (var b = -1; b <= 1; b++) {
+                // NDC (a, b, 1) -> görünüm uzayı (izdüşümün tersi) -> dünya
+                var vw = pi[3] * a + pi[7] * b + pi[11] + pi[15];
+                var vx = (pi[0] * a + pi[4] * b + pi[8] + pi[12]) / vw;
+                var vy = (pi[1] * a + pi[5] * b + pi[9] + pi[13]) / vw;
+                var vz = (pi[2] * a + pi[6] * b + pi[10] + pi[14]) / vw;
+                var dx = m[0] * vx + m[4] * vy + m[8] * vz + m[12] - cx;
+                var dy = m[1] * vx + m[5] * vy + m[9] * vz + m[13] - cy;
+                var dz = m[2] * vx + m[6] * vy + m[10] * vz + m[14] - cz;
+                var L = Math.sqrt(dx * dx + dy * dy + dz * dz);
+                if (!(L > 0)) continue;
+                dx /= L; dy /= L; dz /= L;
+                var bb = cx * dx + cy * dy + cz * dz, cc = cx * cx + cy * cy + cz * cz - R * R;
+                var disk = bb * bb - cc;
+                if (!(disk >= 0)) continue;
+                var t = -bb - Math.sqrt(disk);
+                if (!(t > 0)) continue;
+                var px = cx + dx * t, py = cy + dy * t, pz = cz + dz * t;
+                var lat = Math.asin(Math.max(-1, Math.min(1, py / R))) * R2D;
+                var lon = Math.atan2(-pz, px) * R2D;
+                if (a === 0 && b === 0) merkezLat = lat;
+                w = Math.min(w, lon); e = Math.max(e, lon);
+                s = Math.min(s, lat); n = Math.max(n, lat);
+                say++;
+            }
+        }
+        if (!say || merkezLat === null || e - w > 180) return null;
+        return { kutu: [w, s, e, n], merkezLat: merkezLat };
+    }
+
+    function kutuKesis(a, b) {
+        var w = Math.max(a[0], b[0]), s = Math.max(a[1], b[1]);
+        var e = Math.min(a[2], b[2]), n = Math.min(a[3], b[3]);
+        return (w < e && s < n) ? [w, s, e, n] : null;
+    }
+
+    function kutuIcinde(ic, dis) {
+        return !!(ic && dis && ic[0] >= dis[0] && ic[1] >= dis[1] && ic[2] <= dis[2] && ic[3] <= dis[3]);
+    }
+
+    /* Paket yer adı isteği (gerekirse). Kurulu paket kümesi değiştiyse bölge
+       boşalır. İstek yalnız: kurulu paket görünen kutuyla kesişiyor, z_web
+       GeoNames eşiğini aşmış, yolda istek yok, son istekten bu yana
+       PAKET_ISTEK_ARASI_MS geçmiş ve (dil, düzey, paket kümesi) değişmiş ya
+       da görünen alan son istenen kutudan taşmışsa atılır. */
+    LaunchSiteLabels.prototype._paketIstegi = function (f, zWeb) {
+        var P = global.LaunchSiteMapPacks;
+        var kurulu = (P && typeof P.kuruluKutular === 'function') ? P.kuruluKutular() : [];
+        var imza = (P && typeof P.imza === 'function') ? String(P.imza()) : '';
+        if (this._paketSon && this._paketSon.imza !== imza) this._paketUygula([], null, false);
+        this._paketZM = NaN;
+        if (!Array.isArray(kurulu) || !kurulu.length) { this.paket.durum = 'yok'; return; }
+        var gk = gorunenKutu(f.camera, f.globeRadius);
+        if (!gk) return;
+        // Görünümün gerçek Web Mercator düzeyi: kürenin kare yükünden
+        // (f.zMercator; ölçeğin TEK sahibi küre modülü). Yoksa istek yok.
+        var zM = f.zMercator;
+        if (typeof zM !== 'number' || !isFinite(zM)) return;
+        this._paketZM = zM;
+        if (!(zWeb > this._neZTavan) || this._paketYolda) return;
+        var simdi = this._simdi();
+        if (simdi - this._paketZaman < PAKET_ISTEK_ARASI_MS) return;
+        var zTaban = Math.max(0, Math.min(PAKET_Z_TAVANI, Math.floor(zM)));
+        if (this._paketZKisitTaban !== zTaban) { this._paketZKisit = PAKET_Z_TAVANI; this._paketZKisitTaban = zTaban; }
+        var zI = Math.min(zTaban, this._paketZKisit);
+        var k = gk.kutu, pw = (k[2] - k[0]) * PAKET_KUTU_PAYI, ph = (k[3] - k[1]) * PAKET_KUTU_PAYI;
+        var genis = [Math.max(-180, k[0] - pw), Math.max(-PAKET_MERC_ENLEM, k[1] - ph),
+                     Math.min(180, k[2] + pw), Math.min(PAKET_MERC_ENLEM, k[3] + ph)];
+        var birlesim = null;
+        for (var i = 0; i < kurulu.length; i++) {
+            var b = kurulu[i] && kurulu[i].bbox;
+            if (!b || b.length !== 4) continue;
+            var kk = kutuKesis(genis, b);
+            if (!kk) continue;
+            birlesim = birlesim ? [Math.min(birlesim[0], kk[0]), Math.min(birlesim[1], kk[1]),
+                                   Math.max(birlesim[2], kk[2]), Math.max(birlesim[3], kk[3])] : kk;
+        }
+        if (!birlesim) return;                       // görünen alanda kurulu paket yok
+        var son = this._paketSon, gerek = kutuKesis(k, birlesim) || birlesim;
+        if (son && son.imza === imza && son.dil === this._dil && son.z === zI
+                && kutuIcinde(gerek, son.kutu)) return;
+        var istek = { imza: imza, dil: this._dil, z: zI, kutu: birlesim };
+        var url = PAKET_ETIKET_UCU + '?bbox=' + birlesim.map(function (v) { return v.toFixed(5); }).join(',')
+            + '&z=' + zI + '&lang=' + istek.dil;
+        if (!this._fetch) return;
+        var self = this;
+        this._paketYolda = true;
+        this._paketZaman = simdi;
+        this.paket.istek++;
+        this._fetch(url).then(function (r) {
+            return r.json().then(function (g) { return { ok: r.ok, g: g }; },
+                                 function () { return { ok: false, g: null }; });
+        }).then(function (y) {
+            self._paketYolda = false;
+            if (self._disposed) return;
+            if (!y.ok) {
+                var kod = y.g && y.g.error_code;
+                // Kutu bu düzeyde sunucunun karo sınırını aşıyor: bir düzey
+                // kaba iste (adlar o düzeyin rank'ına göre seyrekleşir).
+                if (kod === 'bbox_too_large' && zI > 0) {
+                    self._paketZKisit = zI - 1; self._paketZaman = -Infinity; self._surum = (self._surum || 0) + 1;
+                    return;
+                }
+                self.paket.durum = 'hata'; self.paket.hata = String(kod || 'yanit');
+                return;
+            }
+            var P2 = global.LaunchSiteMapPacks;
+            if (P2 && typeof P2.imza === 'function' && String(P2.imza()) !== istek.imza) return;
+            if (self._dil !== istek.dil) return;          // dil değişti: yeni tur ister
+            self._paketUygula(y.g && y.g.labels, istek, !!(y.g && y.g.truncated));
+        }, function (e) {
+            self._paketYolda = false;
+            if (self._disposed) return;
+            self.paket.durum = 'hata'; self.paket.hata = String(e && e.message || e);
+        });
+    };
+
+    /* Paket bölgesini [Tp, T) yeni listeyle kurar. Ekranda kalan adın
+       (aynı ad + konum + tür) gösterim durumu, ölçülen genişliği ve DOM
+       yuvası korunur (titreme yok); listeden düşen adın yuvası boşaltılır.
+       Bozuk kayıt (adı boş, konumu/rank'ı sayı değil) basılmaz ve sayılmaz.
+       liste boş + istek null: paketsiz duruma döner. */
+    LaunchSiteLabels.prototype._paketUygula = function (liste, istek, kesildi) {
+        var temiz = [], i, k;
+        if (Array.isArray(liste)) {
+            for (i = 0; i < liste.length; i++) {
+                var x = liste[i];
+                if (!x || typeof x.name !== 'string' || !x.name.trim()) continue;
+                if (typeof x.lon !== 'number' || typeof x.lat !== 'number' || typeof x.rank !== 'number'
+                        || !isFinite(x.lon) || !isFinite(x.lat) || !isFinite(x.rank)
+                        || x.lat < -90 || x.lat > 90 || x.lon < -180 || x.lon > 180) continue;
+                temiz.push({ name: x.name.trim(), lon: x.lon, lat: x.lat, rank: x.rank,
+                             kind: (typeof x.kind === 'string') ? x.kind : '' });
+            }
+        }
+        if (this._Tp === null) this._Tp = this.T;
+        var Tp = this._Tp, P = temiz.length, T = Tp + P, eskiT = this.T;
+        function kes(eski, Tur, uzunluk, kopya, dolgu) {
+            var y = new Tur(uzunluk);
+            y.set(eski.subarray(0, kopya));
+            if (dolgu !== undefined) y.fill(dolgu, kopya);
+            return y;
+        }
+        var eOnceki = this._onceki, eYuva = this._yuvaOf, eGen = this._genislik, eskiKimlik = {};
+        for (k = Tp; k < eskiT; k++) eskiKimlik[this._pKimlik[k - Tp]] = k;
+        this.xyz = kes(this.xyz, Float64Array, 3 * T, 3 * Tp);
+        this.tur = kes(this.tur, Uint8Array, T, Tp);
+        this.zAlt = kes(this.zAlt, Float32Array, T, Tp);
+        this.zUst = kes(this.zUst, Float32Array, T, Tp, Infinity);
+        this.lat = kes(this.lat, Float32Array, T, Tp);
+        this.lon = kes(this.lon, Float32Array, T, Tp);
+        this._onceki = kes(eOnceki, Uint8Array, T, Tp);
+        this._simdiki = new Uint8Array(T);
+        this._genislik = kes(eGen, Float32Array, T, Tp, NaN);
+        this._yuvaOf = kes(eYuva, Int16Array, T, Tp, -1);
+        this._aday = new Float64Array(T);
+        this.ad.length = Tp; this.adEn.length = Tp; this.adTr.length = Tp;
+        // Tekrar sınavının katlanmış adları: GeoNames yüklenmediyse NE kısmı burada kurulur.
+        if (!this._katli) {
+            var katliNe = new Array(Tp), neAdlar = {};
+            for (k = 0; k < this.N; k++) {
+                katliNe[k] = adKatla(this.adEn[k] || this.ad[k]);
+                neAdlar[adKatla(this.ad[k])] = katliNe[k];
+                neAdlar[adKatla(this.adTr[k])] = katliNe[k];
+            }
+            this._katli = katliNe; this._neAdlar = neAdlar;
+        }
+        this._katli.length = Tp;
+        var donustur = this.opts.latLonToXYZ, kimlik = new Array(P);
+        for (i = 0; i < P; i++) {
+            var q = temiz[i];
+            k = Tp + i;
+            this.lat[k] = q.lat; this.lon[k] = q.lon;
+            donustur(q.lat, q.lon, 1, this.xyz, 3 * k);
+            this.tur[k] = (PAKET_RAMPA_TURLERI.indexOf(q.kind) >= 0) ? TUR_RAMPA : TUR_SEHIR;
+            this.zAlt[k] = q.rank;
+            this.ad.push(q.name); this.adEn.push(''); this.adTr.push('');
+            var ka = adKatla(q.name);
+            this._katli[k] = (this._neAdlar && this._neAdlar[ka]) || ka;
+            kimlik[i] = q.name + '|' + q.lon.toFixed(5) + '|' + q.lat.toFixed(5) + '|' + this.tur[k];
+            var ek = eskiKimlik[kimlik[i]];
+            if (ek !== undefined) {
+                delete eskiKimlik[kimlik[i]];
+                this._onceki[k] = eOnceki[ek];
+                this._genislik[k] = eGen[ek];
+                var sl = eYuva[ek];
+                if (sl >= 0 && this._yuvalar && this._yuvalar[sl]) { this._yuvaOf[k] = sl; this._yuvalar[sl].k = k; }
+            }
+        }
+        // Listeden düşen ve ekranda olan adların yuvası boşaltılır.
+        for (var id in eskiKimlik) {
+            if (!Object.prototype.hasOwnProperty.call(eskiKimlik, id)) continue;
+            var s = eYuva[eskiKimlik[id]];
+            if (s >= 0 && this._yuvalar && this._yuvalar[s]) {
+                var y = this._yuvalar[s];
+                y.k = -1; y.x = NaN; y.y = NaN;
+                y.el.style.visibility = 'hidden';
+                this._bos.push(s);
+            }
+        }
+        this._pKimlik = kimlik;
+        this.T = T;
+        this._paketSon = istek;
+        this.paket.durum = istek ? 'hazir' : 'yok';
+        this.paket.hata = null;
+        this.paket.sayi = P;
+        this.paket.z = istek ? istek.z : null;
+        this.paket.dil = istek ? istek.dil : null;
+        this.paket.kesildi = !!kesildi;
+        this._surum = (this._surum || 0) + 1;      // kamera durağanken de yeniden yerleştir
+    };
+
+    // Paket adayları: rank <= z_web (histerezisli; NE MIN_ZOOM'uyla AYNI
+    // kural, aynı ölçek), ufuk önünde ve ekranda (NDC). GeoNames eşiğinin
+    // altında aday yok. ÖLÇÜLDÜ (Sinop 20 km): z12 karosundaki 77 adın 70'i
+    // rank 13 taşıyor; gerçek Mercator düzeyiyle (12,8) süzülünce ekranda
+    // paketten tek ad kalmıyordu, NE ile aynı ölçek (z_web 13,2) onları alır.
+    // İstek düzeyi (yukarıda) enlem düzeltmelidir: karo sayısını sınırlar.
+    LaunchSiteLabels.prototype._paketAdaylari = function (f, cx, cy, cz, R, n, e) {
+        var Tp = this._Tp, zM = f.zWeb;
+        if (Tp === null || this.T <= Tp || !(this._paketZM === this._paketZM)) return n;
+        var esik = this._neZTavan, yeniAday = f.zWeb > esik;
+        if (!yeniAday && !(f.zWeb > esik - Z_HISTEREZIS)) return n;
+        var onceki = this._onceki, aday = this._aday, xyz = this.xyz, zAlt = this.zAlt, sayac = this._sayac;
+        for (var k = Tp; k < this.T; k++) {
+            var mz = zAlt[k];
+            if (mz > zM + Z_HISTEREZIS) continue;
+            if ((mz > zM || !yeniAday) && !onceki[k]) continue;
+            var x = xyz[3 * k], y = xyz[3 * k + 1], w = xyz[3 * k + 2];
+            if (!ufuktaGorunur(x, y, w, cx, cy, cz, R)) continue;
+            var px = x * R, py = y * R, pz = w * R;
+            var cw = e[3] * px + e[7] * py + e[11] * pz + e[15];
+            if (!(cw > 0)) { sayac.ekranDisi++; continue; }
+            var nx = (e[0] * px + e[4] * py + e[8] * pz + e[12]) / cw;
+            var ny = (e[1] * px + e[5] * py + e[9] * pz + e[13]) / cw;
+            if (nx < -1 || nx > 1 || ny < -1 || ny > 1) { sayac.ekranDisi++; continue; }
+            aday[n++] = this._anahtar(k, onceki[k]);
+        }
+        return n;
     };
 
     // Sıralama anahtarı: önce (öncelik - histerezis payı), eşitlikte öncelik.
@@ -838,17 +1322,25 @@
             atlananKare: s.atlanan,
             guncellemeMs: { son: s.sonMs, medyan: yuzdelik(this._sureler, n, 0.5),
                             p95: yuzdelik(this._sureler, n, 0.95), ornek: n },
-            kunye: this.kunye
+            kunye: this.kunye,
+            // V307/FS-HARİTA: yakın ölçek katmanı (GeoNames) durumu.
+            detay: { durum: this.detay.durum, hata: this.detay.hata,
+                     yerSayisi: this.detay.yerSayisi, gorunur: this.detay.gorunur,
+                     tekrarGizli: this.detay.tekrarGizli, kunye: this.detay.kunye },
+            // V307/FS-HARİTA-KÜRE: indirilen paketten yer adları.
+            paket: { durum: this.paket.durum, hata: this.paket.hata, sayi: this.paket.sayi,
+                     gorunur: this.paket.gorunur, z: this.paket.z, dil: this.paket.dil,
+                     kesildi: this.paket.kesildi, istek: this.paket.istek }
         };
     };
 
-    // Son karenin yerleşimi: [{ad, tur, lat, lon, x0, y0, x1, y1}] (ölçüm/test).
+    // Son karenin yerleşimi: [{ad, tur, lat, lon, x0, y0, x1, y1, paket}] (ölçüm/test).
     LaunchSiteLabels.prototype.getPlacements = function () {
-        var out = [], adlar = ['city', 'capital', 'country'];
+        var out = [], adlar = ['city', 'capital', 'country', 'launch'], Tp = this._Tp;
         for (var i = 0; i < this._yerlesim.length; i++) {
             var e = this._yerlesim[i];
             out.push({ ad: this._metin(e.k), tur: adlar[e.tur], lat: this.lat[e.k], lon: this.lon[e.k],
-                       x0: e.x0, y0: e.y0, x1: e.x1, y1: e.y1 });
+                       x0: e.x0, y0: e.y0, x1: e.x1, y1: e.y1, paket: Tp !== null && e.k >= Tp });
         }
         return out;
     };
@@ -878,6 +1370,13 @@
     LaunchSiteLabels.dikdortgen = dikdortgen;
     LaunchSiteLabels.Izgara = Izgara;
     LaunchSiteLabels.DOSYA_ADI_DESENI = DOSYA_ADI_DESENI;
+    LaunchSiteLabels.DETAY_MANIFEST = DETAY_MANIFEST;
+    LaunchSiteLabels.adKatla = adKatla;
+    // V307/FS-HARİTA-KÜRE: paket yer adları (node bekçileri için)
+    LaunchSiteLabels.gorunenKutu = gorunenKutu;
+    LaunchSiteLabels.PAKET_ETIKET_UCU = PAKET_ETIKET_UCU;
+    LaunchSiteLabels.PAKET_Z_TAVANI = PAKET_Z_TAVANI;
+    LaunchSiteLabels.TUR_RAMPA = TUR_RAMPA;
     global.LaunchSiteLabels = LaunchSiteLabels;
 
 })(typeof window !== 'undefined' ? window : this);

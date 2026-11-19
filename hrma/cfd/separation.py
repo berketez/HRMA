@@ -185,7 +185,7 @@ _CRITERIA_BASIS = (
     'kaynağından: summerfield/schmucker/kalt_badal_pressure_ratio — '
     'ikinci gerçekleme yazılmadı); dördüncüsü viskoz çözümün τ_w işaret '
     'değişimidir ve ancak VİSKOZ koşuda vardır. Viskoz koşu yoksa '
-    'dördüncü üye UYDURULMAZ: available=False + gerekçe. Üst düzey '
+    'dördüncü üye YAYIMLANMAZ: available=False + gerekçe. Üst düzey '
     '(düz) alanlar GERİYE UYUM için Summerfield üyesinin ta kendisidir; '
     'criteria[\'summerfield\'] ile aynı hesaptan gelir (tek gerçekleme).')
 
@@ -358,7 +358,7 @@ def _resolve_throat_index(result, z_wall):
                 'BOĞAZ olarak İDDİA ETMİYOR (alan minimumu uç kolonda, '
                 'kontur o alanda tek yönlü). Ayrılma hükmü boğazın '
                 'ıraksak tarafında aranır; boğaz iddiası olmadan arama '
-                'alanı tanımsızdır ve uydurma bir boğaz konumu '
+                'alanı tanımsızdır ve başka bir boğaz konumu '
                 'varsayılmaz. Çözücünün beyanı: '
                 f"{throat.get('interior_basis')}")
         return i_t, ('Boğaz index\'i çözücünün yayımladığı throat[\'i\'] '
@@ -383,7 +383,7 @@ def _resolve_throat_index(result, z_wall):
     raise ValueError(
         'Boğaz index\'i belirlenemedi: sonuçta ne throat[\'i\'] ne de '
         'r_centers_m var. wall_pressure_z_m tek başına boğazı veremez '
-        '(yarıçap bilgisi taşımaz) ve uydurma bir boğaz konumu '
+        '(yarıçap bilgisi taşımaz) ve başka bir boğaz konumu '
         'varsayılmaz.')
 
 
@@ -502,7 +502,7 @@ def assess_separation(result, P_ambient_Pa, separation_factor=None):
         raise ValueError(
             'P_ambient_Pa zorunludur: ayrılma ölçütü p_w < k·P_ortam ortam '
             'basıncına göre tanımlıdır ve varsayılan bir ortam basıncı '
-            '(deniz seviyesi ya da vakum) UYDURMA sayılır — çağıran uçuş '
+            '(deniz seviyesi ya da vakum) VERİLMEYEN BİR GİRDİNİN yerine konmuş sayılır — çağıran uçuş '
             'irtifasının basıncını vermelidir.')
     try:
         p_amb = float(P_ambient_Pa)
@@ -723,7 +723,7 @@ def _build_criteria(result, summerfield_member, p_wall, z_wall, i_throat,
             'Sonuç sözlüğü inputs[\'P0_Pa\'] / inputs[\'gamma\'] yankısını '
             'taşımıyor. Schmucker eşiği YEREL Mach\'a, Kalt-Badal eşiği '
             'basınç oranına (P₀/P_ortam) bağlıdır; ikisi de rezervuar '
-            'basıncı olmadan kurulamaz ve uydurma bir P₀ ile hüküm '
+            'basıncı olmadan kurulamaz ve varsayılan bir P₀ ile hüküm '
             'verilmez.')
 
     if eksik is not None:
@@ -798,7 +798,7 @@ def _tau_wall_member(result, p_wall, z_wall, i_throat, divergent_length):
             'Bu koşu VİSKOZ DEĞİL (result[\'viscous\'] yok ya da None): '
             'duvar kayma gerilmesi hiç çözülmedi, τ_w = 0 istasyonu '
             'TANIMSIZDIR. Euler duvarı kaymalıdır (τ_w ≡ 0) ve ondan '
-            'ayrılma istasyonu türetilmez — uydurma üye yayımlanmaz. '
+            'ayrılma istasyonu türetilmez — bu üye yayımlanmaz. '
             'Bu üyeyi doldurmak için ViscousOptions ile viskoz koşu '
             'gerekir.')
     if 'wall_shear_Pa' not in block or 'wall_z_m' not in block:

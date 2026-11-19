@@ -315,10 +315,13 @@ def _kure(tmp_path, altM, katalog=True, ciz=(), onceden=(), H=845):
 
 @node_gerek
 def test_kaynak_sirasi_yakin_zoomda_paketli_arti_gibs(tmp_path):
-    # 400 km, tuval 845 px: 326 m/px -> z = 7 (> paketli tavan 5).
+    # 400 km, tuval 845 px: 326 m/px -> z = round(7,585) = 8 (> paketli tavan 5).
+    # V307/FS-HARİTA: z bluemarble tavanını (7) aştığı için GIBS düzeyi
+    # artık ayrıntı katmanından (landsat_weld, 31.25m ağacı) istenir;
+    # eskiden z7'ye kırpılıp bluemarble:7 isteniyordu.
     r = _kure(tmp_path, 400000)
     assert r['ilkTur'] == 0
-    assert r['istek'] == {'bm_local:5': 25, 'bluemarble:7': 25}
+    assert r['istek'] == {'bm_local:5': 25, 'landsat_weld:8': 25}
 
 
 @node_gerek
@@ -360,8 +363,9 @@ def test_buyutme_notu_mpx_oranina_bagli(tmp_path):
     vakalar = {
         # 400 km (326 m/px): yalnız paketli z5 çizili (1.957 m/px) -> büyütme
         'paketli_400': (_kure(tmp_path, 400000, ciz=['bm_local']), True, 'bm_local'),
-        # 400 km: GIBS z7 de çizili (~489 m/px) < 2 x 326 -> not yok
-        'gibs_400': (_kure(tmp_path, 400000, ciz=['bm_local', 'bluemarble']), False, 'bluemarble'),
+        # 400 km: GIBS ayrıntı z8 de çizili (~245 m/px) < 2 x 326 -> not yok
+        # (V307/FS-HARİTA: z8 > bluemarble tavanı 7 -> landsat_weld)
+        'gibs_400': (_kure(tmp_path, 400000, ciz=['bm_local', 'landsat_weld']), False, 'landsat_weld'),
         # 1.490 km (1.214 m/px): paketli z5 1.957 < 2 x 1.214 -> not yok
         'paketli_1490': (_kure(tmp_path, 1490000, ciz=['bm_local']), False, 'bm_local'),
         # hiç karo çizili değil: not yok, katman null

@@ -485,9 +485,9 @@
         if (eksik.length) {
             throw new Error(TF('panel.cfd.missingInputs',
                 { fields: eksik.map(fieldLabel).join(', ') },
-                'These inputs have no value and the endpoint has no default '
-                + 'for any of them: {fields}. The request was NOT sent — this '
-                + 'panel does not invent a number in their place.'));
+                'These inputs have no value and none of them has a default: '
+                + '{fields}. The request was NOT sent — the calculation needs '
+                + 'a value for each of them.'));
         }
         // VİSKOZ KİP (opt-in): 'viscous_mode' boşsa gövdeye HİÇBİR viskoz
         // alan konmaz ve koşu bugünkü Euler yolunun bit-aynısıdır.
@@ -989,7 +989,7 @@
                 x: z, y: mach, mode: 'lines', type: 'scatter',
                 line: { width: 2, color: '#00e5ff' },
                 name: T('panel.cfd.traceSecMach',
-                        'section_average.mach (column average)'),
+                        'Mach (column average)'),
             });
         }
         if (pPa) {
@@ -998,14 +998,14 @@
                 mode: 'lines', type: 'scatter', yaxis: 'y2',
                 line: { width: 2, color: '#ff8c33' },
                 name: T('panel.cfd.traceSecP',
-                        'section_average.pressure (column average) [bar]'),
+                        'Pressure (column average) [bar]'),
             });
         }
         return {
             traces: traces,
             layout: {
                 title: T('panel.cfd.chartSectionAverage',
-                    'Section-averaged Mach and pressure (section_average)'),
+                    'Section-averaged Mach and pressure'),
                 xaxis: { title: T('panel.cfd.axisZ', 'Axial position z [m]') },
                 yaxis: { title: T('panel.cfd.axisSecMach',
                                   'Section-average Mach [-]') },
@@ -1629,7 +1629,7 @@
         const inlet = vm.inlet || {};
         let html = sectionTitle('panel.cfd.secInlet',
             'Inlet conditioning and the iteration budget advisory (declared '
-            + 'by the endpoint)');
+            + 'by the calculation)');
         const gerekceler = Array.isArray(inlet.budget_advisory_reasons)
             ? inlet.budget_advisory_reasons : [];
         const satirlar = [
@@ -1648,7 +1648,7 @@
         ];
         if (gerekceler.length) {
             satirlar.push([T('panel.cfd.rowAdvisoryReasons',
-                'Why it fired (rules named by the endpoint)'),
+                'Why it fired (rules named by the calculation)'),
                 gerekceler.map(advisoryReasonText).join('; ')]);
         }
         const yakin = inlet.nearest_measured;
@@ -1933,10 +1933,22 @@
         const saPa = sonIdx(numArray(sa.pressure_Pa));
         const saBar = isNum(saPa) ? saPa / PA_PER_BAR : null;
         let motorBar = null;
+        let kismaAyrilmaUyarisi = false;
         try {
             const r = (typeof window.currentResults === 'object')
                 ? window.currentResults : null;
             const m = motorDict(r) || {};
+            // V307/DİL-SON kalem 6: kısma noktası ayrılma cümlesi yalnız motor
+            // sonucunda o uyarı GERÇEKTEN varsa basılır (uyarı kaydı kodu
+            // warn.liquid.throttle_flow_separation*).
+            [m.input_warnings, m.warnings, m.design_warnings].forEach(function (liste) {
+                (Array.isArray(liste) ? liste : []).forEach(function (w) {
+                    const kod = (w && typeof w === 'object') ? String(w.code || '') : '';
+                    if (kod.indexOf('warn.liquid.throttle_flow_separation') === 0) {
+                        kismaAyrilmaUyarisi = true;
+                    }
+                });
+            });
             const giris = vm.inputs || {};
             const pe = pick(m, 'nozzle_design.performance.exit_pressure');
             const ayniP0 = isNum(m.chamber_pressure) && isNum(giris.P0_Pa)
@@ -1966,10 +1978,43 @@
             + sectionTitle('panel.cfd.secExitRec',
                 'Exit pressure: 1-D engine result ⟷ CFD')
             + kvTable(satirlar)
-            + note(T('panel.cfd.exitRecNote',
-                'Compare the 1-D exit pressure with the CFD SECTION AVERAGE: both are cross-section values. The separation verdict uses the WALL pressure, which in a bell nozzle sits above the section average at the exit (the wall turns the flow back towards the axis and compresses it there). A separation warning in the engine result that names a throttle point refers to a lower chamber pressure, not to this design-point run.'),
-                'dim')
+            + note(exitRecNoteText(duvarBar, saBar, kismaAyrilmaUyarisi), 'dim')
             + '</div>';
+    }
+
+    /* V307/DİL-SON kalem 6 (O9 ikinci yarı; M-HIBRIT-37): açıklama SABİTTİ —
+       "çan nozulda çıkıştaki duvar basıncı kesit ortalamasının üstündedir" ve
+       "motor sonucundaki kısma noktası ayrılma uyarısı" her koşumda basılıyordu.
+       Ölçülen çelişki (hibrit konik lüle): kesit ortalaması 1,036 bar > duvar
+       0,971 bar ve motor sonucunda öyle bir uyarı yok. Artık duvar ⟷ kesit
+       cümlesi ekranda GÖSTERİLEN iki sayıdan (3 ondalık) türer; kısma cümlesi
+       yalnız uyarı varken basılır. İki sayıdan biri yoksa kıyas cümlesi yok. */
+    function exitRecNoteText(duvarBar, saBar, kismaUyarisi) {
+        const parca = [T('panel.cfd.exitRecNote',
+            'Compare the 1-D exit pressure with the CFD SECTION AVERAGE: both '
+            + 'are cross-section values. The separation verdict uses the WALL '
+            + 'pressure.')];
+        if (isNum(duvarBar) && isNum(saBar)) {
+            // Eşitlik ekranda GÖSTERİLEN metinle (fmt, 3 ondalık) sınanır;
+            // ayrıysa yön ham sayılardan.
+            const esit = fmt(duvarBar, 3) === fmt(saBar, 3);
+            const d = esit ? 0 : duvarBar, k = esit ? 0 : saBar;
+            parca.push(d > k
+                ? T('panel.cfd.exitRecWallAbove',
+                    'In this run the exit wall pressure is above the section average.')
+                : (d < k
+                    ? T('panel.cfd.exitRecWallBelow',
+                        'In this run the exit wall pressure is below the section average.')
+                    : T('panel.cfd.exitRecWallEqual',
+                        'In this run the exit wall pressure equals the section average.')));
+        }
+        if (kismaUyarisi) {
+            parca.push(T('panel.cfd.exitRecThrottle',
+                'The separation warning in the engine result that names a '
+                + 'throttle point refers to a lower chamber pressure, not to '
+                + 'this design-point run.'));
+        }
+        return parca.join(' ');
     }
 
     // ------------------------------------------------------------------
@@ -2021,7 +2066,7 @@
                 + sig(gq.first_cell_thickness_m_max)],
         ];
         let html = sectionTitle('panel.cfd.secGridQuality',
-            'Wall grid quality — the endpoint calls this the reading '
+            'Wall grid quality — the calculation calls this the reading '
             + 'condition of the q_w claim');
         html += kvTable(satirlar);
         html += basisText(gq._basis);
@@ -2225,7 +2270,7 @@
                     { k: fmtAuto(1 / v.bartz.ratioThroat, 3) },
                     'At the throat the CFD film coefficient is {k}x LOWER '
                     + 'than the Bartz correlation. Read this against the '
-                    + 'y+ badge and the endpoint\'s own ratio basis printed '
+                    + 'y+ badge and the calculation\'s own ratio basis printed '
                     + 'below, which names the deficit band it measured '
                     + 'against experiment; the panel adds no acceptance '
                     + 'band of its own.'), 'warn');
@@ -2351,7 +2396,7 @@
             + '<strong style="font-size:0.7rem; color:var(--hd-ink-dim, #7d97a5);"'
             + ' data-i18n="panel.cfd.declInputs">'
             + esc(T('panel.cfd.declInputs',
-                    'INPUTS ECHOED BY THE ENDPOINT')) + '</strong>'
+                    'INPUTS ECHOED BY THE CALCULATION')) + '</strong>'
             + kvTable(satirlar) + '</div>';
         if (inp.back_pressure_basis) html += basisText(inp.back_pressure_basis);
 
@@ -2783,7 +2828,7 @@
         }
         if (res.decimated) {
             satirlar.push(T('panel.cfd.viz3dDecimated',
-                'The field was thinned by the endpoint before it was sent, and '
+                'The field was thinned before it was sent, and '
                 + 'the 3D section shows exactly the cells that arrived.'));
         }
         if (res.cutaway_forced) {
@@ -2986,7 +3031,7 @@
         if (sectionAverageVar(vm)) {
             html += sectionTitle('panel.cfd.secSectionAverage',
                 'Section averages along the axis — volume-weighted column '
-                + 'means published by the endpoint');
+                + 'means published by the calculation');
             html += plotBox(secAvgId, 280);
             html += basisText(vm.sectionAverage._basis);
         }

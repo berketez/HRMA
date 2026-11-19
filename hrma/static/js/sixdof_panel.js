@@ -160,6 +160,10 @@
         { id: 'sd_fin_pos', help: 'sixdof.help.finPos', key: 'sixdof.fFinPos', label: 'Fin Root LE from Nose (m)', def: 1.80, step: 0.01, rule: 'nonneg' },
         { id: 'sd_dry_m', help: 'sixdof.help.dryMass', key: 'sixdof.fDryMass', label: 'Dry Mass (kg)', def: 8.0, step: 0.1, rule: 'pos' },
         { id: 'sd_prop_m', help: 'sixdof.help.propMass', key: 'common.f.propellantMassKg', label: 'Propellant Mass (kg)', def: 4.0, step: 0.1, rule: 'pos' },
+        // V307/AĞIRLIK-MERKEZİ-2: faydalı yük (aviyonik + kurtarma + yük) —
+        // noktasal kütle + burundan konum; boş = kalem yok (isteğe bağlı).
+        { id: 'sd_payload_m', help: 'sixdof.help.payloadMass', key: 'sixdof.fPayloadMass', label: 'Payload Mass (kg)', def: '', step: 0.1, rule: 'nonneg', optional: true },
+        { id: 'sd_payload_x', help: 'sixdof.help.payloadStation', key: 'sixdof.fPayloadStation', label: 'Payload Station from Nose (m)', def: '', step: 0.01, rule: 'pos', optional: true },
         { id: 'sd_cd0', help: 'sixdof.help.cd0', key: 'sixdof.fCd0', label: 'Cd₀ (subsonic)', def: 0.45, step: 0.01, rule: 'pos' },
         { id: 'sd_wind', help: 'sixdof.help.wind', key: 'sixdof.fWind', label: 'Wind Speed (m/s)', def: 5.0, step: 0.5, rule: 'nonneg' },
         { id: 'sd_wind_dir', help: 'sixdof.help.windDir', key: 'sixdof.fWindDir', label: 'Wind From (° from N)', def: 0.0, step: 5, rule: 'any' },
@@ -504,6 +508,7 @@
             </div>
             ${orkBoxHtml()}
             ${massBalanceHtml()}
+            <div id="sd_calkanti_form"></div>
             <div style="font-family:var(--hd-mono); font-size:0.8rem; color:${COLORS.dim}; margin:4px 0;">
                 <span data-i18n="sixdof.layoutNote">${T('sixdof.layoutNote',
                     'Vehicle layout — live CG / CP preview (Barrowman, client-side)')}</span>
@@ -519,6 +524,7 @@
             <div id="sd_ork_compare" style="display:none; margin:8px 0;"></div>
             <div id="sd_plot_alt" class="plot-container" style="min-height:400px; display:none;"></div>
             <div id="sd_plot_alpha" class="plot-container" style="min-height:340px; display:none;"></div>
+            <div id="sd_calkanti_sonuc"></div>
             <div id="sd_plot_track" class="plot-container" style="min-height:380px; display:none;"></div>
             <div id="sd_plot_traj3d" class="plot-container" style="min-height:460px; display:none;"></div>
         </div>`;
@@ -593,7 +599,8 @@
             if (!el || f.type === 'select') return;
             // Component modunda toplamlar tablodan türetilir (readonly)
             if (massMode === 'component' &&
-                (f.id === 'sd_dry_m' || f.id === 'sd_prop_m')) {
+                (f.id === 'sd_dry_m' || f.id === 'sd_prop_m'
+                 || f.id === 'sd_payload_m' || f.id === 'sd_payload_x')) {
                 markInvalid(el, false);
                 return;
             }
@@ -602,10 +609,32 @@
                 markInvalid(el, false);
                 return;
             }
+            // V307/UÇUŞ-GÖVDE: türetilmiş gövdede boş kanat alanı
+            // geçerlidir — uçuş onu kanat kuralıyla kurar.
+            if (typeof kanatKuraliAcik === 'function' && kanatKuraliAcik()
+                    && kanatKuraliAlanlari().hasOwnProperty(f.id)
+                    && String(el.value).trim() === '') {
+                markInvalid(el, false);
+                return;
+            }
+            // V307/AĞIRLIK-MERKEZİ-2: isteğe bağlı alan boşsa geçerli.
+            if (f.optional && String(el.value).trim() === '') {
+                markInvalid(el, false);
+                return;
+            }
             const msg = checkRule(parseFloat(el.value), f.rule || 'any');
             markInvalid(el, !!msg);
             if (msg) errors.push(T(f.key, f.label) + ': ' + msg + '.');
         });
+        // Faydalı yük: kütle ve konum birlikte (biri tek başına gelemez).
+        if (massMode !== 'component') {
+            const ym = $('sd_payload_m'), yx = $('sd_payload_x');
+            if (ym && yx && (String(ym.value).trim() === '') !== (String(yx.value).trim() === '')) {
+                markInvalid(String(ym.value).trim() === '' ? ym : yx, true);
+                errors.push(T('sixdof.errPayloadPair',
+                    'Payload Mass and Payload Station go together: enter both or leave both empty.'));
+            }
+        }
 
         // Geometri tutarlılığı (çapraz alan kontrolleri) — bu ihlaller
         // Barrowman CP'sini anlamsız yapar, sessiz geçmemeli.
@@ -691,10 +720,39 @@
         };
     }
 
+    // V307/AĞIRLIK-MERKEZİ: bu koşuda ağırlık merkezi uçta bileşenlerden mi
+    // kurulur? Basit kütle kipi + aracın tank taşıyan türetilmiş gövdesi
+    // (gövde alanları elle yazılmamış) + motorun kütle yerleşimi yayımlanmış.
+    // Dönüş: yerleşim (uca olduğu gibi gider) ya da null.
+    function bilesenYerlesimi() {
+        if (massMode === 'component') return null;
+        const arac = (window.FlightHandoff && FlightHandoff.vehicleFor)
+            ? FlightHandoff.vehicleFor(window.currentResults) : null;
+        if (!tankliGovde(arac)) return null;
+        if (['sd_body_d', 'sd_body_l', 'sd_nose_l'].some(alanElleYazildi)) return null;
+        const y = arac.airframe_resolved.mass_layout;
+        return (y && typeof y === 'object') ? y : null;
+    }
+    // Son koşunun bileşen ağırlık merkezi ve o koşunun kütle/boy girdileri:
+    // önizleme ikinci bir hesap yapmaz, girdiler aynıysa koşunun sayısını
+    // gösterir; değilse "koşudan sonra" der.
+    let sonCgBilesen = null;
+    function bilesenCgAnahtari(g) {
+        return [num('sd_dry_m'), num('sd_prop_m'), g.body_l, g.nose_l,
+                ($('sd_payload_m') || {}).value, ($('sd_payload_x') || {}).value].join('|');
+    }
     function currentCg(derived, g) {
         if (massMode === 'component' && derived &&
             isFinite(derived.cgFull) && isFinite(derived.cgEmpty)) {
             return { full: derived.cgFull, empty: derived.cgEmpty, estimated: false };
+        }
+        if (bilesenYerlesimi()) {
+            if (sonCgBilesen && sonCgBilesen.anahtar === bilesenCgAnahtari(g)) {
+                return { full: sonCgBilesen.full, empty: sonCgBilesen.empty,
+                         estimated: false, components: true };
+            }
+            return { full: NaN, empty: NaN, estimated: false, components: true,
+                     pending: true };
         }
         // Simple mod: backend'in kaba CG tahminini aynala (0.55·L / 0.50·L)
         return { full: CG_FULL_FRACTION * g.body_l,
@@ -836,10 +894,16 @@
         // V306/UÇUŞ-2 (M-KATI-25): önizleme bandı hüküm rozetiyle AYNI kural
         // (kararsızlık en küçük marjdan, aşırı kararlılık en büyük marjdan).
         const bd = marginBandPair(smFull, smEmpty);
-        p.push('<text x="' + padX + '" y="14" font-size="12" ' +
-            'font-family="var(--hd-mono, monospace)" fill="' + bd.color + '">' +
-            'SM ' + fmt(smFull, 2) + ' / ' + fmt(smEmpty, 2) + ' cal &mdash; ' +
-            bd.label + '</text>');
+        // V307/UÇUŞ-GÖVDE: kanat ölçüleri kanat kuralını bekliyorsa (boş)
+        // kanatsız gövdenin marjı HÜKÜM gibi basılmaz; kanat uçuşta kurulur.
+        const kuralBekliyor = typeof kanatKuraliAcik === 'function'
+            && kanatKuraliAcik() && !finOk;
+        if (!kuralBekliyor && !cg.pending) {
+            p.push('<text x="' + padX + '" y="14" font-size="12" ' +
+                'font-family="var(--hd-mono, monospace)" fill="' + bd.color + '">' +
+                'SM ' + fmt(smFull, 2) + ' / ' + fmt(smEmpty, 2) + ' cal &mdash; ' +
+                bd.label + '</text>');
+        }
 
         host.innerHTML =
             '<svg viewBox="0 0 ' + W + ' ' + H.toFixed(0) + '" width="100%" ' +
@@ -851,10 +915,10 @@
                 'font-family:var(--hd-mono); font-size:0.75rem; margin-top:4px;">' +
             '<span style="color:' + COLORS.blue + ';">&#9679; '
                 + T('sixdof.cgFull', 'CG full') + ' ' +
-                fmt(cg.full, 3) + ' m' + (cg.estimated ? ' (' + T('sixdof.est', 'est.') + ')' : '') + '</span>' +
+                (cg.pending ? '—' : fmt(cg.full, 3) + ' m') + (cg.estimated ? ' (' + T('sixdof.est', 'est.') + ')' : '') + '</span>' +
             '<span style="color:' + COLORS.blue + ';">&#9675; '
                 + T('sixdof.cgEmpty', 'CG empty') + ' ' +
-                fmt(cg.empty, 3) + ' m' + (cg.estimated ? ' (' + T('sixdof.est', 'est.') + ')' : '') + '</span>' +
+                (cg.pending ? '—' : fmt(cg.empty, 3) + ' m') + (cg.estimated ? ' (' + T('sixdof.est', 'est.') + ')' : '') + '</span>' +
             '<span style="color:' + COLORS.red + ';">&#9670; CP ' +
                 fmt(bar.xCp, 3) + ' m</span>' +
             '<span style="color:' + COLORS.dim + ';">CN&#945; ' +
@@ -862,6 +926,26 @@
             '</div>';
 
         band.style.display = 'block';
+        if (cg.pending && !kuralBekliyor) {
+            band.innerHTML =
+                '<span style="border:1px solid ' + COLORS.dim + '; color:' + COLORS.dim +
+                '; border-radius:6px; padding:4px 10px; font-family:var(--hd-mono); ' +
+                'font-size:0.78rem; display:inline-block;">' +
+                escapeHtml(T('sixdof.cgComponentsPending',
+                    'Centre of gravity from components (declared placement): the run builds it from the engine mass items and the airframe stack; the static margin is shown after the run.')) +
+                '</span>';
+            return;
+        }
+        if (kuralBekliyor) {
+            band.innerHTML =
+                '<span style="border:1px solid ' + COLORS.dim + '; color:' + COLORS.dim +
+                '; border-radius:6px; padding:4px 10px; font-family:var(--hd-mono); ' +
+                'font-size:0.78rem; display:inline-block;">' +
+                escapeHtml(T('sixdof.seed.finRulePending',
+                    'Fin fields are empty: the flight sizes the fins with the fin rule (static margin target). The static margin is shown after the run. Type a fin value to fix it yourself.')) +
+                '</span>';
+            return;
+        }
         band.innerHTML =
             '<span style="border:1px solid ' + bd.color + '; color:' + bd.color +
             '; border-radius:6px; padding:4px 10px; font-family:var(--hd-mono); ' +
@@ -872,6 +956,9 @@
                 ? ' | ' + T('sixdof.cgEstimated',
                     'CG estimated (0.55 L / 0.50 L) — switch to Component mode '
                     + 'for a mass-based CG')
+                : '') +
+            (cg.components
+                ? ' | ' + T('sixdof.cgComponents', 'CG from components (declared placement)')
                 : '') +
             '</span>';
     }
@@ -914,7 +1001,7 @@
         massMode = mode === 'component' ? 'component' : 'simple';
         const wrap = $('sd_comp_wrap');
         if (wrap) wrap.style.display = massMode === 'component' ? 'block' : 'none';
-        ['sd_dry_m', 'sd_prop_m'].forEach(function (id) {
+        ['sd_dry_m', 'sd_prop_m', 'sd_payload_m', 'sd_payload_x'].forEach(function (id) {
             const el = $(id);
             if (!el) return;
             el.readOnly = massMode === 'component';
@@ -928,6 +1015,30 @@
             try { localStorage.setItem(MODE_KEY, massMode); } catch (e) { /* gizli mod */ }
         }
         updateLive();
+        yukKoprusunuGuncelle();
+    }
+
+    // V307/FS-YÜK — Fırlatma Sahası oturum aracının faydalı yükü: bu panelin
+    // iki alanı (bileşen kipinde kullanılmaz → yok). Köprü (flight_handoff.js)
+    // son hesabın kaydına koyar; alan değişince kayıt güncellenir. Sayı
+    // olmayan alan null gider (sayfa ikisinin birlikte olmasını denetler).
+    function payloadForFlight() {
+        if (massMode === 'component') return null;
+        const ym = $('sd_payload_m'), yx = $('sd_payload_x');
+        if (!ym || !yx) return null;
+        const hm = String(ym.value).trim(), hx = String(yx.value).trim();
+        if (hm === '' && hx === '') return null;
+        const m = parseFloat(hm), x = parseFloat(hx);
+        return { payload_mass_kg: (hm !== '' && isFinite(m)) ? m : null,
+                 payload_station_m: (hx !== '' && isFinite(x)) ? x : null,
+                 source: 'session' };
+    }
+    function yukKoprusunuGuncelle() {
+        try {
+            if (window.FlightHandoff && typeof window.FlightHandoff.syncPayload === 'function') {
+                window.FlightHandoff.syncPayload();
+            }
+        } catch (e) { /* köprü yoksa Fırlatma Sahası alanı boş kalır */ }
     }
 
     // ------------------------------------------------------------------
@@ -1031,7 +1142,7 @@
         badges.innerHTML = '';
         status.textContent = T('sixdof.integrating', 'INTEGRATING 6-DOF FLIGHT…');
 
-        const g = readGeometry();
+        let g = readGeometry();
         const payload = {
             body_diameter: g.body_d,
             body_length: g.body_l,
@@ -1050,6 +1161,27 @@
             launch_azimuth_deg: num('sd_azimuth'),
             rail_length: num('sd_rail'),
         };
+
+        // V307/UÇUŞ-GÖVDE — KANAT KURALI. Türetilmiş (tank taşıyan) gövdede
+        // kullanıcının yazmadığı kanat alanı gönderilmez; uç onu Fırlatma
+        // Sahası'yla AYNI kuraldan kurar (planform gövde çapıyla ölçeklenir,
+        // açıklık statik marj hedefinden) ve yanıtın fin_geometry bloğunda
+        // değeri ve kaynağıyla döndürür. Kuraldan dolan alan (finRule damgası)
+        // her koşuda yeniden kurulur: gövde değişince kanat bayat kalmaz.
+        if (kanatKuraliAcik()) {
+            let kuralAlani = false;
+            const kuralAlanlari = kanatKuraliAlanlari();
+            Object.keys(kuralAlanlari).forEach(function (id) {
+                const el = $(id);
+                const kuraldan = !el || String(el.value).trim() === ''
+                    || (el.dataset && el.dataset.finRule === 'true'
+                        && el.dataset.userOverride !== 'true');
+                if (!kuraldan) return;
+                delete payload[kuralAlanlari[id]];
+                if (id !== 'sd_fin_pos') kuralAlani = true;
+            });
+            if (kuralAlani) payload.fin_geometry_rule = 'static_margin';
+        }
 
         if (massMode === 'component') {
             // Tablo türetimi: toplamlar + CG'ler mevcut backend anahtarlarıyla
@@ -1078,6 +1210,21 @@
             const kalan = provided && Number(provided.propellant_residual_kg);
             if (sayfaMotoruHesabi && isFinite(kalan) && kalan > 0 && isFinite(payload.dry_mass)) {
                 payload.dry_mass = payload.dry_mass + kalan;
+            }
+            // V307/AĞIRLIK-MERKEZİ: türetilmiş gövdede ağırlık merkezi uçta
+            // bileşenlerden kurulur (flight_vehicle.component_cg, TEK tanım);
+            // panel yalnız aracın kütle yerleşimini taşır, hesap yapmaz.
+            const yerlesim = sayfaMotoruHesabi ? bilesenYerlesimi() : null;
+            if (yerlesim) payload.mass_layout = yerlesim;
+            // V307/AĞIRLIK-MERKEZİ-2: faydalı yük kuru kütlenin parçasıdır
+            // (kuru kütleye eklenir); konumunu uç bileşen ağırlık merkezine
+            // koyar. Yerleşim yoksa uç adıyla reddeder (sessizce düşülmez).
+            const yukM = $('sd_payload_m'), yukX = $('sd_payload_x');
+            if (yukM && yukX && String(yukM.value).trim() !== ''
+                    && String(yukX.value).trim() !== '') {
+                payload.payload_mass = num('sd_payload_m');
+                payload.payload_station = num('sd_payload_x');
+                payload.dry_mass = payload.dry_mass + payload.payload_mass;
             }
         }
 
@@ -1134,6 +1281,14 @@
             }
         }
 
+        // 3.0.7 (V307/ÇALKANTI-ARAYÜZ, K5 B): sayfanın motoru uçuyor ve tank
+        // yeri girildiyse çalkantı bloğu (calkanti_panel.js); yoksa gövde
+        // bugünküyle aynı.
+        if (sayfaMotoru && window.HRMACalkanti) {
+            const calkanti = window.HRMACalkanti.sixdofBlok();
+            if (calkanti) payload.calkanti = calkanti;
+        }
+
         try {
             const resp = await fetch('/api/six-dof-analysis', {
                 method: 'POST',
@@ -1174,6 +1329,28 @@
                                                           total_impulse_ns: dosyaImpulsu }, ucan)
                                         : null),
                    payload.dry_mass);
+            // V307/AĞIRLIK-MERKEZİ: önizleme şeması bu koşunun bileşen
+            // ağırlık merkezini gösterir (girdiler değişene kadar).
+            const sbCg = data.stability_basis || {};
+            const smCg = data.summary || {};
+            sonCgBilesen = (payload.mass_layout && sbCg.x_cg_source === 'components'
+                    && Number.isFinite(smCg.x_cg_full) && Number.isFinite(smCg.x_cg_empty))
+                ? { full: smCg.x_cg_full, empty: smCg.x_cg_empty,
+                    anahtar: bilesenCgAnahtari(readGeometry()) }
+                : null;
+            updateLive();
+            if (window.HRMACalkanti) window.HRMACalkanti.sixdofCiz(data);
+            // V307/UÇUŞ-GÖVDE: kanat kuralının kurduğu ölçüler forma yazılır
+            // (yanıttan; şema ve statik marj bandı uçan aracı gösterir).
+            if (kanatAlanlariniKuraldanYaz(data.fin_geometry)) {
+                g = readGeometry();
+                updateLive();
+                // Tutarlılık bekçisi uçan aracın KESİN kanat ölçüleriyle
+                // karşılaştırır: form alanı 1 mm'ye yuvarlıdır ve o fark
+                // (ölçüldü, örnek hibrit: CP 0,3 mm) "formüller ayrıştı"
+                // diye yanlış uyarı veriyordu.
+                g = Object.assign({}, g, kanatKesinOlculeri(data.fin_geometry));
+            }
 
             // İstemci Barrowman ↔ backend tutarlılık bekçisi
             const client = computeBarrowman(g);
@@ -1832,6 +2009,7 @@
         const note = $('sd_seed_note');
         if (!note) return;
         const satirlar = [notSatirlari.proje, notSatirlari.tohum, notSatirlari.govde,
+                          notSatirlari.kanat,
                           notSatirlari.motor, notSatirlari.ret].filter(Boolean);
         note.textContent = satirlar.join('\n');
         note.style.whiteSpace = 'pre-line';
@@ -1923,6 +2101,7 @@
         });
         const kiyas = $('sd_ork_compare');
         if (kiyas) kiyas.innerHTML = '';
+        if (window.HRMACalkanti) window.HRMACalkanti.sixdofTemizle();
         const status = $('sd_status');
         if (status) status.textContent = T('sixdof.staleRun',
             'The engine was recalculated; the previous 6-DOF result belonged to the earlier design and was cleared. Run it again.');
@@ -1961,6 +2140,16 @@
         };
         const e = TABLO[kod];
         return e ? T(e[0], e[1]) : '—';
+    }
+
+    // V307/UÇUŞ-GÖVDE (kalem 6): sınır aşılan bağlaşık koşunun irtifa
+    // grafiği başlığı (yanıtın calkanti.yayim kaydından); kayıt yoksa null.
+    function bagliGecersizBaslik(data) {
+        const y = data && data.calkanti && data.calkanti.yayim;
+        if (!y || y.neden_kodu !== 'BAGLASIK_KOSU_DOGRUSAL_SINIRI_ASTI') return null;
+        if (!(typeof y.t_ilk_asim_s === 'number' && isFinite(y.t_ilk_asim_s))) return null;
+        return TF('sixdof.chartAltCoupledInvalid', { t: sayiEkran(y.t_ilk_asim_s, 2) },
+            'Altitude & Mach — coupled run not valid after t = {t} s');
     }
 
     function render(data, usedCurve, sayfaMotoru, aracKuru) {
@@ -2017,8 +2206,23 @@
         const fvV = fx(fv && fv.speed_at_end_m_s, 0);
         const smUst = (numOf(s.static_margin_full) !== null && numOf(s.static_margin_empty) !== null)
             ? Math.max(s.static_margin_full, s.static_margin_empty) : null;
+        // V307/UÇUŞ-GÖVDE (kalem 6): bağlaşık (çalkantılı) koşu doğrusal
+        // geçerlilik sınırını aştıysa tüm-uçuş sayıları yanıtta YOKTUR
+        // (apoje, hız, Mach, α, sürüklenme, kararlılık); rozet nedenini ve
+        // ilk aşım anını yazar. Çalkantısız referans koşu, etiketiyle,
+        // çalkantı alt bölümünün uyarısında durur (calkanti_panel.js).
+        const yayim = (typeof data !== 'undefined' && data && data.calkanti
+                && data.calkanti.yayim && typeof data.calkanti.yayim === 'object')
+            ? data.calkanti.yayim : null;
+        const bagliGecersiz = !!(yayim
+            && yayim.neden_kodu === 'BAGLASIK_KOSU_DOGRUSAL_SINIRI_ASTI');
         let html;
-        if (fv && fv.flight === 'no_liftoff') {
+        if (bagliGecersiz) {
+            html = badge(TF('sixdof.coupledInvalid',
+                { t: fx(yayim.t_ilk_asim_s, 2) || '—' },
+                'COUPLED MODEL PASSED THE LINEAR VALIDITY LIMIT AT t = {t} s — the trajectory estimate after that time is invalid; apogee, speed, angle of attack, drift and the stability verdict of the coupled run are not reported'),
+                'err');
+        } else if (fv && fv.flight === 'no_liftoff') {
             html = badge(TF('sixdof.verdictNoLiftoff',
                 { tw: fx(s.thrust_to_weight_at_ignition, 2) || '—' },
                 'NO LIFTOFF — thrust-to-weight at ignition {tw}: the vehicle does not leave the pad; no apogee and no stability verdict'),
@@ -2101,7 +2305,7 @@
                                      || 'NO LIFTOFF — the vehicle never left the pad'),
                               'err');
             }
-        } else {
+        } else if (!bagliGecersiz) {
             html += badge(T('sixdof.apogeeNotReported',
                             'APOGEE NOT REPORTED — the integration ended before '
                             + 'a peak was found'), 'warn');
@@ -2120,7 +2324,7 @@
         if (railM !== null) {
             const railSrc = s.rail_length_source === 'supplied'
                 ? T('sixdof.railSupplied', 'supplied')
-                : T('sixdof.railDefault', 'endpoint default, not a measurement');
+                : T('sixdof.railDefault', 'calculation default, not a measurement');
             html += badge(T('sixdof.railLength', 'LAUNCH RAIL') + ' '
                           + fx(railM, 2) + ' m (' + railSrc + ')',
                           s.rail_length_source === 'supplied' ? 'info' : 'warn');
@@ -2170,6 +2374,20 @@
                     : ''),
                 s.max_alpha_deg < 10 ? 'ok' : 'warn');
         }
+        // V307/S2-KALINTI (NK3-S-8) — UÇUŞ SONU YATAY UZAKLIK EKRANDA.
+        // ÖLÇÜLDÜ (NK3-S L4, 9 Kas): uç ``lateral_drift_at_end = 404,97 m``
+        // yayımlıyor ve yer izi grafiği o sürüklenmeyi çiziyordu; panel sayıyı
+        // hiç basmıyor, Coriolis notu ise "yanal sapma sıfır olarak
+        // raporlanıyor" diyordu. Çözücüde (six_dof_trajectory.solve) bu alan
+        // yer izinin son noktasının fırlatma noktasına yatay uzaklığıdır
+        // (hypot(kuzey, doğu)); enlem yoksa yalnız Coriolis İVMESİ kapalıdır,
+        // sıfır diye yayımlanan bir sapma yoktur. Sayı adıyla ve yer iziyle
+        // aynı kaynaktan basılır; alan yoksa rozet yok.
+        const yatayUzaklik = fx(s.lateral_drift_at_end, 0);
+        if (yatayUzaklik !== null) {
+            html += badge(TF('sixdof.badgeHorizDist', { m: yatayUzaklik },
+                'HORIZONTAL DISTANCE AT FLIGHT END {m} m (end of the ground track)'), 'info');
+        }
         // NASA amatör roket pratiği: hedef 1.5-2 kalibre; >3 aşırı-stabil
         // (rüzgâra dönme + irtifa kaybı) — 2026-07-15 GPT-5.6 çapraz kontrol önerisi
         const smFull = numOf(s.static_margin_full);
@@ -2183,6 +2401,19 @@
             html += badge(TF('sixdof.badgeMargin',
                              { full: rozetSayi(smFull, 2), empty: rozetSayi(smEmpty, 2) },
                              'MARGIN {full} / {empty} cal'), smKind);
+        }
+        // V307/AĞIRLIK-MERKEZİ: ağırlık merkezi bileşenlerden kurulduysa
+        // (uç künyesi x_cg_source = components) kaynağı ve sayısı rozette.
+        const kunyeCg = (typeof data !== 'undefined' && data && data.stability_basis) || {};
+        if (kunyeCg.x_cg_source === 'components'
+                && numOf(s.x_cg_full) !== null && numOf(s.x_cg_empty) !== null) {
+            // Yerleşim seçimleri adıyla (uç künyesi x_cg_components.basis'in
+            // ekran karşılığı) rozetin ipucunda.
+            html += '<span title="' + escapeHtml(T('sixdof.cgComponentsBasis',
+                'Placement (HRMA choice): engine dry mass at mid engine length; liquid tank structure at mid tank; propellant as a liquid column settled on the aft tank bottom (the same fill model as the slosh model), reserve and residual propellant in their tank; hybrid fuel grain and solid propellant at mid engine; dry mass the engine does not publish spread along the body (centre at L/2). Enter the centre of gravity yourself (Component mode) to override.'))
+                + '">' + badge(TF('sixdof.badgeCgComponents',
+                             { full: rozetSayi(s.x_cg_full, 3), empty: rozetSayi(s.x_cg_empty, 3) },
+                             'CG FROM COMPONENTS (declared placement) {full} / {empty} m'), 'info') + '</span>';
         }
         const cnAlpha = fx(s.cn_alpha, 2);
         const xCp = fx(s.x_cp, 3);
@@ -2338,11 +2569,16 @@
             // apogee=null, end_reason='time_limit'). Apoje yoksa iddia
             // edilmez; başlık mevcut anahtarlardan + ucun kendi end_reason
             // alanından kurulur (yeni çeviri anahtarı açılmadı).
+            // V307/UÇUŞ-GÖVDE (kalem 6): bağlaşık koşu doğrusal geçerlilik
+            // sınırını aştıysa apoje yayımlanmaz ama integrasyon apojede
+            // bitmiş olabilir; başlık "BİTİŞ: —" yerine nedeni yazar
+            // (ölçüldü: örnek sıvı, TR 1280).
             title: (numOf(s.apogee) !== null)
                 ? T('sixdof.chartAlt', 'Altitude & Mach vs Time (launch to apogee)')
-                : (T('sixdof.sAltitude', 'Altitude [m]') + ' & Mach — '
-                   + T('transient.badgeEnd', 'END') + ': '
-                   + bitisEtiketi(s.end_reason)),
+                : (bagliGecersizBaslik(data)
+                   || (T('sixdof.sAltitude', 'Altitude [m]') + ' & Mach — '
+                       + T('transient.badgeEnd', 'END') + ': '
+                       + bitisEtiketi(s.end_reason))),
             xaxis: { title: T('common.axis.timeS2', 'Time [s]') },
             yaxis: { title: T('sixdof.sAltitude', 'Altitude [m]'), rangemode: 'tozero' },
             yaxis2: { title: 'Mach', overlaying: 'y', side: 'right', rangemode: 'tozero' },
@@ -2480,6 +2716,18 @@
                     isFinite(simdi) ? sayiEkran(simdi, digits) + (unit ? ' ' + unit : '') : '—']);
                 return;
             }
+            // V307/UÇUŞ-GÖVDE: motorun tankları varsa gövde çapı türetilmiş
+            // gövdeden gelir (tankları taşır); sayfa alanının (Yörünge
+            // referans alanı) verdiği çap yazılmaz, not iki sayıyı da söyler.
+            // Kullanıcı sayfa alanını elle yazdıysa o değer geçerlidir.
+            if (fieldId === 'sd_body_d' && typeof tankliGovdeGecerli === 'function'
+                    && tankliGovdeGecerli(src[specKey])) {
+                const simdi = parseFloat(el.value);
+                partsEkran.push([fieldId, src[specKey], kaynakMetni,
+                    isFinite(simdi) ? sayiEkran(simdi, digits) + (unit ? ' ' + unit : '') : '—',
+                    'derived']);
+                return;
+            }
             // Alanın KENDİ çözünürlüğünde yazılır (gövde çapı adımı 0,005 m);
             // yuvarlama farkı alanda 3. haneden sonrasıdır.
             el.value = value.toFixed(digits);
@@ -2522,7 +2770,7 @@
     // (alan kimlikleri) satırın ipucunda (title) kalır.
     let tohumNotu = null;
     // V306/UÇUŞ-3: notun satır yuvaları (notuYaz bunlardan kurar).
-    const notSatirlari = { proje: '', tohum: '', govde: '', motor: '', ret: '' };
+    const notSatirlari = { proje: '', tohum: '', govde: '', kanat: '', motor: '', ret: '' };
     function tohumEtiketi(id) {
         return (typeof HRMAReject !== 'undefined' && HRMAReject
                 && typeof HRMAReject.etiket === 'function' && HRMAReject.etiket(id)) || null;
@@ -2536,6 +2784,11 @@
         notSatirlari.tohum = kaynakAdi + ' → ' + tohumNotu.satir.map(function (p) {
             const alanAdi = tohumEtiketi(p[0]) || p[0];
             const kaynakAdi2 = tohumEtiketi(p[1]) || ('#' + (p[1] || '?'));
+            if (p[4] === 'derived') {
+                return TF('sixdof.seed.derivedKept',
+                    { field: alanAdi, value: p[3], source: kaynakAdi2, sourceValue: p[2] },
+                    '{field} = {value} (the airframe derived to carry the engine and its tanks; {source} gives {sourceValue})');
+            }
             if (p[3] !== null && p[3] !== undefined) {
                 return TF('sixdof.seed.userKept',
                     { field: alanAdi, value: p[3], source: kaynakAdi2, sourceValue: p[2] },
@@ -2548,6 +2801,7 @@
     if (typeof window !== 'undefined' && window.I18N && typeof window.I18N.onChange === 'function') {
         window.I18N.onChange(function () { try { tohumNotunuYaz(); } catch (e) { /* panel yok */ } });
         window.I18N.onChange(function () { try { govdeNotunuYaz(); } catch (e) { /* panel yok */ } });
+        window.I18N.onChange(function () { try { kanatNotunuYaz(); } catch (e) { /* panel yok */ } });
     }
 
     // V306/UÇUŞ-KÜTLE (kalem 6) — VARSAYILAN GÖVDE MOTORU TAŞIR. ÖLÇÜLDÜ
@@ -2564,17 +2818,226 @@
     // kanatlarla kararsız uçtu). Eskiden yalnız sıvı sayfası satır içinde
     // yapıyordu; kural artık tek yerde. Elle yazılan değer ezilmez (dar ise
     // uç adıyla reddeder).
+    //
+    // V307/UÇUŞ-GÖVDE (17 Kas 2026) — TÜRETİLMİŞ GÖVDE TANKLARI TAŞIR.
+    // ÖLÇÜLDÜ (docs/scofield/raw/OH/V307/ucus-govde/ONKAYIT.md): örnek sıvı
+    // motorda panel Ø0,242 × 2,0 m gövdeyle uçuyordu (tanklar Ø0,473 m, 0,362
+    // m³; uç "itici sığmıyor" diyor, araç KARARSIZ, çalkantı bağlanmıyor);
+    // hibritte Yörünge alanından gelen Ø0,150 m gövde N₂O tankından (Ø0,212 m)
+    // dardı. Motorun kasası dışında tankı varsa (sıvı, hibrit) panel gövdesi
+    // artık aracın TÜRETİLMİŞ gövdesidir (flight_vehicle.derive_airframe —
+    // Fırlatma Sahası'nın kullandığı AYNI işlev ve aynı burun): çap, toplam
+    // boy ve burun oradan dolar; kullanıcının yazmadığı kanat alanları
+    // boşalır ve uçuş onları Fırlatma Sahası'yla aynı kanat kuralından
+    // kurar. Yazılan alan ezilmez (dar gövdeyi uç adıyla reddeder). Tanksız
+    // araçta (katı) kural yukarıdaki gibidir: gövde bit-aynı.
     let govdeNotu = null;
+    let kanatNotu = null;
+    // Durum işlev özelliğindedir (kanatKuraliAcik.acik): doğrulama, şema ve
+    // istek kurucusu bu işlevi çağırır.
+    function kanatKuraliAcik() { return kanatKuraliAcik.acik === true; }
+    // Kanat kuralının kurabildiği alanlar: alan kimliği → 6-DOF ucu anahtarı.
+    function kanatKuraliAlanlari() {
+        return { sd_fin_root: 'fin_root_chord', sd_fin_tip: 'fin_tip_chord',
+                 sd_fin_span: 'fin_span', sd_fin_sweep: 'fin_sweep',
+                 sd_fin_pos: 'fin_position' };
+    }
+    function alanElleYazildi(id) {
+        const el = $(id);
+        return !!(el && el.dataset && el.dataset.userOverride === 'true');
+    }
+    // Aracın türetilmiş gövdesi ya da null (ölçü eksikse null: sayı
+    // uydurulmaz). Ad tarihseldir: V307/AĞIRLIK-MERKEZİ-2 (Berke kararı, 18
+    // Kas) — tanksız araç (katı; tank_order boş liste) da Fırlatma Sahası'nın
+    // türetilmiş gövdesiyle uçar (aynı derive_airframe, aynı burun, kanat
+    // kuralı, bileşen ağırlık merkezi). ÖLÇÜLDÜ (agirlik-merkezi-2/
+    // kati_panel.json): panel varsayılanı Ø0,10 × 2,0 m + sabit boy kesri
+    // marjı 5,20 kal gösteriyordu; aynı araç bileşenlerle −0,99 kal.
+    // Tank listesi yayımlanmamış sıvı/hibritte (tank_order null) gövde boyu
+    // da yoktur → null.
+    function tankliGovde(arac) {
+        const g = arac && arac.airframe_resolved;
+        if (!g || g.source !== 'derived' || !Array.isArray(g.tank_order)) return null;
+        const d = Number(g.body_diameter_m);
+        const arka = Number(g.length_behind_nose_m);
+        const burun = Number(g.nose_length_m);
+        if (g.body_diameter_m == null || g.length_behind_nose_m == null
+                || g.nose_length_m == null || !(isFinite(d) && d > 0)
+                || !(isFinite(arka) && arka > 0) || !(isFinite(burun) && burun > 0)) {
+            return null;
+        }
+        return { d: d, burun: burun, boy: burun + arka,
+                 burunTipi: (typeof g.nose_type === 'string') ? g.nose_type : null,
+                 tanksiz: g.tank_order.length === 0 };
+    }
+    // Sayfanın araç tanımı (hibrit Yörünge paneli) gövde çapını verse de
+    // türetilmiş gövde geçerli mi: bu hesabın aracı tank taşıyorsa ve
+    // kullanıcı sayfa alanını (kaynakId) elle yazmadıysa evet.
+    function tankliGovdeGecerli(kaynakId) {
+        const arac = (window.FlightHandoff && FlightHandoff.vehicleFor)
+            ? FlightHandoff.vehicleFor(window.currentResults) : null;
+        if (!tankliGovde(arac)) return false;
+        return !(typeof kaynakId === 'string' && alanElleYazildi(kaynakId));
+    }
     function govdeNotunuYaz() {
         if (!govdeNotu) { notSatirlari.govde = ''; notuYaz(); return; }
+        if (govdeNotu.tankli) {
+            const kalan = govdeNotu.kalan.map(function (id) {
+                return tohumEtiketi(id) || id;
+            });
+            notSatirlari.govde = govdeNotu.tanksiz ? (TF('sixdof.seed.bodyCarriesEngine',
+                { d: sayiEkran(govdeNotu.d, 3), l: sayiEkran(govdeNotu.boy, 2),
+                  nose: sayiEkran(govdeNotu.burun, 2) },
+                'Airframe derived from the engine so that it carries the engine (HRMA choice, not a sourced design rule; the same airframe as the Launch Site): outer diameter {d} m = the engine envelope; total length {l} m = nose {nose} m + engine.')
+                + (kalan.length ? ' ' + TF('sixdof.seed.bodyKeptTypedEngine',
+                    { fields: kalan.join(', ') },
+                    'Kept because you typed them: {fields}; a body that cannot carry the engine is refused by name when you run.') : ''))
+                : TF('sixdof.seed.bodyCarriesTanks',
+                { d: sayiEkran(govdeNotu.d, 3), l: sayiEkran(govdeNotu.boy, 2),
+                  nose: sayiEkran(govdeNotu.burun, 2) },
+                'Airframe derived from the engine so that it carries the engine and its propellant tanks (HRMA choice, not a sourced design rule; the same airframe as the Launch Site): outer diameter {d} m = the larger of the engine envelope and the widest tank outer diameter (inner diameter + 2 × published wall); total length {l} m = nose {nose} m + tanks stacked ahead of the engine (inner length + end closures) + engine.')
+                + (kalan.length ? ' ' + TF('sixdof.seed.bodyKeptTyped',
+                    { fields: kalan.join(', ') },
+                    'Kept because you typed them: {fields}; if the tanks do not fit, the run names it.') : '');
+            notuYaz();
+            return;
+        }
         notSatirlari.govde = TF('sixdof.seed.bodyFromEngine',
             { field: T('sixdof.fBodyD', 'Body Diameter (m)'),
               d: sayiEkran(govdeNotu.d, 3), od: sayiEkran(govdeNotu.od_mm, 1) },
             '{field} ← {d}: the panel body was narrower than the engine envelope {od} mm, so it was raised to the envelope rounded up to 1 mm (HRMA choice, not a design rule)');
         notuYaz();
     }
+    // Kanat satırı: sayılar yanıtın fin_geometry bloğundan (kural çalıştıysa).
+    function kanatNotunuYaz() {
+        if (!kanatNotu) { notSatirlari.kanat = ''; notuYaz(); return; }
+        const p = { span: sayiEkran(kanatNotu.span, 3), target: sayiEkran(kanatNotu.hedef, 1),
+                    min: sayiEkran(kanatNotu.enDusuk, 2), max: sayiEkran(kanatNotu.aramaSiniri, 0),
+                    floor: sayiEkran(kanatNotu.esik, 1) };
+        notSatirlari.kanat = kanatNotu.hedefSaglandi
+            ? TF('sixdof.seed.finRule', p,
+                'Fins from the fin rule (the same rule as the Launch Site): chords and sweep scaled with the body diameter (HRMA choice); span {span} m is the smallest that keeps the lowest static margin over the flight Mach range at {target} calibres or more (lowest {min}). Type a fin value to fix it yourself.')
+            : TF('sixdof.seed.finRuleFloor', p,
+                'Fins from the fin rule (the same rule as the Launch Site): chords and sweep scaled with the body diameter (HRMA choice). The {target} calibre target cannot be met within {max} body diameters of span on this body, so span {span} m keeps the lowest static margin just above the {floor} calibre limit (lowest {min}). Type a fin value to fix it yourself.');
+        notuYaz();
+    }
+    // Yanıtın fin_geometry bloğundaki kanat ölçüleri (readGeometry anahtarlarıyla,
+    // yuvarlanmamış); kuraldan gelmeyen ya da sayı olmayan alan girmez.
+    function kanatKesinOlculeri(blok) {
+        const out = {};
+        const eslem = { fin_root_chord: 'fin_root', fin_tip_chord: 'fin_tip',
+                        fin_span: 'fin_span', fin_sweep: 'fin_sweep' };
+        if (!blok || !blok.fields) return out;
+        Object.keys(eslem).forEach(function (uc) {
+            const k = blok.fields[uc];
+            if (k && typeof k.value === 'number' && isFinite(k.value)
+                    && typeof k.source === 'string' && k.source.indexOf('rule_') === 0) {
+                out[eslem[uc]] = k.value;
+            }
+        });
+        return out;
+    }
+    // Yanıtın fin_geometry bloğundan kuralla kurulan kanat ölçülerini forma
+    // yazar (finRule damgasıyla; bir sonraki koşuda yeniden kurulur). Dönüş:
+    // en az bir alan yazıldıysa true. Blok yoksa hiçbir şey yazılmaz.
+    function kanatAlanlariniKuraldanYaz(blok) {
+        if (!kanatKuraliAcik() || !blok || !blok.fields) return false;
+        const alanlar = kanatKuraliAlanlari();
+        let yazildi = false;
+        let aciklik = null;
+        Object.keys(alanlar).forEach(function (id) {
+            const k = blok.fields[alanlar[id]];
+            const el = $(id);
+            if (!el || !k || typeof k.value !== 'number' || !isFinite(k.value)
+                    || typeof k.source !== 'string' || k.source.indexOf('rule_') !== 0) return;
+            el.value = k.value.toFixed(3);
+            el.dataset.finRule = 'true';
+            yazildi = true;
+            if (id === 'sd_fin_span') aciklik = k.value;
+        });
+        const olcut = blok.criterion;
+        if (aciklik !== null && olcut && typeof olcut.target_cal === 'number'
+                && typeof olcut.threshold_cal === 'number'
+                && typeof olcut.search_max_calibers === 'number'
+                && typeof blok.min_margin_over_mach_range_cal === 'number') {
+            kanatNotu = { span: aciklik, hedef: olcut.target_cal, esik: olcut.threshold_cal,
+                          aramaSiniri: olcut.search_max_calibers,
+                          enDusuk: blok.min_margin_over_mach_range_cal,
+                          hedefSaglandi: olcut.target_met === true };
+        } else {
+            kanatNotu = null;
+        }
+        kanatNotunuYaz();
+        return yazildi;
+    }
+    // Kanat kuralını kapat: kuralın boşalttığı / doldurduğu alanlar panelin
+    // kendi sayfa varsayılanına döner (tanksız araç: eski davranış).
+    function kanatKuraliniKapat() {
+        if (!kanatKuraliAcik()) return;
+        kanatKuraliAcik.acik = false;
+        const alanlar = kanatKuraliAlanlari();
+        FIELDS.forEach(function (f) {
+            const el = $(f.id);
+            if (!el || !alanlar.hasOwnProperty(f.id) || alanElleYazildi(f.id)) return;
+            if (String(el.value).trim() === '' || el.dataset.finRule === 'true') {
+                el.value = f.def;
+            }
+            delete el.dataset.finRule;
+        });
+        kanatNotu = null;
+        kanatNotunuYaz();
+    }
+    function tankliGovdeyiKur(tg) {
+        const kalan = [];
+        // Hibrit: kullanıcı Yörünge panelinin referans alanını yazdıysa gövde
+        // çapı o alandan gelir (T12 sözleşmesi); yazmadıysa türetilmiş gövde.
+        let sayfaCapiElle = false;
+        try {
+            const sp = window.HRMAVehicleSpec && window.HRMAVehicleSpec.read
+                && window.HRMAVehicleSpec.read();
+            const kaynakId = sp && sp.fields && sp.fields.body_diameter_m;
+            sayfaCapiElle = typeof kaynakId === 'string' && alanElleYazildi(kaynakId);
+        } catch (e) { sayfaCapiElle = false; }
+        // Form alanına (makine kanalı: input[type=number] noktalı ondalık
+        // ister) alanın kendi çözünürlüğünde yazılır.
+        const yaz = function (id, deger, basamak, kilit) {
+            const el = $(id);
+            if (!el) return;
+            if (kilit || alanElleYazildi(id)) { kalan.push(id); return; }
+            el.value = deger.toFixed(basamak);
+        };
+        yaz('sd_body_d', tg.d, 3, sayfaCapiElle);
+        yaz('sd_body_l', tg.boy, 2, false);
+        yaz('sd_nose_l', tg.burun, 2, false);
+        const tip = $('sd_nose_type');
+        if (tip && tg.burunTipi && !alanElleYazildi('sd_nose_type')
+                && Array.prototype.some.call(tip.options, function (o) {
+                    return o.value === tg.burunTipi; })) {
+            tip.value = tg.burunTipi;
+        }
+        // Kanat: yazılmamış alanlar boşalır; uçuş kanat kuralından kurar.
+        kanatKuraliAcik.acik = true;
+        Object.keys(kanatKuraliAlanlari()).forEach(function (id) {
+            const el = $(id);
+            if (!el || alanElleYazildi(id)) return;
+            el.value = '';
+            delete el.dataset.finRule;
+        });
+        kanatNotu = null;
+        kanatNotunuYaz();
+        govdeNotu = { tankli: true, tanksiz: tg.tanksiz === true, d: tg.d, boy: tg.boy,
+                      burun: tg.burun, kalan: kalan };
+        govdeNotunuYaz();
+    }
     function govdeyiMotordanTohumla(arac) {
-        if (window.HRMAVehicleSpec && typeof window.HRMAVehicleSpec.read === 'function') return;
+        const tg = tankliGovde(arac);
+        if (tg) { tankliGovdeyiKur(tg); return; }
+        kanatKuraliniKapat();
+        if (window.HRMAVehicleSpec && typeof window.HRMAVehicleSpec.read === 'function') {
+            govdeNotu = null;
+            govdeNotunuYaz();
+            return;
+        }
         const el = $('sd_body_d');
         if (!el) return;
         const od = (arac && arac.engine_od_m != null) ? Number(arac.engine_od_m) : NaN;
@@ -2738,6 +3201,8 @@
 
         // Bileşen tablosu varsayılan satırları
         defaultComponents().forEach(addComponentRow);
+        // 3.0.7 (K5 B): çalkantı alt bölümünün tank yeri formu.
+        if (window.HRMACalkanti) window.HRMACalkanti.sixdofForm($('sd_calkanti_form'));
 
         // Canlı güncelleme: tüm form girdileri şema/doğrulamayı tetikler
         FIELDS.forEach(function (f) {
@@ -2752,6 +3217,9 @@
                 el.addEventListener(tip, function (e) {
                     if (!(e && e.isTrusted && el.dataset)) return;
                     el.dataset.userOverride = 'true';
+                    // V307/UÇUŞ-GÖVDE: yazılan kanat alanı artık kuralın
+                    // değil kullanıcınındır (koşuya aynen gider).
+                    delete el.dataset.finRule;
                     // Tohumlanan alan elle yazıldıysa not o anda tazelenir
                     // (yalnız gerçek yazmada: geri yüklemenin yapay olayı
                     // damga kurulmadan önce alanı tohumla ezmesin).
@@ -2781,6 +3249,13 @@
                 });
             });
         }
+        // V307/FS-YÜK: faydalı yük alanı değişince köprü kaydı güncellenir.
+        ['sd_payload_m', 'sd_payload_x'].forEach(function (id) {
+            const yukEl = $(id);
+            if (!yukEl) return;
+            yukEl.addEventListener('input', yukKoprusunuGuncelle);
+            yukEl.addEventListener('change', yukKoprusunuGuncelle);
+        });
         const useCurveEl = $('sd_use_curve');
         if (useCurveEl) useCurveEl.addEventListener('change', updateLive);
 
@@ -2884,10 +3359,12 @@
         document.addEventListener('hrma:flight-vehicle', function (e) {
             const d = e && e.detail;
             if (!(d && d.results && d.results === window.currentResults)) return;
-            try { seedFromPageVehicle(); } catch (err) { /* panel yok */ }
             // V306/UÇUŞ-KÜTLE (kalem 6): araç tanımı yayımlamayan sayfada gövde
             // çapı motordan (yukarıdaki kural); şema/doğrulama tazelenir.
-            try { govdeyiMotordanTohumla(d.vehicle); updateLive(); } catch (err) { /* panel yok */ }
+            // V307/UÇUŞ-GÖVDE: önce gövde (tank taşıyan türetilmiş gövde),
+            // sonra sayfa tanımının notu — not alandaki son değeri yazar.
+            try { govdeyiMotordanTohumla(d.vehicle); } catch (err) { /* panel yok */ }
+            try { seedFromPageVehicle(); updateLive(); } catch (err) { /* panel yok */ }
         });
         document.addEventListener('hrma:flight-vehicle-refused', function (e) {
             const d = e && e.detail;
@@ -2937,5 +3414,7 @@
                            // V306/UÇUŞ-3: proje şeridinin kayıt/açılış kancaları.
                            projeDurumu: projeDurumu,
                            projeDurumunuKur: projeDurumunuKur,
+                           // V307/FS-YÜK: Fırlatma Sahası köprüsünün faydalı yükü.
+                           payloadForFlight: payloadForFlight,
                            _sozlukGelinceCalistir: sozlukGelinceCalistir };
 })();

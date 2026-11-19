@@ -55,7 +55,9 @@ PANEL_SAYI_SIVI_ALTKUME = {
                             'ullage_volume': 10.517710283016346},
         'slosh': {'radius': 0.23747092328741232,
                   'fill_height': 1.1279868856152082, 'g_eff': 9.80665,
-                  'f1_hz': 1.3877962867846818,
+                  # 3.0.7 (V307/K1): ξ1 kesin kök (Dodge (1.41), scipy);
+                  # 4 basamaklı 1,8412 ile 1.3877962867846818 idi.
+                  'f1_hz': 1.3877901743947403,
                   'baffle': {'width_ratio': 0.7499999999999999,
                              'depth_ratio': 1.4166666666666654}}}},
     'feed_system': {'tank_pressure_bar': 3.647085446646845,

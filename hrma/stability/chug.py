@@ -336,7 +336,7 @@ def _newton(s0, gain, tau_s, tau_c_s, tau_f_s, iters=80, tol=1e-13,
             if diag is not None:
                 diag['newton_failure'] = (
                     f'The Newton iterate left the finite plane at iteration '
-                    f'{it} (step = {step!r}); no root is fabricated.')
+                    f'{it} (step = {step!r}); no root is published.')
                 diag['newton_iterations'] = it
             return None
     residual = abs(_char_fn(s, gain, tau_s, tau_c_s, tau_f_s))
@@ -879,7 +879,7 @@ def assess_chug(dp_ratio_j, tau_s, tau_c_s, tau_f_s=None,
             'exp(tau/tau_c) (Corless et al., Adv. Comput. Math. 5, 1996); '
             'with inertance the same root is continued in tau_f and polished '
             'by Newton iteration with a residual check (None if the residual '
-            'is not met — no number is fabricated).'),
+            'is not met — no number is published).'),
         'root_dominance_note': dominance_note,
         'unconditionally_stable': bool(unconditional),
         'inertance_included': bool(inertance),
@@ -974,7 +974,7 @@ def sweep_feed_line_length(line_lengths_m, line_area_m2, mass_flow_kg_s,
     if not lengths:
         raise ValueError(
             'line_lengths_m is empty: the sweep grid must be supplied '
-            'explicitly (no default sweep is fabricated).')
+            'explicitly (there is no default sweep).')
 
     rows = []
     for length in lengths:

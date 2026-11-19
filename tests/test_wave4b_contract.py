@@ -50,6 +50,7 @@ import warnings
 from pathlib import Path
 
 import pytest
+from scipy.special import jnp_zeros
 
 warnings.filterwarnings('ignore')
 
@@ -96,7 +97,9 @@ SLOSH_INPUT = {
     'baffle_width_ratio': 0.15,
     'baffle_depth_ratio': 0.10,
 }
-SLOSH_LAMBDA1 = 1.8412
+# 3.0.7 (V307/K1): kesin J1' kökü (Dodge 2000 Denk. (1.41); scipy); ürün
+# sabiti de artık bu kökü kullanıyor (eskisi 4 basamaklı 1.8412).
+SLOSH_LAMBDA1 = float(jnp_zeros(1, 1)[0])
 
 PRESS_REGULATED_INPUT = {
     'mode': 'regulated',
@@ -316,10 +319,23 @@ class TestRegenCoolingContract:
         assert sm['coking_risk'] is (t > RP1_COKING_TEMP_K)
         assert sm['coking_risk'] is True        # senaryo uyarı kademesini aşar
 
-    def test_missing_required_400(self, client):
+    def test_missing_required_422_adli(self, client):
+        """V307/ORTAM-TEK (kalem 2) — SÖZLEŞME YALNIZ BU UÇ İÇİN ÇEVRİLDİ.
+
+        Eskiden 400 + ham cümle ("'chamber_pressure' is required (bar)") ve
+        yalnız İLK eksik alan adlanıyordu. Artık aynı ucun fizik dışı
+        sıcaklık reddiyle (``invalid_regen_input``, V307/KÜÇÜKLER-2) aynı
+        aile: 422 ``incomplete_regen_input`` + eksiklerin tamamı
+        ``missing_fields``te. Öteki uçların eksik-alan sözleşmesi (bu
+        dosyadaki kardeş ``test_missing_required_400``ler) 400'de kaldı.
+        Ölçüm: docs/scofield/raw/OH/V307/ortam-tek/olcum/k2_{once,sonra}.json.
+        """
         r = client.post('/api/regen-cooling', json={})
-        assert r.status_code == 400
-        assert 'chamber_pressure' in r.get_json()['error']
+        assert r.status_code == 422
+        j = r.get_json()
+        assert j['error'] == 'incomplete_regen_input'
+        assert j['missing_fields'] == [
+            'chamber_pressure', 'chamber_temperature', 'throat_diameter']
 
     def test_unknown_material_400(self, client):
         r = client.post('/api/regen-cooling',

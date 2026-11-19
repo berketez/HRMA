@@ -99,6 +99,16 @@ KILITLI_ENVANTER = [
     ('hrma/app.py', 'P_SEA_LEVEL_PA', 101325.0, 'ikiz'),          # app-api
     ('hrma/app.py', 'P_SEA_LEVEL_PA', 101325.0, 'ikiz'),          # app-api
     ('hrma/app.py', 'P_SEA_LEVEL_PA', 101325.0, 'ikiz'),          # app-api
+
+    # ---- V307 / KIRMIZI-C (16 Kas 2026) -> V307 / İRTİFA-TEK (17 Kas) ----
+    # KIRMIZI-C, katı motorun irtifa tablosundaki ``alt * 6356766 /
+    # (6356766 + alt)`` tamsayı r0 ikizini (yeni görülen, tabanda da vardı)
+    # iki 'kati (devir)' satırıyla kilitlemişti. İRTİFA-TEK devir yamasını
+    # uyguladı (docs/scofield/raw/OH/V307/kirmizi-c/
+    # devir_kati_geopotansiyel_r0.patch; 26 145 irtifada eski/yeni bit farkı
+    # 0, katı ve sıvı tablo md5'i aynı: docs/scofield/raw/OH/V307/irtifa-tek/
+    # olcum/r0_*.json) ve iki satır SİLİNDİ — mandal daraldı. Ödenen borç
+    # listede TUTULMAZ: bayat satır geri gelen ikizi sessizce affederdi.
 ]
 
 

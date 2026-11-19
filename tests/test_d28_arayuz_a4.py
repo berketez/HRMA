@@ -354,9 +354,18 @@ class TestB405Wind:
         mb = re.search(r'var body = \{(.*?)\n        \};', s, re.S)
         assert mb, 'ucus yuku nesnesi bulunamadi'
         yuk = mb.group(1)
-        for ad, deger in (('nose_length', '0.50'), ('fin_root_chord', '0.20'),
-                          ('fin_tip_chord', '0.10'), ('fin_sweep', '0.08'),
-                          ('rail_length', '5')):
+        # V307/FS-UÇUŞ-2 (A1, 16 Kas): kanat kök/uç veteri ve oku SABİT
+        # DEĞİL — kullanıcı girdisi (boşsa uçtaki kaynaklı kanat kuralı;
+        # örnek aracın planformu launch_site_flight.EXAMPLE_FIN_PLANFORM_M'de
+        # tek yerde). Sabit nesnede yalnız burun ve ray kalır; kanat
+        # alanları yükte alandan okunur, gömülü sayı olarak dönemez.
+        for ad, alan in (('fin_root_chord', 'ls-a-finroot'),
+                         ('fin_tip_chord', 'ls-a-fintip'),
+                         ('fin_sweep', 'ls-a-finsweep')):
+            assert re.search(r"\b%s:\s*fieldNum\('%s'\)" % (ad, alan), yuk), (
+                '%s yine sabit: kanat planformu girdi olmalı' % ad)
+            assert ad not in nesne, '%s sabit nesneye geri döndü' % ad
+        for ad, deger in (('nose_length', '0.50'), ('rail_length', '5')):
             assert re.search(r'%s:\s*%s\b' % (ad, re.escape(deger)), nesne), (
                 '%s tek kaynakta %s degil' % (ad, deger))
             # Yuk artik sayiyi gomulu tasimaz, NESNEDEN okur.
@@ -369,16 +378,16 @@ class TestB405Wind:
                        s, re.S)
         assert m2, 'renderFixedAirframeNote yok'
         basici = m2.group(1)
-        for alan in ('nose_length', 'fin_root_chord', 'fin_tip_chord',
-                     'fin_sweep', 'rail_length'):
+        for alan in ('nose_length', 'rail_length'):
             assert 'LS_FIXED_AIRFRAME.%s' % alan in basici, (
                 'not %s alanini yukun nesnesinden okumuyor' % alan)
-        # EN/TR metinlerde gomulu sayi KALMADI; bes yer tutucu var.
+        # EN/TR metinlerde gomulu sayi KALMADI; iki yer tutucu var
+        # (V307/FS-UÇUŞ-2: kanat ölçüleri artık sabit değil, notta yok).
         sozluk = metin(I18N_LS)
         for m3 in re.finditer(r"'site\.fixedAirframeNote': '([^']*)'", sozluk):
             metni = m3.group(1)
             assert set(re.findall(r'\{(\w+)\}', metni)) == {
-                'nose', 'root', 'tip', 'sweep', 'rail'}, metni
+                'nose', 'rail'}, metni
             # \uXXXX kacislari sayi icerir; once onlar cozulur.
             duz = re.sub(r'\\u[0-9a-fA-F]{4}', 'X', metni)
             assert not re.search(r'\d', duz), (

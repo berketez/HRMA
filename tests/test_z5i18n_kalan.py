@@ -108,14 +108,14 @@ Z5K_MAKINE_ADLARI = (
 Z5K_BASIS_EN = (
     'No acceptance is issued and no verdict is issued at all',
     'No acceptance is issued: the measured sections',
-    'The verdict comes from verdict_safety_factor',
+    'The verdict comes from the safety factor behind the verdict',
     'Every station in the basket was evaluated against a user-supplied',
 )
 #: Aynı dört dalın Türkçe karşılıklarından çapa parçaları (i18n_charts.js).
 Z5K_BASIS_TR = (
     'Ne onay ne de hüküm verildi',
     'Onay verilmedi: ölçülen kesitler',
-    'Hüküm verdict_safety_factor alanından geliyor',
+    'Hüküm, çizilmiş bir cidar üstünde gerçekten ölçülen',
     'Sepetteki her istasyon kullanıcının verdiği bir kalınlığa karşı',
 )
 

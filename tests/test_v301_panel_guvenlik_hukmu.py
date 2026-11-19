@@ -332,8 +332,11 @@ def test_hukum_bloksuz_motor_sonucu_adiyla_reddedilir(client, sekme):
 
 @pytest.mark.parametrize('deger', ['SAFE', 3, ['x']])
 def test_motor_sonucu_nesne_olmali(client, deger):
+    # V307/GÜVERTE-ISIL kalem 4: oda sıcaklığı zorunlu; yoksa eksik-alan
+    # kapısı motor_result kapısından ÖNCE döner. Eski örtük 3000 K açık.
     govde = {'chamber_pressure': 30.0, 'propellant_mass': 10.0,
              'chamber_diameter': 0.08, 'wall_thickness': 0.004,
+             'chamber_temperature': 3000.0,
              'motor_type': 'hybrid', 'motor_result': deger}
     r = _sessiz(client.post, '/analyze_safety', json=govde)
     assert r.status_code in (400, 422)
@@ -343,6 +346,7 @@ def test_motor_sonucu_nesne_olmali(client, deger):
 def test_itki_uydurulmaz(client):
     govde = {'chamber_pressure': 30.0, 'propellant_mass': 10.0,
              'chamber_diameter': 0.08, 'wall_thickness': 0.004,
+             'chamber_temperature': 3000.0,   # V307/GÜVERTE-ISIL kalem 4
              'motor_type': 'hybrid', 'burn_time': 5.0}
     j = _sessiz(client.post, '/analyze_safety', json=govde).get_json()
     assert 'thrust' not in j['defaults_applied']

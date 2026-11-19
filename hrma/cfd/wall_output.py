@@ -175,7 +175,7 @@ def viscous_wall_block(result):
             'CFD sonucunda \'viscous\' anahtarı yok: bu köprü VİSKOZ '
             'koşunun duvar dizilerini tüketir. Euler koşusunda duvar '
             'kayma gerilmesi ve ısı akısı YOKTUR (kayma duvarı) ve '
-            'uydurulmaz.')
+            'varsayılmaz.')
     block = result['viscous']
     if not isinstance(block, dict):
         raise ValueError(
@@ -215,7 +215,7 @@ def _inputs(result, key, name):
         raise ValueError(
             f'CFD sonucunda inputs[{key!r}] ({name}) yok: bu köprü '
             'çözücünün girdi yankısını tüketir ve gaz/rezervuar '
-            'büyüklüğünü UYDURMAZ.')
+            'büyüklüğünü VARSAYMAZ.')
     return float(inputs[key])
 
 
@@ -228,7 +228,7 @@ def _prandtl(block):
             'viscous[\'declaration\'][\'transport\'][\'prandtl\'] yok: '
             'kurtarma faktörü r = Pr^n koşumun KENDİ Prandtl sayısıyla '
             'kurulur (GasTransport.declaration); varsayılan bir Pr '
-            'uydurulmaz.')
+            'varsayılmaz.')
     pr = float(pr)
     if not np.isfinite(pr) or pr <= 0.0:
         raise ValueError(f'Beyandaki Prandtl sayısı geçersiz: {pr!r}.')
@@ -554,7 +554,7 @@ def thermal_axial_profile(result, *, t_aw_basis=T_AW_BASIS_RECOVERY,
             f'T_w = {T_w[kotu]:.2f} K): h_g = q_w/(T_aw − T_w) tanımsız ya '
             'da işareti belirsiz olurdu. Duvar kurtarma sıcaklığından '
             'sıcaksa ısı transferi yönü terstir; bu koşum termal FEA '
-            'sınır koşulu üretmez ve uydurma bir h_g yayımlanmaz.')
+            'sınır koşulu üretmez ve bir h_g yayımlanmaz.')
     h_g = q_w / delta_T
     if np.any(h_g <= 0.0):
         kotu = int(np.argmin(h_g))

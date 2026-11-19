@@ -175,6 +175,16 @@ jobs:
     if: github.event_name != 'release'
     runs-on: ubuntu-latest
     timeout-minutes: 60
+    # 3.0.7 SÜREÇ kalem 4 — hesap ortamı sabit (gerekçe tests.yml iş akışı
+    # düzeyi `env` bloğunda). Değerler tools/ci_hesap_kunyesi.py SABIT_ORTAM'ın
+    # aynasıdır; bekçi tests/test_v307_surec.py ikisini eşit tutar. İş düzeyinde
+    # (iş akışı düzeyinde DEĞİL): macOS paket işi ARM64 OpenBLAS'ında Zen
+    # çekirdeği yoktur.
+    env:
+      OPENBLAS_CORETYPE: "Zen"
+      OPENBLAS_NUM_THREADS: "4"
+      OMP_NUM_THREADS: "4"
+      NPY_DISABLE_CPU_FEATURES: "AVX512F AVX512CD AVX512_KNL AVX512_KNM AVX512_SKX AVX512_CLX AVX512_CNL AVX512_ICL AVX512_SPR"
     steps:
       - uses: actions/checkout@v4
 

@@ -549,7 +549,10 @@ class TestP16B3_24SinifKunyesi:
 
     EMNIYET_GOVDESI = {'motor_type': 'hybrid', 'chamber_pressure': 20.0,
              'propellant_mass': 50.0, 'chamber_diameter': 0.1,
-             'wall_thickness': 0.005}
+             'wall_thickness': 0.005,
+             # V307/GÜVERTE-ISIL kalem 4: oda sıcaklığı zorunlu (3000 K
+             # varsayılanı kalktı); eski örtük değer açık, sayılar bit-aynı.
+             'chamber_temperature': 3000.0}
 
     def test_tablo_disi_yakit_sinifi_kunyeli(self, istemci):
         y = istemci.post('/analyze_safety',

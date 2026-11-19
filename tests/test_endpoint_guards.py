@@ -219,6 +219,9 @@ class TestAnalyzeSafetyMaterial:
         r = client.post('/analyze_safety', json={
             'chamber_pressure': 30, 'chamber_diameter': 0.12,
             'wall_thickness': 0.004, 'propellant_mass': 8,
+            # V307/GÜVERTE-ISIL kalem 4: oda sıcaklığı zorunlu (3000 K
+            # varsayılanı kalktı); eski örtük değer açık, sayılar bit-aynı.
+            'chamber_temperature': 3000.0,
             'material': 'aluminum_6061'})
         assert r.status_code == 200
         ss = r.get_json()['safety_analysis']['structural_safety']
@@ -228,7 +231,10 @@ class TestAnalyzeSafetyMaterial:
     def test_default_material_is_steel_4130(self, client):
         r = client.post('/analyze_safety', json={
             'chamber_pressure': 30, 'chamber_diameter': 0.12,
-            'wall_thickness': 0.004, 'propellant_mass': 8})
+            'wall_thickness': 0.004, 'propellant_mass': 8,
+            # V307/GÜVERTE-ISIL kalem 4: oda sıcaklığı zorunlu (3000 K
+            # varsayılanı kalktı); eski örtük değer açık, sayılar bit-aynı.
+            'chamber_temperature': 3000.0})
         assert r.status_code == 200
         ss = r.get_json()['safety_analysis']['structural_safety']
         assert ss['material'] == 'steel_4130'
@@ -236,7 +242,10 @@ class TestAnalyzeSafetyMaterial:
 
     def test_material_changes_safety_factor(self, client):
         payload = {'chamber_pressure': 30, 'chamber_diameter': 0.12,
-                   'wall_thickness': 0.004, 'propellant_mass': 8}
+                   'wall_thickness': 0.004, 'propellant_mass': 8,
+                   # V307/GÜVERTE-ISIL kalem 4: oda sıcaklığı zorunlu (3000 K
+                   # varsayılanı kalktı); eski örtük değer açık, sayılar bit-aynı.
+                   'chamber_temperature': 3000.0}
         r1 = client.post('/analyze_safety',
                          json={**payload, 'material': 'steel_4130'})
         r2 = client.post('/analyze_safety',

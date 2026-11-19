@@ -69,8 +69,12 @@ def ornek():
 # Kalem 6 — tek çıkış alanı, tasarım ortamında çapa
 # ---------------------------------------------------------------------------
 def test_tarama_geometrik_alan_ve_tasarim_capasi_ile():
-    """Sabit geometride dF/dp_a = −A_e: her satır F + (p_çapa − p)·A_e."""
-    from hrma.constants import isa_pressure
+    """Sabit geometride dF/dp_a = −A_e: her satır F + (p_çapa − p)·A_e.
+
+    3.0.7 İRTİFA-TEK: tarama irtifası GEOMETRİK okunur; ortam basıncı
+    ``isa_pressure_geometric`` (eski beklenti geopotansiyel ``isa_pressure``
+    ile yazılmıştı: 20 km'de p farkı ~%1, itkide 0,10 N; 0 m bit-aynı)."""
+    from hrma.constants import isa_pressure_geometric
     from hrma.engines.combustion_analysis import CombustionAnalyzer
     mdot, v_e, p_e_bar, t_e, r_e = 1.4, 2400.0, 0.9, 1800.0, 320.0
     f_tasarim, a_e, p_capa = 3000.0, 0.0036, 1.0e5
@@ -83,7 +87,7 @@ def test_tarama_geometrik_alan_ve_tasarim_capasi_ile():
     assert meta['thrust_vacuum_n'] == pytest.approx(
         f_tasarim + p_capa * a_e, rel=1e-12)
     for s in satirlar:
-        p_pa = isa_pressure(float(s['altitude']))
+        p_pa = isa_pressure_geometric(float(s['altitude']))
         assert s['thrust'] == pytest.approx(
             f_tasarim + (p_capa - p_pa) * a_e, rel=1e-12)
 

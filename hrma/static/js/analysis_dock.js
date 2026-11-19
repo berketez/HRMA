@@ -265,6 +265,7 @@
         outside_anchor_envelope_unverified: 'common.code.outside_anchor_envelope_unverified',
         OUT_OF_PUBLISHED_RANGE: 'common.code.OUT_OF_PUBLISHED_RANGE',
         not_applied_unverified: 'common.code.not_applied_unverified',
+        module_estimate_applied: 'common.code.module_estimate_applied',
         user_supplied_unvalidated: 'common.code.user_supplied_unvalidated',
         not_evaluated_no_condensed_fraction: 'common.code.not_evaluated_no_condensed_fraction'
     };
@@ -286,6 +287,20 @@
                   'turbopump-fed': 'common.code.turbopump_fed' },
         edge: { floor: 'common.code.edge_floor',
                 ceiling: 'common.code.edge_ceiling' },
+        // V307/DİL-EKRAN-2 (KILAVUZ §2 "fuel besleme hattı"): `{line}`
+        // kapalı kümesi liquid_rocket_engine.py'den ölçüldü — hız uyarısı
+        // `prop_kind` ('fuel' / 'oxidizer'), su koçu uyarısı `_line_block`
+        // etiketi ('fuel_line' / 'oxidizer_line'). EN kalıp "The {line} feed
+        // line" / "on the {line}:", TR kalıp "{line} besleme hattı" /
+        // "{line} hattında": EN değeri kalıba göre, TR değeri yalnız ad.
+        line: { fuel: 'common.code.line_fuel',
+                oxidizer: 'common.code.line_oxidizer',
+                fuel_line: 'common.code.line_fuel_line',
+                oxidizer_line: 'common.code.line_oxidizer_line' },
+        // V307/DİL-EKRAN-2 (akşam tarayıcı ölçümü, YAPISAL TR): cıvata
+        // uyarısının `{module}` değeri structural_analysis.py'de tek
+        // ('bolted_joint'); ekranda makine adı basılıyordu.
+        module: { bolted_joint: 'common.code.module_bolted_joint' },
     };
 
     function warnParamText(k, v) {
@@ -491,7 +506,9 @@
             // satır, tek satırlık metin duvarıysa karakter (bulgunun ölçtüğü
             // büyüklük: "8.725 karakter beyan bir tıklama arkasında").
             const n = info.items > 0 ? String(info.items)
-                : (info.lines > 1 ? String(info.lines) : String(info.chars) + 'c');
+                : (info.lines > 1 ? String(info.lines)
+                    // V307/DİL-EKRAN (DİL-HİBRİT O16): 'c' kısaltması çevrilmiyordu.
+                    : TF('dock.foldChars', { n: String(info.chars) }, '{n} chars'));
             const text = (info.declaration ? '▲ ' : '▸ ') + n;
             // DEĞİŞMEDİYSE YAZMA: rozetin kendisi bir DOM değişikliğidir;
             // aynı metni yeniden yazmak aşağıdaki gözlemciyi sonsuz
@@ -1144,12 +1161,20 @@
     // ▲/▼ simgesiyle bildirilir.
     function diffBadge(change) {
         if (!change) return '';
-        const oldTxt = (change.old == null) ? '—' : String(dockSigFig(change.old, 5));
-        const newTxt = (change['new'] == null) ? '—' : String(dockSigFig(change['new'], 5));
+        // V307/DİL-EKRAN (NK3-S-1): ondalık ayracı dile göre (TR virgül),
+        // yüzde biçimi sözlükten (TR "%12,3"); eski değer 0 iken bağıl
+        // değişim tanımsızdır — "%100" yerine "önceki 0" yazılır.
+        const sayiYaz = function (v) {
+            return (window.I18N && typeof window.I18N.number === 'function')
+                ? window.I18N.number(v) : String(v);
+        };
+        const oldTxt = (change.old == null) ? '—' : sayiYaz(dockSigFig(change.old, 5));
+        const newTxt = (change['new'] == null) ? '—' : sayiYaz(dockSigFig(change['new'], 5));
         const arrow = change.dir === 'up' ? '▲'
             : (change.dir === 'down' ? '▼' : '•');
         const pct = (change.rel == null) ? T('common.unknown', 'unknown')
-            : (dockSigFig(change.rel * 100, 3) + ' %');
+            : (change.old === 0 ? T('dock.diff.fromZero', 'previous value 0')
+                : TF('dock.diff.pct', { v: sayiYaz(dockSigFig(change.rel * 100, 3)) }, '{v} %'));
         const tip = TF('dock.diff.badgeTip', { pct: pct },
             'Changed vs the previous result — relative change {pct}.');
         return `<span class="ad-diff-badge" data-diff-badge="${escAttr(change.path || '')}"
@@ -1209,7 +1234,7 @@
         const rows = result.changes.slice(0, DIFF_TOP_N).map(function (c) {
             return `<div style="margin:3px 0;"><span
                 style="font-family:var(--hd-mono, monospace);
-                color:var(--hd-ink, #cfe8f2);">${escAttr(c.path)}</span>${diffBadge(c)}</div>`;
+                color:var(--hd-ink, #cfe8f2);">${escAttr(c.path)}</span> ${diffBadge(c)}</div>`;
         }).join('');
         const seriesRows = result.series.slice(0, DIFF_TOP_N).map(function (s) {
             return `<div style="margin:3px 0; font-family:var(--hd-mono, monospace);
@@ -2376,7 +2401,14 @@
                     // çeviri anahtarı değil, makine-yolu dizesidir (Z4
                     // kaçışı): iki anahtar da ham geçer, çevrilmez.
                     const gonderilen = (el.value == null) ? '' : String(el.value);
-                    withheld[k] = 'solver_value_not_in_option_list: solver="'
+                    // V307/DİL-EKRAN (NK3-K-4, NK3-H-8): görünen satır kullanıcı
+                    // dilinde ve malzeme ADLARIYLA; makine künyesi (\u001e
+                    // sonrası) ipucunda kalır (V301/DİL-2 kök 7 biçimi).
+                    withheld[k] = TF('dock.optionNotInList',
+                        { solver: warnParamText(k, want), sent: warnParamText(k, gonderilen) },
+                        'The solver value ({solver}) is not in this list; the form '
+                        + 'would send {sent}, so the run is blocked.')
+                        + '\u001e' + 'solver_value_not_in_option_list: solver="'
                         + want + '" sent="' + gonderilen + '"';
                     // ÖH D24 / P17B2-08 — BEYAN ÇÖZÜM DEĞİLDİR.
                     // D21 gerekçeyi konsoldan ekrana taşıdı; ekranda
@@ -2470,7 +2502,7 @@
     // geri çekme). Çipin rengi/etiketi aynı ('missing'); değişen not.
     const FIELD_SRC_BLANK_OPTIONAL_KEY = 'dock.src.fieldBlankOptional';
     const FIELD_SRC_BLANK_OPTIONAL_FALLBACK = 'The field is empty — this field '
-        + 'is not sent; the endpoint applies its own rule.';
+        + 'is not sent; the calculation applies its own rule.';
     // OH-D37-S4: önceki koşunun önerisi bu koşuda gelmediği için temizlendi.
     const FIELD_SRC_CLEARED_KEY = 'dock.src.fieldCleared';
     const FIELD_SRC_CLEARED_FALLBACK = 'The previous run\'s value was cleared '
@@ -2731,6 +2763,10 @@
     const HATA_ANAHTARI = {
         incomplete_flow_input: 'dock.err.incompleteFlowInput',
         invalid_flow_input: 'dock.err.invalidFlowInput',
+        // V307/KÜÇÜKLER-2 (kalem 1): /api/regen-cooling fizik dışı oda sıcaklığı.
+        invalid_regen_input: 'dock.err.invalidRegenInput',
+        // V307/ORTAM-TEK (kalem 2): aynı ucun eksik zorunlu alan reddi.
+        incomplete_regen_input: 'dock.err.incompleteRegenInput',
         incomplete_thermal_input: 'dock.err.incompleteThermalInput',
         invalid_thermal_input: 'dock.err.invalidThermalInput',
         incomplete_structural_input: 'dock.err.incompleteStructuralInput',
@@ -2741,12 +2777,18 @@
     //: Aynı kodların İngilizce yedek cümleleri (sözlük yüklenmezse basılır).
     const HATA_YEDEGI = {
         incomplete_flow_input:
-            'The nozzle flow solution was not run: this endpoint publishes '
+            'The nozzle flow solution was not run: this analysis publishes '
             + 'the regime, CF and thrust of YOUR motor, and the inputs '
             + 'below were not supplied, so nothing was assumed for you.',
         invalid_flow_input:
             'The nozzle flow solution was not run: the inputs below are '
             + 'outside the range this solver can work in.',
+        invalid_regen_input:
+            'The regenerative cooling march was not run: the inputs below '
+            + 'are outside the range this solver can work in.',
+        incomplete_regen_input:
+            'The regenerative cooling march was not run: the inputs below '
+            + 'were not supplied, and no value was assumed for them.',
         incomplete_thermal_input:
             'The thermal analysis was not run: the inputs below were not '
             + 'supplied and cannot be derived from the rest of the form.',
@@ -2858,9 +2900,14 @@
             });
             status.textContent = TF('dock.materialNotInList',
                 { fields: engelliAlanlar.map(function (k) {
+                    // V307/DİL-EKRAN (NK3-K-4): alan ve malzemeler okunur adla.
+                    const _f = (Array.isArray(spec.fields) ? spec.fields : []).filter(function (x) {
+                        return Array.isArray(x) && x[0] === k; })[0];
+                    const _alan = _f ? (_f[4] ? T(_f[4], _f[1]) : _f[1]) : k;
                     return TF('dock.materialNotInListField',
-                        { field: k, solver: engel[k].solver, sent: engel[k].sent },
-                        '{field} (solver="{solver}", the form would send "{sent}")');
+                        { field: _alan, solver: warnParamText(k, engel[k].solver),
+                          sent: warnParamText(k, engel[k].sent) },
+                        '{field} (solver value: {solver}; the form would send {sent})');
                 }).join('; ') },
                 'The solver value for {fields} is not in this deck\'s option '
                 + 'list and could not be matched through the materials '
@@ -2876,6 +2923,35 @@
         }
 
         // ------------------------------------------------------------------
+        // V307/GÜVERTE-ISIL (kalem 2) — YEREL SONUÇ
+        // ------------------------------------------------------------------
+        // Panel, kurulan gövdeye bakıp ucun MODELLEMEDİĞİ bir durumu uca
+        // gitmeden kendi çizebilir: `spec.localResult(payload)` bir nesne
+        // dönerse istek GÖNDERİLMEZ ve nesne panelin `render`ına verilir
+        // (dil değişiminde yeniden çizilmek üzere saklanır). null / undefined
+        // dönerse akış aynen sürer. Bugün tek kullanıcısı termal sekme: film /
+        // ışınım / dump soğutmalı motorda sekme hesap yapmaz, motor sonucunun
+        // soğutma bloğunu gösterir (eskiden doğal taşınıma düşüp başka bir
+        // soğutmanın hükmünü basıyordu).
+        if (typeof spec.localResult === 'function') {
+            let yerel = null;
+            try { yerel = spec.localResult(built.payload); } catch (e) { yerel = null; }
+            if (yerel && typeof yerel === 'object') {
+                purgePlots(root);
+                root.innerHTML = '';
+                lastData[spec.id] = yerel;
+                lastPayload[spec.id] = JSON.stringify(built.payload);
+                status.removeAttribute('data-onceki-tasarim');
+                spec.render(yerel, root);
+                if (window.I18N && window.I18N.applyTo) window.I18N.applyTo(root);
+                root.style.display = 'block';
+                status.textContent = T('dock.localResult',
+                    'No request was sent: this tab does not model this case. '
+                    + 'See the note below.');
+                return;
+            }
+        }
+
         // ÖH D24 / P11B2-11 — BOŞ GÖVDE POSTALAMA
         // ------------------------------------------------------------------
         // ÖLÇÜLDÜ (a3/once.json + P11 B2-repro-09): `fields: []` ile
@@ -2888,11 +2964,18 @@
         // yanında duran, HİÇ çalışmayan ikinci bir kontroldü.
         // Boş gövdenin MEŞRU olduğu tek uç (`/api/correlation-report`,
         // ölçüldü: 200 + 54.805 B) bunu `allowsEmptyPayload` ile BEYAN eder.
-        if (!Object.keys(built.payload).length && spec.allowsEmptyPayload !== true) {
+        // V307/SEKME-GÜVERTE (NK3-H-7): alan tanımlayan panelde gövde ZORUNLU
+        // alanlar boş olduğu için boşsa (son hesap başarısız, tohum yok)
+        // doğru ileti "boş zorunlu alanlar"dır, aşağıda adlarıyla basılır;
+        // bu dal yalnız alanı HİÇ olmayan paneller içindir. ÖLÇÜLDÜ
+        // (tests/test_v307_sekme_guverte.py, performans paneli bayat):
+        // "This panel declares no deck fields …" basılıyordu.
+        if (!Object.keys(built.payload).length && !built.missing.length
+                && spec.allowsEmptyPayload !== true) {
             root.style.display = 'none';
             status.textContent = T('dock.emptyPayload',
                 'This panel declares no deck fields, so this button would '
-                + 'post an empty body — the endpoint rejects that. Nothing '
+                + 'send an empty request, which is refused. Nothing '
                 + 'was sent. Use the panel\'s own controls below, which build '
                 + 'the request they need.');
             return;

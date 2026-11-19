@@ -720,3 +720,17 @@ class TestConsistencyGuard:
 if __name__ == '__main__':
     import sys
     sys.exit(pytest.main([__file__, '-v']))
+
+
+# V307/GRAFİK-BİRİM (kalem 3) — çıktı başına birim. Bekçi: birimsiz çıktı
+# KIRMIZI. Birim üreticinin tek tablosundan (uq_adapters
+# CONTRACT_OUTPUT_UNITS); örneklenmeyen çıktı (hibrit total_impulse) dahil.
+def test_v307_her_cikti_blogunda_ureticinin_birimi(hybrid_fast, kati_dagilim,
+                                                   sivi_dagilim):
+    from hrma.analysis.uq_adapters import CONTRACT_OUTPUT_UNITS
+    for tur, govde in (('hybrid', hybrid_fast), ('solid', kati_dagilim),
+                       ('liquid', sivi_dagilim)):
+        assert govde['outputs'], tur
+        for ad, blok in govde['outputs'].items():
+            assert blok.get('unit') == CONTRACT_OUTPUT_UNITS[tur][ad], (
+                tur, ad, blok.get('unit'))

@@ -402,7 +402,7 @@ class TestOHUC10KutleBoslugu:
         govde = [u for u in _kutle_uyarilari(_ayristir(govde_mat=''))
                  if "'Body'" in u][0]
         gerekce = ('no bulk material density in file; mass not estimated '
-                   '(no fabricated defaults)')
+                   '(no default density is assumed)')
         assert kanat == _mass_not_estimated_warning(
             'trapezoidfinset', 'Fins', gerekce)
         assert govde == _mass_not_estimated_warning(

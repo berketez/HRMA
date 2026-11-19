@@ -363,7 +363,9 @@ def test_a2_slosh_gercek_tank_geometrisiyle(saha_motor):
     assert 0.0 < s['slosh_mass_kg'] < blok['liquid_mass_kg']
     assert s['pendulum_length'] > 0
     # SP-106 frekans bağıntısının kendisiyle çapraz sağlama
-    lam1 = 1.8412
+    # 3.0.7 (V307/K1): kesin J1' kökü (Dodge (1.41)); eskisi 1.8412.
+    from scipy.special import jnp_zeros
+    lam1 = float(jnp_zeros(1, 1)[0])
     r = blok['tank_diameter_m'] / 2.0
     omega2 = (lam1 * blok['g_eff_m_s2'] / r) * np.tanh(
         lam1 * blok['fill_height_m'] / r)
@@ -378,9 +380,13 @@ def test_a2_g_eff_sabit_1g_beyanli(saha_motor):
     _, sonuc = saha_motor
     blok = sonuc['oxidizer_tank_slosh']
     assert blok['g_eff_m_s2'] == pytest.approx(G_0)
-    # Yörünge/uçuş ivmesi bağlaşımı SONRAKİ iş — açık NOT_MODELLED notu
-    assert 'NOT_MODELLED' in blok['g_eff_basis']
-    assert 'T/m' in blok['g_eff_basis']
+    # 3.0.7 (V307/ÇALKANTI-ARAYÜZ, DEVİR K5 §4): uçuş ivmesiyle bağlaşım
+    # artık 6-DOF panelinin çalkantı alt bölümünde (K2 g_eff(t) serisi);
+    # motor kartı 1 g'de kalır ve bunu söyler. Sayı değişmedi (yukarıda G_0).
+    assert 'NOT_MODELLED' not in blok['g_eff_basis']
+    assert '1 g' in blok['g_eff_basis']
+    assert '6-DOF panel' in blok['g_eff_basis']
+    assert 'g_eff(t)' in blok['g_eff_basis']
 
 
 def test_a2_cozum_yokken_beyanla_bos():

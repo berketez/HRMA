@@ -100,6 +100,42 @@ MESRU = (
                 'birimiyle ilgisi yok; 6894,757 Pa/psi ile 3,2e-4 bağıl '
                 'yakınlık rastlantıdır ve sayı bir ÖLÇÜM sonucudur, '
                 'merkezden okunamaz.'},
+    # V307/KIRMIZI-C (16 Kas 2026) — SIVI-ORTAM (c7ac8fc92) USSA 1976
+    # geopotansiyel dönüşüm yarıçapını merkeze taşıyınca
+    # (``ISA_GEOPOTENTIAL_EARTH_RADIUS_M`` = 6 356 766 m) yakın-ıska bandı
+    # (5e-3) Dünya'nın BAŞKA iki yarıçapını da yakaladı: WGS-84 büyük yarı
+    # ekseni (bağıl fark 3,4e-3) ve küresel ortalama yarıçap (2,2e-3). Bu
+    # literaller yeni değil (taban 9dd10f531'de aynı satırlarda), yeni
+    # GÖRÜLDÜLER. Üçü de ayrı fiziksel büyüklüktür; r0'a bağlamak yörünge
+    # geometrisini değiştirirdi. Değerler ölçüldü (sabit_envanteri.envanter).
+    {'dosya': 'hrma/analysis/launch_site.py',
+     'sabit': 'ISA_GEOPOTENTIAL_EARTH_RADIUS_M', 'deger': 6378137.0,
+     'gerekce': 'WGS84_A — WGS-84 elipsoidinin büyük yarı ekseni a, '
+                'tanımlayıcı parametre (NIMA TR8350.2 Tablo 3.1); fırlatma '
+                'sahasının jeodezik konum dönüşümü. USSA 1976 geopotansiyel '
+                'dönüşüm yarıçapı r0 DEĞİL.'},
+    {'dosya': 'hrma/static/js/launch_site_globe.js',
+     'sabit': 'ISA_GEOPOTENTIAL_EARTH_RADIUS_M', 'deger': 6378137.0,
+     'gerekce': 'WGS84_A — Fırlatma Sahası küresinde WGS-84 büyük yarı '
+                'ekseni a (NIMA TR8350.2 Tablo 3.1), launch_site.py WGS84_A '
+                'ile aynı büyüklük. Geopotansiyel r0 DEĞİL.'},
+    {'dosya': 'hrma/analysis/six_dof_trajectory.py',
+     'sabit': 'ISA_GEOPOTENTIAL_EARTH_RADIUS_M', 'deger': 6371000.0,
+     'gerekce': 'R_EARTH — küresel Dünya yaklaşımının ORTALAMA yarıçapı '
+                '(6371 km; GRS80 ortalama yarıçapı R1 = 6 371 008,8 m, '
+                'Moritz 2000), 6-DOF kalkış noktasının merkez uzaklığı. '
+                'Modülün kendi yorumu bunu r0 (R_GEOPOTENTIAL) ile ayırır.'},
+    {'dosya': 'hrma/analysis/trajectory_analysis.py',
+     'sabit': 'ISA_GEOPOTENTIAL_EARTH_RADIUS_M', 'deger': 6371000.0,
+     'gerekce': 'self.R_earth — düzlemsel çözücünün ORTALAMA Dünya '
+                'yarıçapı (6371 km; GRS80 R1 = 6 371 008,8 m, Moritz 2000); '
+                'aynı sınıfta r0 ayrıca R_geopotential olarak MERKEZDEN '
+                'okunuyor, iki büyüklük bilerek ayrı.'},
+    {'dosya': 'hrma/static/js/launch_site_globe.js',
+     'sabit': 'ISA_GEOPOTENTIAL_EARTH_RADIUS_M', 'deger': 6371000.0,
+     'gerekce': 'R_EARTH_M — küre çiziminde ORTALAMA Dünya yarıçapı '
+                '(6371 km), six_dof_trajectory.R_EARTH ile aynı büyüklük '
+                '(dosyanın kendi yorumu). Geopotansiyel r0 DEĞİL.'},
 )
 
 

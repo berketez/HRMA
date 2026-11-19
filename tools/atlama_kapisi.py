@@ -66,9 +66,17 @@ import xml.etree.ElementTree as ET
 #:     (test_v306_guncelleme_kilidi), 4 tarayıcı testi (test_v306_ucus3),
 #:     1 gerekçeli koşullu dal (test_d19_arayuz_a1, V306/KATI-MODEL
 #:     M-KATI-10) = 96. Pay eklenmedi: tek yeni atlama kapıyı kapatır.
+#:   18 Kasım 2026 (3.0.7): erken aday CI'ı (koşu 44290629774, 13b307593)
+#:     134 atlama; 3.0.6 rc.8 CI'ının (koşu 42789100405) dökümüyle düğüm
+#:     adıyla fark: yeni 38, kaybolan 0 — 26 yalnız-macOS güncelleme ekranı
+#:     (test_v307_guncelleme_ekran), 5 sığ klon (test_six_dof_slosh::TestCc),
+#:     7 tarayıcı (test_v307_s2_kalinti 5, test_v307_fs_ucus 1,
+#:     test_v307_fs_ucus_2 1). Adaydan sonra birleşen +2: yerelde üretilen
+#:     pilot görüntü paketi CI'da yok (test_v307_harita_goruntu::
+#:     test_uretilmis_pilot_paketi[sinop_tr|ccsfs_slc40]) = 136. Pay eklenmedi.
 #: Dökümün tamamı `.github/workflows/tests.yml` içindeki gerekçe bloğundadır.
 #: Değiştirirken ölçüm komutunu, tarihi ve dökümü BİRLİKTE güncelleyin.
-ATLAMA_BUTCESI = 96
+ATLAMA_BUTCESI = 136
 
 #: Toplama çöktüğünde "0 test, 0 atlama" ile yeşil kalmayı engelleyen taban.
 #: Ölçülen toplama 9497; taban %94,8'ine kondu.
