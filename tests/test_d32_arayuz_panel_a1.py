@@ -143,6 +143,17 @@ class TestP5B418GimbalKnKapisi:
             'korumuyor: %s' % eksik)
 
     @node_gerekli
+    def _anlamli(self):
+        """V307/S2-KALINTI (NK3-S-6): kN sarmalayıcısı sayı yolunda
+        sayfanın anlamlı basamak kuralını (liqAnlamliTxt) çağırır; düzenek
+        o bloğu da GERÇEK dosyadan keser (sabitler + iki işlev)."""
+        html = _oku(TPL / 'liquid.html')
+        i = html.index('const LIQ_ANLAMLI_BASAMAK')
+        j = html.index('function liqAnlamliTxt(v, taban, unit)', i)
+        govde = _govde(html, 'liqAnlamliTxt')
+        assert govde, 'liqAnlamliTxt bulunamadı'
+        return html[i:j] + govde
+
     def test_canli_kn_davranisi(self, govde, tmp_path):
         """Canlı ölçüm: null → '—', sayı → değişmeden aynı sayı."""
         o = _node("""
@@ -152,12 +163,14 @@ function hrmaFmt(v, dec, unit) {
     const s = v.toFixed(dec != null ? dec : 1);
     return unit ? (s + ' ' + unit) : s;
 }
+function numTxt(v, d) { return v.toFixed(d); }
+%s
 %s
 process.stdout.write(JSON.stringify({
     bos: kN(null), tanimsiz: kN(undefined), nan: kN(NaN),
     dize: kN('13937'), sayi: kN(13937.128436), sifir: kN(0)
 }));
-""" % self._kn(govde), tmp_path)
+""" % (self._anlamli(), self._kn(govde)), tmp_path)
         assert o['bos'] == '\u2014', (
             'kN(null) hâlâ sayı basıyor: %r (P5B4-18)' % o['bos'])
         assert o['tanimsiz'] == '\u2014'

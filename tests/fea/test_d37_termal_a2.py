@@ -1298,8 +1298,14 @@ HIBRIT_PENCERE_YANMA_S = 5
 HIBRIT_STEEL_304_PENCERE_SINIRA_SURE_S = 4.7222
 #: /api/thermal-protection ısı-yutucu çapası (denetim-6 Ş1 a) ve ss_304
 #: 13 s vakasının ölçülen sınıra süresi [s].
+#: V307/GRAFİK-BİRİM (19 Kas): ısı kuyusu kipinde ``T_initial_K`` zorunlu
+#: (V307/KÜÇÜKLER kalem 5, da1b44a96; eksikse 422
+#: ``incomplete_thermal_protection_input``). Panel motorun yayımladığı cidar
+#: başlangıç sıcaklığını gönderir; bu sabit çapa gövdesi motordan değil,
+#: çekirdeğin eski ÖRTÜK değeri (300 K) açık yazıldı — çapa bit-aynı.
 KORUMA_ISI_YUTUCU_CAPA = {'mode': 'heat_sink', 'h_gas_W_m2K': 500,
-                          'T_recovery_K': 3000, 'wall_thickness_m': 0.005}
+                          'T_recovery_K': 3000, 'wall_thickness_m': 0.005,
+                          'T_initial_K': 300.0}
 KORUMA_SS_304_PENCERE_YANMA_S = 13
 KORUMA_SS_304_PENCERE_SINIRA_SURE_S = 12.0406
 
@@ -2029,9 +2035,16 @@ class TestGuvenlikTermalKatsayiTekEsik:
 #: basamağı. Gövde test_viz_real_fields HEAT_INPUT'unun geometrisi; 0,5 s
 #: yanmada cidar 811 / 723 K'yi geçer ama 1000 K'ye ulaşmaz (ÖNCE not YOK,
 #: SONRA "Service limit (811 K)" / "(723 K)"); 30 s'de ÖNCE 1000 K yazıyordu.
+#: V307/GRAFİK-BİRİM (19 Kas): oda sıcaklığı figürün ZORUNLU girdisi
+#: (V307/KÜÇÜKLER-2 kalem 2; eksikse figür "not available"). ÖLÇÜLDÜ
+#: (docs/scofield/raw/OH/V307/grafik-birim/olcum/k1k2_motor_once.json):
+#: PERFORMANS paneli alanı üç motor türünde `required` ve motorun
+#: ``chamber_temperature``ıyla tohumlu — panel her istekte gönderir. Gövde
+#: HEAT_INPUT gibi eski gizli 3000 K'yi AÇIK yazar; çapa bit-aynı.
 ISI_AKISI_GRAFIK_GOVDE = {'chamber_length': 0.5, 'nozzle_length': 0.1,
                           'throat_area': 0.001, 'expansion_ratio': 16,
-                          'chamber_pressure': 30.0}
+                          'chamber_pressure': 30.0,
+                          'chamber_temperature': 3000.0}
 ISI_AKISI_YANMA_S = (0.5, 30.0)
 
 

@@ -152,6 +152,32 @@ LAYERS: Dict[str, dict] = {
         'attribution_i18n_key': None,
         'ui_offered': False,
     },
+    # --- V307 / FS-HARİTA (9 Kas 2026): YAKIN ZOOM AYRINTI KATMANI ---------
+    # ÖLÇÜLDÜ (kanıt ~/HRMA-calisma/2026-11-09/FS-HARITA/olcum/once_agacik):
+    # rıza açıkken en ince katman 'bluemarble' z7'ydi (~489 m/px). 25 km
+    # irtifada ekran ~21 m/px iken bu doku 23 kat büyütülüyordu: şehir,
+    # kıyı ayrıntısı ya da rampa görünmüyordu ("zemin yüklenmiyor").
+    # GIBS'in aynı EPSG:4326 ağacındaki '31.25m' TileMatrixSet'i z0-z11
+    # (512 px karo, aynı 288/2^z açıklık formülü; WMTSCapabilities.xml
+    # 2026-11-09: z11 2560x1280) Landsat WELD gerçek renk yıllık bileşkesini
+    # sunar (~30 m). Katman TARİHLİDİR (Dimension:Time); en yeni değer
+    # 2000-12-01'dir (Value 1998-12-01/2000-12-01/P1Y). Tarih istemciden
+    # GELMEZ: sabit ``fixed_date`` kullanılır (kullanıcı girdisi yok, önbellek
+    # yolu tarihle sürümlüdür). Görüntü güncel DEĞİLDİR; künye bunu söyler.
+    # Ağ kapısı (K5a) aynen geçerlidir: rıza yoksa tek bayt dışarı çıkmaz.
+    # İstemci bu katmanı yalnız 'bluemarble' tavanının (z7) ÜSTÜNDE ister.
+    'landsat_weld': {
+        'wmts': 'Landsat_WELD_CorrectedReflectance_TrueColor_Global_Annual',
+        'tms': '31.25m',
+        'time': False,
+        'fixed_date': '2000-12-01',
+        'max_zoom': 11,
+        'ext': 'jpg',
+        'attribution': ('NASA GIBS — Landsat WELD true colour, annual '
+                        'composite 2000 (~30 m); not current imagery'),
+        'attribution_i18n_key': 'site.tileDetailAttribution',
+        'ui_offered': True,
+    },
     # --- harita-detay K4 (F2; tasarım §3.4): PAKETLİ çevrimdışı piramit ---
     # NASA Blue Marble NG (Aralık 2004, Reto Stöckli) 21600x10800 kaynaktan
     # tools/build_bm_pyramid.py ile üretilen z0-z5 WebP karolar
@@ -171,12 +197,37 @@ LAYERS: Dict[str, dict] = {
         'attribution_i18n_key': 'site.tilePackagedAttribution',
         'ui_offered': True,
     },
+    # --- V307 / FS-HARİTA-VERİ faz 2: İNDİRİLEN HARİTA PAKETİ katmanı ---------
+    # Kullanıcının onayıyla HRMA release'inden indirilen OSM vektör paketleri
+    # (hrma.analysis.map_packs) sunucuda saydam rastere çizilir: yol sınıfları,
+    # bina, su, kıyı, arazi kullanımı. AĞA ÇIKMAZ (paket yerel diskte); paket
+    # kapsamadığı karoda 404 (sahte doku yok). Geometri GIBS ızgarasıyla aynı
+    # (288/2^z, 512 px), tavan z15 (Protomaps Basemap tavanı).
+    # Künye anahtarı ve 'ui_offered' Parça K'nın i18n anahtarı
+    # (``site.mapPackAttribution``, EN metni aşağıdaki 'attribution' ile birebir)
+    # gelene kadar KAPALI: künyesiz katman arayüze sunulmaz (fail-closed,
+    # test_d31 ``test_api_alani_kunye_anahtariyla_kilitli``).
+    'pack_detail': {
+        'source': 'pack',
+        'max_zoom': 15,
+        'ext': 'webp',
+        'time': False,
+        'attribution': ('OpenStreetMap contributors (ODbL 1.0), Protomaps '
+                        'Basemap schema; offline HRMA map pack'),
+        # 3.0.7 birleşmesi (ana model): FS-HARİTA-KÜRE künye anahtarını EN+TR
+        # ekledi (i18n_launch_site.js), katman bu birleşmede arayüze açıldı.
+        'attribution_i18n_key': 'site.mapPackAttribution',
+        'ui_offered': True,
+    },
 }
 DEFAULT_TILE_LAYER = 'bluemarble'
 #: Paketli katmanın anahtarı ve kaynak türü (tek tanım; araç ve testler
 #: buradan okur).
 PACKAGED_LAYER_KEY = 'bm_local'
 PACKAGED_SOURCE = 'packaged'
+#: İndirilen harita paketi katmanı (V307/FS-HARİTA-VERİ faz 2).
+PACK_LAYER_KEY = 'pack_detail'
+PACK_SOURCE = 'pack'
 #: Ekvatorda bir derece [m] (WGS84 yarı büyük eksen 6.378.137 m x pi/180).
 #: launch_site_globe.js TILE_Z0_MPP yorumundaki çarpanla aynı tanım.
 EQUATOR_M_PER_DEG = 111319.49
@@ -195,7 +246,9 @@ _DATE_RE = re.compile(r'^\d{4}-\d{2}-\d{2}$')
 
 _EXT_MIME = {'jpg': 'image/jpeg', 'jpeg': 'image/jpeg', 'png': 'image/png',
              'webp': 'image/webp'}
-_IMAGE_EXTS = ('.jpg', '.jpeg', '.png')
+#: V307/FS-HARİTA-VERİ: paket katmanı karoları önbellekte WebP'dir; LRU ve muhasebe
+#: onları da karo sayar (uzantı listede olmasaydı cap dışı kalırdı).
+_IMAGE_EXTS = ('.jpg', '.jpeg', '.png', '.webp')
 
 # ---------------------------------------------------------------------------
 # 2) Cache boyutu / eşzamanlılık
@@ -431,6 +484,9 @@ def _gibs_url(cfg: dict, z: int, x: int, y: int, date_seg: str) -> str:
     """
     if cfg['time']:
         style = 'default/%s' % date_seg
+    elif cfg.get('fixed_date'):
+        # V307/FS-HARİTA: sabit tarihli katman (istemci tarih göndermez).
+        style = 'default/%s' % cfg['fixed_date']
     else:
         style = 'default'
     return '%s/%s/%s/%s/%d/%d/%d.%s' % (
@@ -588,6 +644,8 @@ def _is_valid_tile(path: str, ext: str) -> bool:
     try:
         if os.path.getsize(path) <= 0:
             return False
+        if str(ext).lower() == 'webp':
+            return _is_valid_webp(path)
         imzalar = _TILE_MAGIC.get(str(ext).lower())
         if not imzalar:
             return True
@@ -781,6 +839,13 @@ LAYERS_BASIS = (
     "here is not a claim that you can see it.")
 
 
+#: ``list_layers`` 'packs' künyesi (V307/FS-HARİTA-VERİ faz 2).
+PACK_BASIS = (
+    "'packs' layers are drawn by this application from map packs the user chose to "
+    "download (OpenStreetMap data, ODbL). They need no network request once "
+    "installed; where no installed pack covers a tile the layer returns nothing.")
+
+
 #: ``list_layers`` 'packaged' künyesi (harita-detay K4).
 PACKAGED_BASIS = (
     "'packaged' layers ship with the application and are served from disk "
@@ -795,13 +860,17 @@ def list_layers() -> dict:
     iddialarını AYIRIR; ikisi aynı şey değildir ve eskiden ayırt
     edilmiyordu.
     """
-    out, paketli = {}, {}
+    out, paketli, harita_paketi = {}, {}, {}
     for key, cfg in LAYERS.items():
         # harita-detay K4: paketli katman GIBS kataloğuna KARIŞMAZ. 'layers'
         # NASA GIBS'ten gelen katmanlardır (her birinin künyesi GIBS atfını
         # taşır; test_faz6_baslik_kodlama bunu kilitler); paketli katman
         # GIBS'ten gelmez, kendi künyesiyle 'packaged' altında yayımlanır.
-        hedef = paketli if cfg.get('source') == PACKAGED_SOURCE else out
+        # V307/FS-HARİTA-VERİ: indirilen harita paketi katmanı 'packs' altında.
+        if cfg.get('source') == PACK_SOURCE:
+            hedef = harita_paketi
+        else:
+            hedef = paketli if cfg.get('source') == PACKAGED_SOURCE else out
         hedef[key] = {
             # 'packaged': uygulamayla gelir, ağa çıkmaz; 'gibs': NASA GIBS.
             'source': cfg.get('source', 'gibs'),
@@ -816,7 +885,8 @@ def list_layers() -> dict:
         }
     return {'default': DEFAULT_TILE_LAYER, 'layers': out,
             'layers_basis': LAYERS_BASIS, 'packaged': paketli,
-            'packaged_basis': PACKAGED_BASIS}
+            'packaged_basis': PACKAGED_BASIS, 'packs': harita_paketi,
+            'packs_basis': PACK_BASIS}
 
 
 def _err(code: int, message: str, **extra) -> dict:
@@ -859,11 +929,19 @@ def resolve_tile(layer_key: str, z, x, y, date: Optional[str] = None,
     if cfg.get('source') == PACKAGED_SOURCE:
         return _resolve_packaged(layer_key, cfg, z, x, y)
 
+    # -- 2c) İndirilen harita paketi: AĞ YOK; çizim önbelleği (V307/FS-HARİTA-VERİ) --
+    if cfg.get('source') == PACK_SOURCE:
+        return _resolve_pack(layer_key, cfg, z, x, y)
+
     # -- 3) date (yalnız zaman katmanı) --
     if cfg['time']:
         if not date or not _DATE_RE.match(str(date)):
             return _err(400, 'date required (YYYY-MM-DD) for time layer')
         date_seg = str(date)
+    elif cfg.get('fixed_date'):
+        # V307/FS-HARİTA: sabit tarihli katman; istemcinin date'i YOK SAYILIR,
+        # önbellek yolu katmanın kendi tarihiyle sürümlenir.
+        date_seg = cfg['fixed_date']
     else:
         date_seg = 'default'               # statik katman: date yok sayılır
 
@@ -950,6 +1028,72 @@ def resolve_tile(layer_key: str, z, x, y, date: Optional[str] = None,
     return {'ok': True, 'path': path, 'mimetype': mimetype,
             'layer': layer_key, 'cached': False,
             'attribution': cfg['attribution']}
+
+
+def _resolve_pack(layer_key: str, cfg: dict, z: int, x: int, y: int) -> dict:
+    """İndirilen harita paketinden çizilmiş karo (V307/FS-HARİTA-VERİ faz 2).
+
+    * Ağa HİÇ çıkılmaz; paket doğrulanmış yerel dosyadır (``map_packs``).
+    * Önbellek yolu ``pack_detail/<anahtar>/z/x/y.webp``; anahtar stil sürümü +
+      zemin sağlayıcı sürümü + kapsayan paketlerin kurulu bileşen özetlerinden
+      türetilir (paket değişince eski karo sunulmaz). LRU capı aynen geçerli.
+    * Kapsayan kurulu paket yoksa 404 ``not_covered``; paket okunamazsa 503 ile
+      ADIYLA (``error_code``) — sahte doku yok, 500 yok.
+    """
+    from hrma.analysis import map_packs
+    try:
+        anahtar = map_packs.onbellek_anahtari(z, x, y)
+        if anahtar is None:
+            return _err(404, 'no installed map pack covers this tile', available=False,
+                        pack=True, error_code='not_covered')
+        root = tiles_root()
+        path = _tile_path(root, layer_key, anahtar, z, x, y, cfg['ext'])
+        if path is None:
+            return _err(403, 'path traversal blocked')
+        mimetype = _EXT_MIME.get(cfg['ext'], 'application/octet-stream')
+        if os.path.exists(path) and not _is_valid_tile(path, cfg['ext']):
+            try:
+                os.remove(path)
+            except OSError:
+                pass
+        if os.path.exists(path):
+            try:
+                os.utime(path, None)
+            except OSError:
+                pass
+            return {'ok': True, 'path': path, 'mimetype': mimetype, 'layer': layer_key,
+                    'cached': True, 'pack': True, 'attribution': cfg['attribution']}
+        data = map_packs.karo_ciz(z, x, y)
+    except map_packs.PaketHatasi as hata:
+        return _err(503, 'map pack could not be read', available=False, pack=True,
+                    error_code=hata.kod)
+    if data is None:
+        return _err(404, 'no installed map pack covers this tile', available=False,
+                    pack=True, error_code='not_covered')
+    with _lock:
+        if not os.path.exists(path):
+            try:
+                os.makedirs(os.path.dirname(path), exist_ok=True)
+                fd, tmp = tempfile.mkstemp(dir=os.path.dirname(path), suffix='.tmp')
+                try:
+                    with os.fdopen(fd, 'wb') as fh:
+                        fh.write(data)
+                    os.replace(tmp, path)
+                finally:
+                    if os.path.exists(tmp):
+                        try:
+                            os.remove(tmp)
+                        except OSError:
+                            pass
+            except OSError:
+                return _err(503, 'tile cache write failed', available=False, pack=True,
+                            error_code='cache_write_failed')
+            _yeni = len(data)
+        else:
+            _yeni = 0
+        _enforce_cap(root, added_bytes=_yeni)
+    return {'ok': True, 'path': path, 'mimetype': mimetype, 'layer': layer_key,
+            'cached': False, 'pack': True, 'attribution': cfg['attribution']}
 
 
 def _resolve_packaged(layer_key: str, cfg: dict, z: int, x: int, y: int) -> dict:

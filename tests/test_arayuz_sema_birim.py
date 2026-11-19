@@ -517,10 +517,16 @@ def test_yapisal_panel_hukmun_dayanagini_basiyor(yapisal):
     assert 'DESIGN PROPOSAL' in withheld, (
         'cidar HRMA tarafından boyutlandırıldığında uç bunu söylüyor ama '
         'panel basmıyor — kullanıcı öneriyi doğrulama sanıyor')
-    assert 'safety_factor_is_tautological' in withheld, (
+    # V307/DİL-EKRAN-2 (ÖK-22 kararı, 18 Kas): gerekçe ve değerlendirilmeyen
+    # alan makine adıyla değil okunur cümleyle basılır; ölçülen olgu aynı
+    # (hükmün neden geri çekildiği ve neyin koşmadığı ekranda).
+    assert 'tautology, not a verification' in withheld, (
         'hükmün neden geri çekildiği kullanıcıya gösterilmiyor')
-    assert 'wall_temperature' in withheld, (
+    assert '(safety_factor_is_tautological)' not in withheld, (
+        'gerekçe makine adıyla basılıyor')
+    assert 'Wall temperature — no temperature input reached' in withheld, (
         'koşmayan değerlendirmeler (not_evaluated) gösterilmiyor')
+    assert '(wall_temperature)' not in withheld
     assert 'verification' in issued, (
         'kullanıcı kendi cidarını verdiğinde bunun bir doğrulama olduğu '
         'yazılmıyor')

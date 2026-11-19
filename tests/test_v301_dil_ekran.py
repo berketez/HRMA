@@ -98,6 +98,10 @@ MUAF_PARCALAR = {
     'mdot_ox': 'formül simgesi: oksitleyici debisi (F/ṁ_ox)',
     'mdot_total': 'formül simgesi: toplam debi (itki eğrisi bağıntısı)',
     'c_star': 'formül simgesi: karakteristik hız (itki eğrisi bağıntısı)',
+    # V307/DİL-EKRAN (kalem 5, ana model kararı 17 Kas): düz cümle ve etikette ad
+    # ('etkin eksenel ivme') yazılır; formül bağlamında simge kalır.
+    'g_eff': 'formül simgesi: etkin eksenel ivme (Dodge 2000)',
+    'f_x': 'formül simgesi: eksenel özgül kuvvet (NASA SP-8009)',
     't_residual': 'formül simgesi: artık et kalınlığı (zarf bağıntısı)',
     'h_ig': 'formül simgesi: ideal gaz entalpisi (kaynak künyesi)',
     'h_sat_liquid': 'formül simgesi: doymuş sıvı entalpisi (kaynak künyesi)',

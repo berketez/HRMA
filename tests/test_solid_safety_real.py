@@ -208,12 +208,24 @@ class TestIspLossBreakdownIsComputed:
         assert apcp['two_phase_losses'] != 1.8
 
     def test_two_phase_loss_is_declared_as_not_applied(self):
+        # V307 KATI-DOĞRULAMA faz 3 (B1, 16 Kas 2026): beyan UYGULANAN durumu söyler.
+        # Eski test varsayılan apcp motorunda 'applied False' bekliyordu;
+        # modül tahmini artık o motorda uygulanıyor. İlke aynı ("uygulanmayan
+        # kayıp uygulanmış gibi, uygulanan kayıp uygulanmamış gibi
+        # sunulamaz"), iki yönde de sınanır.
         loss = solid()['detailed_analysis']['performance_metrics'][
             'theoretical_vs_actual_isp']
-        assert loss['two_phase_losses_applied'] is False, (
+        assert loss['two_phase_losses_applied'] is True
+        assert loss['two_phase_applied_source'] == 'module_estimate'
+        assert loss['two_phase_efficiency_applied'] < 1.0
+        assert 'X_p' in loss['two_phase_losses_basis']
+        seker = solid(propellant_type='kndx')['detailed_analysis'][
+            'performance_metrics']['theoretical_vs_actual_isp']
+        assert seker['two_phase_losses_applied'] is False, (
             'Itki katsayisina uygulanmayan bir kayip, uygulanmis gibi '
             'sunulamaz')
-        assert 'X_p' in loss['two_phase_losses_basis']
+        assert seker['two_phase_efficiency_applied'] == 1.0
+        assert seker['two_phase_applied_source'] == 'none'
 
     def test_nozzle_loss_follows_the_applied_efficiency(self):
         base = solid()['detailed_analysis']['performance_metrics'][
@@ -352,8 +364,19 @@ class TestOverridesActuallyApply:
         cd = solid({'discharge_coeff': 0.85})
         assert cd['throat_diameter'] > base['throat_diameter'], (
             'Bogaz akis katsayisi geometrik bogazi buyutmeli')
-        assert cd['average_thrust'] == pytest.approx(base['average_thrust']), (
+        # V307 KATI-DOĞRULAMA faz 3 (B1, 16 Kas 2026): Cd basınç çözümüne ve etkin alana
+        # yine GİRMEZ. Ama iki fazlı kayıp tahmini GEOMETRİK boğaz çapına
+        # bağlıdır (parçacık gecikmesi fiziksel boyutla ölçeklenir) ve Cd
+        # geometrik boğazı büyütür; bu yüzden uygulanan iki faz çarpanı
+        # 0,981006 -> 0,981491 olur ve itki 3538,07 -> 3539,82 N kayar
+        # (+%0,05). Eski eşitlik çarpan ayrıldıktan sonra AYNEN geçerlidir.
+        def _tp(r):
+            return r['detailed_analysis']['performance_metrics'][
+                'theoretical_vs_actual_isp']['two_phase_efficiency_applied']
+        assert cd['average_thrust'] / _tp(cd) == pytest.approx(
+            base['average_thrust'] / _tp(base)), (
             'Cd basinc/itki cozumune girmemeli (etkin alan degismedi)')
+        assert _tp(cd) > _tp(base)
 
     @pytest.mark.parametrize('key,value', [
         ('yield_strength', 900),
@@ -466,7 +489,12 @@ class TestOverridesActuallyApply:
         # V301/T-ÇAPA-A: ÇAPA ALTINCI KEZ ÖLÇÜLDÜ — N-CEA-2 (katı termokimya motorun Pc'sinde NASA CEA'dan) sonrası
         # 3633,53 -> 3606,57 N (3606,570083993098); CEA kapalı aynı motor
         # 3633,53'te kalır. Tolerans aynı.
-        assert res['average_thrust'] == pytest.approx(3606.57, abs=0.5)
+        # V307 KATI-DOĞRULAMA faz 3 (B1, 16 Kas 2026): ÇAPA YEDİNCİ KEZ ÖLÇÜLDÜ — modülün
+        # iki fazlı kayıp tahmini (%1,90; çarpan 0,9810060041923164) itki
+        # katsayısına uygulanıyor: 3606,57 -> 3538,07 N (3538,066906937616).
+        # 3538,0669 / 0,9810060 = 3606,5701: eski sayı çarpan ayrılınca son
+        # basamağına kadar geri gelir. Tolerans aynı.
+        assert res['average_thrust'] == pytest.approx(3538.07, abs=0.5)
         # a = 0,005 kolu (F024 ayrıştırması): bu katsayıyla Ø100/500 tanede
         # port HİÇBİR örnek çekirdekte boğaza yetişmiyor (30 mm: 0,40;
         # 48 mm: 0,89) -> tasarım YAYIMLANMAZ (KT-23, ters kapı). Eski

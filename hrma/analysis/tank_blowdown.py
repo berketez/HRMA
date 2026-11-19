@@ -328,8 +328,13 @@ class N2OTankBlowdown:
         props = N2OSaturation(use_coolprop=use_coolprop)
         rho_l = props.rho_l(initial_temperature)
         tank_volume = (oxidizer_mass / rho_l) / resolve_liquid_fill_fraction(liquid_fill_fraction)  # noqa: E501
-        return cls(tank_volume, initial_temperature,
+        tank = cls(tank_volume, initial_temperature,
                    liquid_fill_fraction, use_coolprop)
+        # V307/CI-KIRMIZI: tank m_ox'a göre boyutlandı; ateşlemedeki sıvı
+        # tanım gereği m_ox'tur (V·f·ρ_l geri dönüşü son basamakta platforma
+        # göre kayıyordu: CI 44290629774, 12,502164616605832 ⟷ …834).
+        tank.m_l = float(oxidizer_mass)
+        return tank
 
     # ---- iç enerji / hacim tutarlılığı ----
 

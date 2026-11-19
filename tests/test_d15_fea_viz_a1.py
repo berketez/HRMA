@@ -484,7 +484,9 @@ class TestP8B2_03_SicaklikSiniri:
         assert alanlar is not None, beyan
         assert alanlar['allowable_temperature_K'] is None
         assert alanlar['allowable_temperature_adaylari_K'] == {}
-        assert 'uydurulmaz' in alanlar['allowable_temperature_kaynagi']
+        # V307/DİL-SUNUCU: 'uydurulmaz' ifadesi kullanıcı metninde yasak; aynı
+        # hüküm tarafsız dille ('sınır varsayılmaz').
+        assert 'sınır varsayılmaz' in alanlar['allowable_temperature_kaynagi']
 
 
 # =====================================================================

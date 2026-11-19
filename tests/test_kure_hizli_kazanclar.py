@@ -205,8 +205,16 @@ def test_burnout_etiketi_girdi_kaynagini_soyluyor():
     ifade aranıyor — yorum içindeki geçiş bu deseni sağlamaz.
     """
     html = SITE_HTML.read_text(encoding='utf-8')
-    assert 'site.burnoutFromInput' in html, \
-        'yanma sonu etiketi girdi kaynağını beyan etmiyor'
+    # V307/FS-UÇUŞ-2 (A5, 16 Kas): yanma sonu TEK TANIMDIR — uçurulan itki
+    # girdisinin bittiği an (= "Yanma süresi" alanı = çözücünün t_burn'ü;
+    # ölçüldü fs-ucus-2/olcum/ucus_once.json, üç örnek motorda üçü aynı).
+    # Etiket artık "girdi yanma süresinden" değil, uçan itkinin sonu + itki
+    # kaynağı (motor itki eğrisi / N2O boşalma eğrisi / sabit itki x süre)
+    # der; zamanı sunucunun olay listesinden okur.
+    assert 'site.burnoutFlownThrust' in html, \
+        'yanma sonu etiketi uçan itkinin kaynağını beyan etmiyor'
+    assert "t(ITKI_KAYNAGI_ANAHTARI[ITKI_KAYNAGI], ITKI_KAYNAGI)" in html, \
+        'yanma sonu etiketi itki kaynağının adını basmıyor'
     assert re.search(r'^\s*globe\.opts\.burnTime\s*=\s*body\.burn_time\s*;', html, re.M), \
         'burnTime artık girdiden gelmiyorsa bu testin dayanağı değişti, gözden geçir'
     m = re.search(r"e\.key === 'burnout'", html)

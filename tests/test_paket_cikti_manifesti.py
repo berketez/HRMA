@@ -373,6 +373,44 @@ def test_boyut_sapmasi_esigi_calisir(tmp_path):
     assert yok.startswith('KALDI'), yok
 
 
+def _surum_demeti(metin):
+    return tuple(int(p) for p in metin.split('.'))
+
+
+def test_boyut_tabani_tek_yayinin_varliklari():
+    """3.0.7 SÜREÇ kalem 6: taban TEK bir yayının iki varlığından gelir ve
+    bayatlamaz.
+
+    3.0.6 kapısı EXE'yi hâlâ v3.0.0 kurucusuna (276 087 608 B) göre ölçtü
+    ("−%4"), DMG ise 3.0.5'e göreydi: iki taban iki farklı yayından geliyordu
+    ve yayındaki 3.0.5 EXE'sine göre gerçek değişim (+1,2 MB) hiç görünmedi.
+    Kural: ``tag`` tek sürüm adıdır (``vX.Y.Z``), ``_source`` o yayının iki
+    varlığının adını yazar ve taban ya bugünkü sürümün kendisidir (yayından
+    sonra, bir sonraki sürüm adı commit'inden önce) ya da changelog'daki bir
+    ÖNCEKİ sürüm (sürüm adı commit'inden sonra). Daha eskisi bayattır.
+    """
+    veri = json.loads((PAKET / 'last_release_sizes.json').read_text(encoding='utf-8'))
+    m = re.fullmatch(r'v(\d+\.\d+\.\d+)', str(veri.get('tag', '')))
+    assert m, 'tag tek bir sürüm adı olmalı (vX.Y.Z), bulunan %r' % veri.get('tag')
+    taban = m.group(1)
+    for anahtar in ('dmg_bytes', 'exe_bytes'):
+        assert isinstance(veri.get(anahtar), int) and veri[anahtar] > 0, anahtar
+    kaynak = veri.get('_source', '')
+    for varlik in ('HRMA-Setup-%s-macOS.dmg' % taban, 'HRMA-Setup-%s.exe' % taban):
+        assert varlik in kaynak, (
+            '_source %s varlığını anmıyor — iki taban aynı yayından mı?' % varlik)
+    surum = re.search(r'__version__ = "([^"]+)"',
+                      (KOK / 'hrma' / '__init__.py').read_text(encoding='utf-8')).group(1)
+    surumler = [v['version'] for v in json.loads(
+        (KOK / 'hrma' / 'data' / 'changelog.json').read_text(encoding='utf-8'))['versions']]
+    assert surumler[0] == surum, (surumler[0], surum)
+    gecerli = {surum} | ({surumler[1]} if len(surumler) > 1 else set())
+    assert taban in gecerli, (
+        'boyut tabanı v%s bayat: paket sürümü %s, kabul edilen taban %s — '
+        'son yayının gerçek varlık boyutlarını yazın (gh release view vX.Y.Z '
+        '--json assets)' % (taban, surum, sorted(gecerli, key=_surum_demeti)))
+
+
 def test_kapi_esigi_tek_yerde_tanimli():
     kod = _kod(KAPI.read_text(encoding='utf-8'))
     tanim = re.findall(r'^BOYUT_TOLERANS_YUZDE=(\d+)', kod, re.M)

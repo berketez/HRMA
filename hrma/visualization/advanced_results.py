@@ -28,8 +28,13 @@ def _identity(motor_results: Dict, keys) -> str:
     return 'NOT REPORTED'
 
 
-def _vacuum_column(motor_results: Dict, sea_level_isp, vacuum_isp):
+def _vacuum_column(motor_results: Dict, sea_level_isp, vacuum_isp,
+                   ref_name: str = 'Isp_sl'):
     """(F_vac, Cf_vac, gerekce_metni) — duz carpan YOK.
+
+    V307/HİBRİT-ORTAM: ``sea_level_isp`` itkiyle (``thrust``) AYNI ortamın
+    Isp'si olmalıdır; tasarım ortamı deniz seviyesi değilse çağıran tasarım
+    ortamının Isp'sini verir ve ``ref_name`` bunu künyede adlandırır.
 
     1. Tercih: ayni tabloda basilan Isp cifti (sabit debide F ~ Isp).
     2. Yedek: F_vac = F + p_a * A_e ve Cf_vac = F_vac/(Pc*At) geometriden.
@@ -42,7 +47,8 @@ def _vacuum_column(motor_results: Dict, sea_level_isp, vacuum_isp):
         ratio = float(vacuum_isp) / float(sea_level_isp)
         return (float(thrust_sl) * ratio,
                 (float(cf_sl) * ratio) if cf_sl is not None else None,
-                'scaled from the solver Isp_vac/Isp_sl at fixed mass flow')
+                f'scaled from the solver Isp_vac/{ref_name} at fixed mass '
+                'flow')
 
     d_e = motor_results.get('exit_diameter')
     d_t = motor_results.get('throat_diameter')
@@ -245,8 +251,30 @@ def create_cea_style_results(motor_results: Dict) -> str:
     # Performance Parameters
     results_text.append("PERFORMANCE PARAMETERS:")
     results_text.append("")
-    results_text.append("Parameter".ljust(30) + "Sea Level".rjust(15) + "Vacuum".rjust(15) + "Units".rjust(15))
-    results_text.append("-" * 75)
+    # V307/HİBRİT-ORTAM: tasarım ortamı deniz seviyesi DEĞİLSE "Sea Level"
+    # sütunu tasarım ortamının itkisini ve C_F'ini basıyordu (Isp ise 0 m
+    # satırınındı; 20 km tasarımında −16,5 s). Ölçüldü:
+    # docs/scofield/raw/OH/V307/hibrit-ortam/olcum/once.json. Artık o
+    # durumda tablo üç sütunludur: tasarım ortamı (başlık sayıları), deniz
+    # seviyesi (aynı lülenin 0 m durumu, ayrılmışsa 'n/a') ve vakum.
+    # Deniz seviyesi tasarımında tablo eskisiyle aynıdır.
+    _da = motor_results.get('design_ambient')
+    _da = _da if isinstance(_da, dict) else {}
+    _dis_ortam = _da.get('is_sea_level') is False
+    if _dis_ortam:
+        _p_tas = _da.get('pressure_bar')
+        results_text.append(
+            "Design ambient: "
+            + (f"{float(_p_tas):.4f} bar" if isinstance(
+                _p_tas, (int, float)) else "not reported")
+            + "; sea level: 1.01325 bar (ISA)")
+        results_text.append("Parameter".ljust(30) + "Design Amb.".rjust(15)
+                            + "Sea Level".rjust(15) + "Vacuum".rjust(15)
+                            + "Units".rjust(15))
+        results_text.append("-" * 90)
+    else:
+        results_text.append("Parameter".ljust(30) + "Sea Level".rjust(15) + "Vacuum".rjust(15) + "Units".rjust(15))
+        results_text.append("-" * 75)
     
     sea_level_isp = motor_results.get('sea_level_isp', motor_results['isp'])
     vacuum_isp = motor_results.get('vacuum_isp')
@@ -258,26 +286,64 @@ def create_cea_style_results(motor_results: Dict) -> str:
     # (sabit debide F = mdot*g0*Isp -> F_vac/F_sl = Isp_vac/Isp_sl). Eski
     # surum ayni tabloda iki farkli vakum/deniz-seviyesi orani kullaniyordu
     # (Isp icin 1.124, itki ve Cf icin 1.15).
-    thrust_vac, cf_vac, vac_basis = _vacuum_column(
-        motor_results, sea_level_isp, vacuum_isp)
-    if vacuum_isp is None:
-        vacuum_isp = (sea_level_isp * thrust_vac / thrust_sl
-                      if (thrust_vac and thrust_sl) else None)
-
     def _cell(value, fmt):
         return ('n/a' if value is None else format(value, fmt)).rjust(15)
 
-    results_text.append("Specific Impulse".ljust(30)
-                        + _cell(sea_level_isp, '.1f')
-                        + _cell(vacuum_isp, '.1f') + "s".rjust(15))
-    results_text.append("Thrust".ljust(30) + _cell(thrust_sl, '.0f')
-                        + _cell(thrust_vac, '.0f') + "N".rjust(15))
-    results_text.append("C*".ljust(30) + _cell(motor_results['c_star'], '.1f')
-                        + _cell(motor_results['c_star'], '.1f')
-                        + "m/s".rjust(15))
-    results_text.append("Cf".ljust(30) + _cell(cf_sl, '.4f')
-                        + _cell(cf_vac, '.4f') + "-".rjust(15))
-    results_text.append(f"  Vacuum column basis: {vac_basis}")
+    if _dis_ortam:
+        # Tasarım sütunu: başlık sayıları (itki, Isp, C_F aynı ortamda).
+        isp_tas = motor_results['isp']
+        thrust_vac, cf_vac, vac_basis = _vacuum_column(
+            motor_results, isp_tas, vacuum_isp,
+            ref_name='Isp at the design ambient')
+        _ds = _da.get('sea_level') if isinstance(_da.get('sea_level'),
+                                                  dict) else {}
+        isp_ds = _da.get('isp_sea_level_s')
+        thrust_ds = _ds.get('thrust_N')
+        # C_F tanımı başlıkla aynı (F/(P_c·A_t)); sabit P_c·A_t'de F ile
+        # orantılı. Deniz seviyesi itkisi yoksa C_F de yoktur.
+        cf_ds = (float(cf_sl) * float(thrust_ds) / float(thrust_sl)
+                 if (thrust_ds is not None and cf_sl is not None
+                     and thrust_sl) else None)
+        results_text.append("Specific Impulse".ljust(30)
+                            + _cell(isp_tas, '.1f') + _cell(isp_ds, '.1f')
+                            + _cell(vacuum_isp, '.1f') + "s".rjust(15))
+        results_text.append("Thrust".ljust(30) + _cell(thrust_sl, '.0f')
+                            + _cell(thrust_ds, '.0f')
+                            + _cell(thrust_vac, '.0f') + "N".rjust(15))
+        results_text.append("C*".ljust(30)
+                            + _cell(motor_results['c_star'], '.1f')
+                            + _cell(motor_results['c_star'], '.1f')
+                            + _cell(motor_results['c_star'], '.1f')
+                            + "m/s".rjust(15))
+        results_text.append("Cf".ljust(30) + _cell(cf_sl, '.4f')
+                            + _cell(cf_ds, '.4f') + _cell(cf_vac, '.4f')
+                            + "-".rjust(15))
+        results_text.append(f"  Vacuum column basis: {vac_basis}")
+        _neden = _ds.get('not_published_reason')
+        if _neden:
+            results_text.append(f"  Sea level column: {_neden}")
+        else:
+            results_text.append(
+                "  Sea level column basis: the 0 m row of this same nozzle "
+                "(design_ambient.sea_level)")
+    else:
+        thrust_vac, cf_vac, vac_basis = _vacuum_column(
+            motor_results, sea_level_isp, vacuum_isp)
+        if vacuum_isp is None:
+            vacuum_isp = (sea_level_isp * thrust_vac / thrust_sl
+                          if (thrust_vac and thrust_sl) else None)
+
+        results_text.append("Specific Impulse".ljust(30)
+                            + _cell(sea_level_isp, '.1f')
+                            + _cell(vacuum_isp, '.1f') + "s".rjust(15))
+        results_text.append("Thrust".ljust(30) + _cell(thrust_sl, '.0f')
+                            + _cell(thrust_vac, '.0f') + "N".rjust(15))
+        results_text.append("C*".ljust(30) + _cell(motor_results['c_star'], '.1f')
+                            + _cell(motor_results['c_star'], '.1f')
+                            + "m/s".rjust(15))
+        results_text.append("Cf".ljust(30) + _cell(cf_sl, '.4f')
+                            + _cell(cf_vac, '.4f') + "-".rjust(15))
+        results_text.append(f"  Vacuum column basis: {vac_basis}")
 
     results_text.append("")
     
@@ -403,8 +469,26 @@ def create_cea_style_results(motor_results: Dict) -> str:
         results_text.append("TOTAL IMPULSE ANALYSIS:")
         results_text.append("-" * 40)
         results_text.append(f"Input Total Impulse: {thrust_analysis['input_total_impulse']:.0f} N·s")
-        results_text.append(f"Sea Level Thrust: {thrust_analysis['base_thrust_sea_level']:.0f} N")
-        results_text.append(f"Maximum Thrust: {thrust_analysis['max_thrust']:.0f} N at {thrust_analysis['max_thrust_altitude']:.0f} m")
+        # V307/HİBRİT-ORTAM: deniz seviyesi itkisi ayrılmış lülede
+        # yayımlanmaz (None); tasarım ortamının itkisi kendi adıyla.
+        _f_tas = thrust_analysis.get('base_thrust_design_ambient')
+        if _f_tas is not None:
+            results_text.append(
+                f"Design Ambient Thrust: {float(_f_tas):.0f} N")
+        _f_ds = thrust_analysis.get('base_thrust_sea_level')
+        if _f_ds is None:
+            results_text.append(
+                "Sea Level Thrust: not published (the nozzle flow is "
+                "separated at sea level; see design_ambient.sea_level)")
+        else:
+            results_text.append(f"Sea Level Thrust: {float(_f_ds):.0f} N")
+        if thrust_analysis.get('max_thrust') is None:
+            results_text.append(
+                "Maximum Thrust: not published ("
+                + str(thrust_analysis.get('max_thrust_not_published_reason')
+                      or 'no published row') + ")")
+        else:
+            results_text.append(f"Maximum Thrust: {thrust_analysis['max_thrust']:.0f} N at {thrust_analysis['max_thrust_altitude']:.0f} m")
         # P8B4-11 (ÖH D15 / fea-viz a2, 31 Ağustos 2026) — AYNI METİNDE ÜÇ
         # FARKLI VAKUM İTKİSİ.
         #
@@ -451,7 +535,15 @@ def create_cea_style_results(motor_results: Dict) -> str:
         _ceiling_thrust = thrust_analysis.get('top_of_grid_thrust')
         _ceiling_alt = thrust_analysis.get('top_of_grid_altitude_m')
         _ceiling_src = 'top_of_grid_thrust/top_of_grid_altitude_m'
-        if _ceiling_thrust is None or _ceiling_alt is None:
+        _tavan_satir = (thrust_analysis.get('thrust_altitude_data')
+                        or [None])[-1]
+        _tavan_ayrik = bool(isinstance(_tavan_satir, dict)
+                            and _tavan_satir.get('flow_separated'))
+        if _tavan_ayrik:
+            # V307/HİBRİT-ORTAM: ızgaranın ucu ayrılmış satır; yedek alana
+            # düşülmez (o vakum değeridir), satır adıyla yazılır.
+            _ceiling_thrust = None
+        elif _ceiling_thrust is None or _ceiling_alt is None:
             _ceiling_thrust = thrust_analysis.get('vacuum_thrust')
             _ceiling_alt = thrust_analysis.get('max_thrust_altitude')
             _ceiling_src = ('vacuum_thrust/max_thrust_altitude (FALLBACK: '
@@ -483,6 +575,10 @@ def create_cea_style_results(motor_results: Dict) -> str:
                    if _tavan_vakumun_kendisi else
                    "(NOT the vacuum value: ambient pressure is still "
                    f"finite there; source: {_ceiling_src})"))
+        elif _tavan_ayrik and _ceiling_alt is not None:
+            results_text.append(
+                f"Altitude-grid ceiling ({float(_ceiling_alt):.0f} m): flow "
+                "separated at that ambient, no thrust published")
         results_text.append("")
         
         results_text.append("THRUST vs ALTITUDE:")
@@ -491,6 +587,11 @@ def create_cea_style_results(motor_results: Dict) -> str:
         results_text.append("-" * 48)
         
         for point in thrust_analysis['thrust_altitude_data'][:6]:  # Show first 6 points
+            if point.get('thrust') is None:
+                # V307/HİBRİT-ORTAM: ayrılmış satır sayı basmaz.
+                results_text.append(f"{point['altitude']:.0f}".ljust(12)
+                                    + "flow separated: not published")
+                continue
             results_text.append(f"{point['altitude']:.0f}".ljust(12) + 
                               f"{point['thrust']:.0f}".ljust(12) + 
                               f"{point['isp']:.1f}".ljust(12) + 
@@ -510,6 +611,11 @@ def create_cea_style_results(motor_results: Dict) -> str:
         
         alt_data = motor_results['altitude_performance']['altitude_performance']
         for point in alt_data[:8]:  # Show first 8 points
+            if point.get('thrust') is None:
+                results_text.append(f"{point['altitude']:.0f}".ljust(12)
+                                    + f"{point['pressure']:.4f}".ljust(12)
+                                    + "flow separated: not published")
+                continue
             results_text.append(f"{point['altitude']:.0f}".ljust(12) + 
                               f"{point['pressure']:.4f}".ljust(12) + 
                               f"{point['isp']:.1f}".ljust(12) + 
@@ -598,6 +704,13 @@ def normalize_altitude_rows(payload):
                     deger = ham[aday]
                     break
             if deger is None:
+                # V307/HİBRİT-ORTAM: akışı ayrılmış satır sayı yayımlamaz;
+                # boşluk olarak taşınır (grafikte çizgi orada kesilir),
+                # eksik alan sayılmaz. İrtifa ve basınç yine zorunludur.
+                if ham.get('flow_separated') is True and ad in (
+                        'isp', 'thrust', 'cf'):
+                    satir[ad] = None
+                    continue
                 eksik.append('%s (accepted names: %s)'
                              % (ad, ', '.join(adaylar)))
             else:
@@ -832,7 +945,10 @@ def create_thrust_altitude_plot(thrust_data: List[Dict]) -> str:
     altitudes = [p['altitude'] / 1000 for p in thrust_data]  # Convert to km
     thrust_values = [p['thrust'] for p in thrust_data]
     isp_values = [p['isp'] for p in thrust_data]
-    efficiency_values = [p['impulse_efficiency'] * 100 for p in thrust_data]
+    # V307/HİBRİT-ORTAM: ayrılmış satır (None) grafikte boşluktur.
+    efficiency_values = [None if p.get('impulse_efficiency') is None
+                         else p['impulse_efficiency'] * 100
+                         for p in thrust_data]
     
     # Create subplots
     fig = make_subplots(

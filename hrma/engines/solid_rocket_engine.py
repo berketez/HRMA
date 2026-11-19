@@ -189,7 +189,8 @@ def _cached_slot_quads(r_port, n_slots, width, depth):
 # geri gelmiş demektir.
 from hrma.constants import (G_0, ISA_LAYERS, M_AIR,
                             R_STAR_ICAO, R_UNIVERSAL,
-                            ISA_TABLE_TOP_M, isa_temperature, isa_pressure)
+                            ISA_TABLE_TOP_M, isa_temperature, isa_pressure,
+                            geometric_to_geopotential)
 # Yayımlanan eğrinin seyreltmesi: katı ve hibrit AYNI algoritmayı kullanır,
 # tanımı ortak modüldedir (bkz. SOLID_THRUST_CURVE_MAX_POINTS yorumu).
 from hrma.analysis.curve_sampling import (
@@ -1062,6 +1063,19 @@ TWO_PHASE_STATUS_NO_FRACTION = 'not_evaluated_no_condensed_fraction'
 #: X_p = 0,55 için hrma.analysis.two_phase_loss SAYI ÜRETMİYOR
 #: (OUT_OF_PUBLISHED_RANGE) ama doğrusal teşhis %5,28 / %6,60 yayımlıyor.
 TWO_PHASE_STATUS_OUT_OF_ENVELOPE = 'outside_anchor_envelope_unverified'
+#: V307/KATI-DOGRULAMA faz 3 (B1, ana model kararı 16 Kas 2026): modülün
+#: boyut düzeltmeli kayıp tahmini yayımlanmış pencerelerin İÇİNDE ve kullanıcı
+#: çarpan vermemiş -> tahmin itki katsayısına UYGULANIR. Dayanak: NASA SP-8039
+#: (1971) Şekil 8 teslim Isp verimini "sıfır oksit kesişimi (≈ %98, 15° koni)
+#: − oksit kesrine bağlı düşüş" olarak verir; tablo ``nozzle_efficiency``
+#: kesişim, modül kaybı düşüştür (Şekil 7 iki kaybı ayrı bantlarla çizer),
+#: yani çarpım çift sayım değildir. Bağımsız sağlama: NASA-CR-158815'in altı
+#: 70-lb BATES koşusunda ölçülen lüle (C_F) verimi ortalama 0,9452 ⟷
+#: 0,985 × (1 − modül kaybı) ortalama 0,9431 (fark −0,2 puan; −2,6…+1,6).
+#: Kaynak okuması: docs/arastirma/2026-11-16/kati-dogrulama/
+#: KAYNAK_nasa_sp8039_sekil7_8.md. "Doğrulandı" DENMEZ: sağlama AN ağırlıklı
+#: iticilerdendir, AP/HTPB/Al için bağımsız ateşleme kaydı yoktur.
+TWO_PHASE_STATUS_MODULE_APPLIED = 'module_estimate_applied'
 
 
 def _two_phase_anchor_envelope():
@@ -1081,7 +1095,8 @@ def _two_phase_anchor_envelope():
         return None, None
 
 
-def _two_phase_correction_state(x_particle, eta_user):
+def _two_phase_correction_state(x_particle, eta_user, module_applied=None,
+                                withheld_for_request_efficiency=None):
     """(durum, doğrulandı_mı, künye) — iki-faz düzeltmesinin DURUMU.
 
     Durum çözücünün GERÇEK haline bakılarak türetilir; hiçbir dalda
@@ -1107,6 +1122,32 @@ def _two_phase_correction_state(x_particle, eta_user):
         'verified delivered-performance claim from this Isp. Condensed-phase '
         f'anchor window for X_p: {pencere_metni}.')
 
+    if (not kullanici_var and isinstance(module_applied, dict)
+            and module_applied.get('loss_percent') is not None):
+        kayip = float(module_applied['loss_percent'])
+        bant = module_applied.get('band_percent')
+        bant_metni = (f'{float(bant[0]):.2f}-{float(bant[1]):.2f}'
+                      if bant else 'not published')
+        return {
+            'two_phase_correction_status': TWO_PHASE_STATUS_MODULE_APPLIED,
+            'two_phase_correction_verified': False,
+            'two_phase_correction_status_basis': (
+                f'The size-corrected two-phase (particle-lag) loss estimate '
+                f'of hrma.analysis.two_phase_loss, {kayip:.2f} % (band '
+                f'{bant_metni} %), IS applied to the thrust coefficient, '
+                f'so the published Isp, thrust and total impulse include '
+                f'it. No user multiplier was supplied. Basis: NASA SP-8039 '
+                f'(1971) Fig. 8 gives the delivered Isp efficiency as a '
+                f'zero-oxide intercept (about 98 % for a 15 deg cone, the '
+                f'propellant-table nozzle efficiency) minus an '
+                f'oxide-dependent drop (this estimate), and Fig. 7 draws '
+                f'the divergence and two-phase losses as separate bands, '
+                f'so the product does not double count. Cross-check: six '
+                f'32 kg BATES firings in NASA-CR-158815 measured a mean '
+                f'nozzle efficiency of 0.945 against 0.943 from this '
+                f'product. It is an engineering estimate, not a verified '
+                f'value for this propellant.'),
+        }
     if kullanici_var:
         return {
             'two_phase_correction_status': TWO_PHASE_STATUS_USER,
@@ -1160,6 +1201,34 @@ def _two_phase_correction_state(x_particle, eta_user):
                 'because of this: the diagnostic was never applied to the '
                 'thrust coefficient (two_phase_losses_applied = false). '
                 + ortak),
+        }
+    if (isinstance(withheld_for_request_efficiency, dict)
+            and withheld_for_request_efficiency.get('loss_percent') is not None):
+        # V307 KATI KARAR 0 (b), ana model 16-17 Kas 2026: istek lüle ya da
+        # kinetik verim taşıyorsa yerleşik tahmin UYGULANMAZ. Durum kodu
+        # 3.0.6 ile aynıdır (uygulanmadı, doğrulanmadı); künye nedeni söyler.
+        _wk = float(withheld_for_request_efficiency['loss_percent'])
+        return {
+            'two_phase_correction_status': TWO_PHASE_STATUS_NOT_APPLIED,
+            'two_phase_correction_verified': False,
+            'two_phase_correction_status_basis': (
+                f'X_p = {xp:.3f} > 0. The built-in size-corrected two-phase '
+                f'(particle-lag) loss estimate of hrma.analysis.two_phase_loss '
+                f'for this motor is {_wk:.2f} %, but it is NOT applied: a '
+                'nozzle or kinetic efficiency was supplied with the request. '
+                'A supplied efficiency is taken to be a delivered (lumped) '
+                'value that already covers the two-phase loss; applying the '
+                'built-in estimate on top of it would count that loss twice '
+                '(measured on the solid page defaults: Isp over theoretical '
+                '0.84 with both, against 0.88-0.93 measured on six BATES '
+                'firings of NASA-CR-158815). The thrust coefficient therefore '
+                'carries no separate two-phase factor '
+                '(two_phase_efficiency_applied = 1.0). Whether the supplied '
+                'efficiency really covers the loss is not checked. Supplying '
+                'a two-phase loss factor applies that factor; leaving the '
+                'nozzle and kinetic efficiency fields empty applies the '
+                'built-in estimate on the propellant-table nozzle efficiency. '
+                f'Condensed-phase anchor window for X_p: {pencere_metni}.'),
         }
     return {
         'two_phase_correction_status': TWO_PHASE_STATUS_NOT_APPLIED,
@@ -1288,6 +1357,16 @@ BURN_RATE_NUMERIC_CEILING_MPS = 0.1
 # (V301/B6) AYNI tavanı kullanır; yayımlanan 'basis' / 'note' metinleri de
 # sayıyı buradan okur (eskiden döngüde ve iki metinde ayrı ayrı '100' yazılıydı).
 SOLID_PRESSURE_SOLVER_MAX_ITER = 100
+
+# Yanma benzetiminin EMNİYET SINIRLARI (V307/KATI-DOGRULAMA kalem 1): zaman
+# döngüsü bu basıncın ya da sürenin üstüne çıkınca yakıt tükenmeden durur
+# (termination 'safety_limit'). HRMA seçimi: 500 bar formun kabul ettiği en
+# büyük kamara basıncıyla aynıdır (motor_validation.CANONICAL_LIMITS), 1000 s
+# sayısal taşma korumasıdır. Sınıra dayanan koşu SONUÇ ÜRETMEZ
+# (``_safety_limit_rejection``); kullanıcı metni
+# 'warn.solid.safety_limit_termination' aynı iki sayıyı yazar.
+SOLID_SIMULATION_PRESSURE_LIMIT_BAR = 500.0
+SOLID_SIMULATION_TIME_LIMIT_S = 1000.0
 
 # Akış ayrılması ölçütü (Summerfield): sabit geometrili nozulda aşırı
 # genişlemede P_e ≲ 0.4·P_a olduğunda çıkış konisinde ayrılma beklenir ve
@@ -2519,6 +2598,11 @@ class SolidRocketEngine:
         # tasarım noktasından boyutlandırılır. Yalnız ``pin_throat_area``
         # doldurur (üretim toleransı Monte Carlo'su).
         self._pinned_throat_area_m2 = None
+        # Genleşme oranı sabitlemesi (V307/KATI-DOGRULAMA kalem 2): None =
+        # normal tasarım akışı. Yalnız ``pin_expansion_ratio`` doldurur.
+        self._pinned_expansion_ratio = None
+        # Yoğun faz kesri sabitlemesi (V307 faz 3): None = katalog/formül.
+        self._pinned_condensed_fraction = None
         self._ctor_args = dict(
             grain_type=grain_type, propellant_type=propellant_type,
             chamber_diameter=chamber_diameter, grain_length=grain_length,
@@ -3481,9 +3565,15 @@ class SolidRocketEngine:
         m = self._override_val('cf_efficiency', 0.80, 1.0)
         if m is not None:
             self.nozzle_efficiency = m
+        #: V307 KATI KARAR 0 (b): lüle verimi İSTEKTEN mi geldi (form /
+        #: kullanıcı) yoksa itici tablosundan mı — iki fazlı tahminin
+        #: uygulanıp uygulanmayacağını bu belirler (bkz.
+        #: _request_efficiency_replaces_two_phase_estimate).
+        self._nozzle_efficiency_from_request = m is not None
         m = self._override_val('nozzle_efficiency', 0.80, 1.0)
         if m is not None:
             self.nozzle_efficiency = m
+            self._nozzle_efficiency_from_request = True
 
         self.kinetic_efficiency = 1.0
         m = self._override_val('kinetic_efficiency', 0.80, 1.0)
@@ -3584,8 +3674,10 @@ class SolidRocketEngine:
         self.ambient_pressure_bar = SEA_LEVEL_PRESSURE_BAR
         m = self._override_val('test_altitude', 0.0, 30000.0)
         if m is not None and m > 0:
-            from hrma.constants import isa_pressure
-            self.ambient_pressure_bar = float(isa_pressure(m)) / 1e5
+            # V307/İRTİFA-TEK: test irtifası GEOMETRİK (irtifa tablosu ve
+            # yörüngeyle aynı okuma: USSA 1976'ya geopotansiyele çevrilerek).
+            from hrma.constants import isa_pressure_geometric
+            self.ambient_pressure_bar = float(isa_pressure_geometric(m)) / 1e5
         m = self._override_val('atm_pressure', 1.0, 200.0)       # kPa
         if m is not None:
             self.ambient_pressure_bar = m / 100.0
@@ -4163,7 +4255,106 @@ class SolidRocketEngine:
         return float(self.nozzle_efficiency
                      * self._divergence_efficiency_correction()
                      * getattr(self, 'kinetic_efficiency', 1.0)
-                     * getattr(self, 'two_phase_efficiency', 1.0))
+                     * self._two_phase_applied_efficiency())
+
+    def _request_efficiency_replaces_two_phase_estimate(self):
+        """İstek, yerleşik iki fazlı tahminin yerini alan bir verim taşıyor mu?
+
+        V307 KATI KARAR 0 (b) (ana model, 16-17 Kas 2026). İstekle gelen lüle
+        verimi (``nozzle_efficiency`` / ``cf_efficiency``) itici tablosundaki
+        değerin YERİNE geçer; kinetik verim ayrıca çarpılır. Çözücü, verilen
+        bir verimin hangi kayıpları kapsadığını bilemez. Toplu (teslim) verim
+        girdisi iki fazlı kaybı zaten içerir kabul edilir: yerleşik tahmin
+        üstüne binerse kayıp İKİ KEZ sayılır. Ölçüm (faz 3,
+        ``docs/scofield/raw/OH/V307/kati-dogrulama/olcum/f3_sayfa_verimi.json``):
+        katı sayfasının form varsayılanları (0,95 / 0,97) + yerleşik tahmin ->
+        Isp / kuramsal 0,838-0,850; NASA-CR-158815 BATES ölçümü 0,882-0,926.
+        Kullanıcının ``two_phase_loss`` girdisiyle AYNI kural: girdi tahminin
+        yerine geçer, çarpılmaz.
+
+        Kinetik verim tam 1,0 gönderildiyse çarpan etkisizdir ve tablo lüle
+        verimi kullanılıyorsa tahmin uygulanır (değer ölçütü; alanın varlığı
+        değil).
+        """
+        return bool(
+            getattr(self, '_nozzle_efficiency_from_request', False)
+            or abs(float(getattr(self, 'kinetic_efficiency', 1.0)) - 1.0)
+            > 1e-12)
+
+    def _two_phase_module_state(self):
+        """İtki katsayısına UYGULANACAK yerleşik tahmin (yoksa None).
+
+        ``_two_phase_module_estimate`` tahmini hesaplar; istek lüle ya da
+        kinetik verim taşıyorsa (KARAR 0 (b)) tahmin UYGULANMAZ ve None döner.
+        O durumda tahmin teşhis olarak yayımlanır
+        (``_two_phase_withheld_estimate``).
+        """
+        if self._request_efficiency_replaces_two_phase_estimate():
+            return None
+        return self._two_phase_module_estimate()
+
+    def _two_phase_withheld_estimate(self):
+        """İstek verimi yüzünden UYGULANMAYAN yerleşik tahmin (yoksa None)."""
+        if not self._request_efficiency_replaces_two_phase_estimate():
+            return None
+        return self._two_phase_module_estimate()
+
+    def _two_phase_module_estimate(self):
+        """Modülün pencere içi iki fazlı kayıp tahmini (yoksa None).
+
+        V307/KATI-DOGRULAMA faz 3 (B1). Dönüş ``{'loss_percent', 'band_percent',
+        'efficiency'}`` ya da None. None döndüğü durumlar: kullanıcı kendi
+        çarpanını verdi (onun değeri modülün YERİNE geçer — çarpım yok),
+        yoğun faz kesri yok / sıfır / pencere dışı, ya da modül girdilerden
+        biri yayımlanmış aralığın dışında olduğu için sayı üretmedi
+        (ör. boğaz 25,4 mm'nin altında). O durumlarda itki katsayısına iki
+        fazlı çarpan GİRMEZ ve yanıt bunu ayrıca beyan eder.
+
+        Tahmin, itki eğrisinden ÖNCE bilinen büyüklüklerden (tasarım boğazı,
+        tasarım basıncı, serbest hacim kalış süresi) hesaplanır; geometri ya
+        da donanım sabitlemesi değişirse yeniden hesaplanır (anahtarlı
+        önbellek — itki eğrisi bu yöntemi her adımda çağırır).
+        """
+        if abs(float(getattr(self, 'two_phase_efficiency', 1.0)) - 1.0) > 1e-12:
+            return None
+        anahtar = (
+            float(self.D_chamber), float(self.D_core), float(self.L_grain),
+            getattr(self, '_pinned_throat_area_m2', None), float(self.P_c),
+            float(getattr(self, 'rho_p', 0.0)), float(getattr(self, 'c_star', 0.0)),
+            float(getattr(self, 'a', 0.0)), float(getattr(self, 'n', 0.0)),
+            float(getattr(self, '_burn_rate_lot_scale', 1.0)),
+            float(getattr(self, '_burn_rate_lot_exponent_shift', 0.0)),
+            self.overrides.get('grain_count'), self.overrides.get('n_segments'),
+            str(getattr(self, 'propellant_type', '')))
+        onbellek = getattr(self, '_two_phase_module_cache', None)
+        if onbellek is not None and onbellek[0] == anahtar:
+            return onbellek[1]
+        durum = None
+        blok = self._two_phase_loss_report(
+            self._estimate_throat_diameter(), _for_application=True)
+        kayip = blok.get('two_phase_loss_pct') if isinstance(blok, dict) else None
+        if (isinstance(blok, dict) and blok.get('status') == 'computed'
+                and isinstance(kayip, (int, float)) and np.isfinite(kayip)
+                and 0.0 < float(kayip) < 100.0):
+            durum = {
+                'loss_percent': float(kayip),
+                'band_percent': blok.get('two_phase_loss_band_pct'),
+                'efficiency': float(1.0 - float(kayip) / 100.0),
+            }
+        self._two_phase_module_cache = (anahtar, durum)
+        return durum
+
+    def _two_phase_applied_efficiency(self):
+        """İtki katsayısına FİİLEN giren iki fazlı verim çarpanı.
+
+        Öncelik: kullanıcının ``two_phase_loss`` girdisi (modülün yerine
+        geçer) > modülün pencere içi tahmini (B1) > 1.0 (uygulanmadı).
+        """
+        eta_kullanici = float(getattr(self, 'two_phase_efficiency', 1.0))
+        if abs(eta_kullanici - 1.0) > 1e-12:
+            return eta_kullanici
+        modul = self._two_phase_module_state()
+        return float(modul['efficiency']) if modul else 1.0
 
     def _divergence_efficiency_correction(self):
         """Kullanıcının yarı açısının referans koniye göre verim düzeltmesi.
@@ -7418,7 +7609,10 @@ class SolidRocketEngine:
         # ICAO Standard Atmosphere (ISO 2533) - verified to 99.95% accuracy
         for alt in altitudes:
             # Geopotential height conversion
-            H = alt * 6356766 / (6356766 + alt)  # Geopotential height
+            # H = h·r0/(r0 + h): merkezî yardımcı (r0 TEK TANIM hrma.constants;
+            # V307/İRTİFA-TEK, eski tamsayı literalle 26 145 irtifada
+            # bit-aynı). alt GEOMETRİK irtifadır (kullanıcı irtifası).
+            H = geometric_to_geopotential(alt)  # Geopotential height
             
             # Katman tablosu merkezi sabit modülünden alınır (hrma.constants.ISA_LAYERS)
             # Kaynak: U.S. Standard Atmosphere 1976 (NOAA/NASA/USAF), Tablo 4
@@ -7881,13 +8075,15 @@ class SolidRocketEngine:
         # ÖH D15 a3 (P2B1-11): çözüm TEK noktadan (_condensed_mass_fraction)
         # — kompozit ailede kesir artık kaydın KENDİ formülasyonundan gelir,
         # metal yüklemesi ayırt edilmeden apcp'den devralınmaz.
-        x_particle, x_source, x_kunye = _condensed_mass_fraction(
-            self.propellant_type)
+        x_particle, x_source, x_kunye = self._two_phase_condensed_fraction()
         # ÖH D32 (OH-D31-17) / ÖH D33 (OH-D32-17): durum TEK tanım
         # noktasından gelir ve artık SAYININ YAYIMLANIP YAYIMLANMAYACAĞINI
         # da o belirler — iki karar (durum ⟷ sayı) ayrışamaz.
         eta_2phase_user = float(getattr(self, 'two_phase_efficiency', 1.0))
-        durum = _two_phase_correction_state(x_particle, eta_2phase_user)
+        _modul_uygulanan = self._two_phase_module_state()
+        durum = _two_phase_correction_state(
+            x_particle, eta_2phase_user, _modul_uygulanan,
+            self._two_phase_withheld_estimate())
         zarf_disi = (durum['two_phase_correction_status']
                      == TWO_PHASE_STATUS_OUT_OF_ENVELOPE)
         two_phase_withheld_reason = None
@@ -8033,8 +8229,19 @@ class SolidRocketEngine:
             'two_phase_losses': (None if two_phase_losses is None
                                  else float(two_phase_losses)),
             'two_phase_losses_withheld_reason': two_phase_withheld_reason,
-            'two_phase_losses_applied': False,
-            'two_phase_efficiency_applied': eta_2phase_user,
+            # B1 (V307 faz 3): ``two_phase_losses`` (doğrusal çapa) TEŞHİS
+            # olarak kalır; itki katsayısına giren çarpan ya kullanıcının
+            # girdisi ya da modülün boyut düzeltmeli tahminidir.
+            'two_phase_losses_applied': bool(
+                _modul_uygulanan or abs(eta_2phase_user - 1.0) > 1e-12),
+            'two_phase_efficiency_applied': float(
+                self._two_phase_applied_efficiency()),
+            'two_phase_applied_source': (
+                'user_input' if abs(eta_2phase_user - 1.0) > 1e-12 else
+                'module_estimate' if _modul_uygulanan else 'none'),
+            'two_phase_module_losses_applied': (
+                float(_modul_uygulanan['loss_percent'])
+                if _modul_uygulanan else None),
             'two_phase_user_losses': float(100.0 * (1.0 - eta_2phase_user)),
             'two_phase_losses_basis': two_phase_basis,
             **durum,
@@ -8104,7 +8311,7 @@ class SolidRocketEngine:
             return None
         return float(tau_s * 1000.0)
 
-    def _two_phase_loss_report(self, throat_diameter_m):
+    def _two_phase_loss_report(self, throat_diameter_m, _for_application=False):
         """İki-fazlı (tanecik gecikmesi) Isp kaybı — hrma.analysis.two_phase_loss.
 
         KATI MOTORUN KENDİ FİZİĞİ. Alüminyumlu APCP'de yanma ürünlerinin
@@ -8154,8 +8361,7 @@ class SolidRocketEngine:
                  f'(HRMA {surum})')
 
         # ÖH D15 a3 (P2B1-11): aynı TEK çözüm noktası (iki blok ayrışamaz).
-        beta, beta_source, beta_kunye = _condensed_mass_fraction(
-            self.propellant_type)
+        beta, beta_source, beta_kunye = self._two_phase_condensed_fraction()
         eksik = []
         if beta is None:
             eksik.append('condensed_mass_fraction')
@@ -8175,8 +8381,14 @@ class SolidRocketEngine:
 
         # ÖH D32 (OH-D31-17): durum beyanı HER dalda taşınır — blok sayı
         # üretmese de "düzeltme doğrulandı mı?" sorusu yanıtsız kalmaz.
+        # B1 (V307 faz 3): uygulama için çağrıldığında durum henüz bilinmez
+        # (modül sayısı bu çağrının çıktısıdır); yayım için çağrıldığında
+        # uygulanan tahmin durum künyesine girer.
+        _uygulanan = (None if _for_application
+                      else self._two_phase_module_state())
         _durum = _two_phase_correction_state(
-            beta, getattr(self, 'two_phase_efficiency', 1.0))
+            beta, getattr(self, 'two_phase_efficiency', 1.0), _uygulanan,
+            None if _for_application else self._two_phase_withheld_estimate())
         if eksik:
             return {
                 'status': 'NOT_MODELLED',
@@ -8250,7 +8462,13 @@ class SolidRocketEngine:
         blok.update({
             'status': ('computed' if sonuc.get('valid')
                        else 'OUT_OF_PUBLISHED_RANGE'),
-            'applied_to_isp': False,
+            'applied_to_isp': bool(_uygulanan),
+            'applied_efficiency': (float(_uygulanan['efficiency'])
+                                   if _uygulanan else None),
+            'applied_source': (
+                'hrma.analysis.two_phase_loss size-corrected estimate '
+                '(NASA SP-8039 Fig. 8 anchors; cross-checked against '
+                'NASA-CR-158815 BATES firings)' if _uygulanan else None),
             **_durum,
             'inputs_used': {
                 'condensed_mass_fraction': float(beta),
@@ -8313,7 +8531,16 @@ class SolidRocketEngine:
             # katalog yorumu da o veriMi "Divergence + friction losses" diye
             # tanımlar. Gerçek çifte sayım kanalı YALNIZ kullanıcı
             # çarpanıdır. Künye artık kendi sayısını yazar.
-            'overlap_declaration': (
+            'overlap_declaration': ((
+                'This loss IS applied to the thrust coefficient (and through '
+                'it to Isp, thrust and total impulse) as the multiplier '
+                f'{float(_uygulanan["efficiency"]):.6f}; it is not applied to '
+                "c*. The user's 'two_phase_loss' input was not supplied; had "
+                'it been, it would have REPLACED this estimate (never '
+                "multiplied with it). The propellant record's own nozzle "
+                'efficiency does not contain a two-phase factor: it is the '
+                'zero-oxide intercept of NASA SP-8039 Fig. 8, of which this '
+                'estimate is the oxide-dependent drop.') if _uygulanan else (
                 'This loss is NOT applied to Isp, c* or the thrust '
                 'coefficient. The only channel that could double-count it is '
                 "the user's 'two_phase_loss' input, which becomes the "
@@ -8326,19 +8553,25 @@ class SolidRocketEngine:
                 'it as divergence + friction, and it is measurably too high '
                 'to contain even the reference divergence cone as a factor '
                 '(see divergence_losses_basis, which publishes the residual '
-                'this run).'),
+                'this run).')),
             'relation_to_isp_loss_breakdown': (
                 "detailed_analysis.theoretical_vs_actual_isp.two_phase_losses "
                 'is the LINEAR anchor 100*k*X_p with no particle-size or '
                 'motor-size correction; the number here comes from the same '
                 'k anchor multiplied by the Stokes-ratio size factor of the '
-                'module, so the two generally differ. Both are reported and '
-                'neither is applied.'),
+                'module, so the two generally differ. Both are reported; '
+                + ('the module estimate here is the one applied to the thrust '
+                   'coefficient, the linear anchor is a diagnostic only.'
+                   if _uygulanan else 'neither is applied.')),
             'module_basis': modul_basis,
             '_basis': (
                 f'{kunye}; inputs taken from the solver state listed in '
-                'inputs_used. Diagnostic only — not fed back into any '
-                'performance, geometry or CAD quantity.'),
+                'inputs_used. '
+                + ('Applied to the thrust coefficient (see applied_to_isp); '
+                   'not fed back into geometry or CAD quantities.'
+                   if _uygulanan else
+                   'Diagnostic only — not fed back into any '
+                   'performance, geometry or CAD quantity.')),
         })
         return blok
 
@@ -8927,7 +9160,7 @@ class SolidRocketEngine:
                 'forms bound here are derived for psi = cos(q*pi*z/L). For '
                 'tangential/radial modes neither the nozzle admittance '
                 'integral nor the surface mean square holds, and no number is '
-                'fabricated for them.'),
+                'published for them.'),
             'not_modelled': esik_beyanlari,
         }
         return forbid_verdict_key(
@@ -10650,6 +10883,7 @@ class SolidRocketEngine:
         samples = {k: [] for k in keys}
         n_success = 0
         n_failed_runs = 0
+        n_safety_limit_runs = 0
 
         for _ornek_no in range(n_samples):
             # done = tamamlanan örnek (başarısız dahil); 0 = döngü başı
@@ -10696,6 +10930,9 @@ class SolidRocketEngine:
                         scale=1.0 + eps_a, exponent_shift=d_n)
                 r = sample_engine.calculate_performance()
                 if isinstance(r, dict) and r.get('error'):
+                    if ((r.get('solver_diagnostics') or {})
+                            .get('termination_reason') == 'safety_limit'):
+                        n_safety_limit_runs += 1
                     raise ValueError(r['error'])
                 s_thrust = float(r['average_thrust'])
                 s_isp = float(r['specific_impulse'])
@@ -10732,6 +10969,20 @@ class SolidRocketEngine:
         return {
             'n_samples': n_samples,
             'n_failed_runs': n_failed_runs,
+            # V307/KATI-DOGRULAMA (kalem 1): emniyet sınırında duran
+            # örnekler SIFIR performans olarak istatistiğe girmez; başarısız
+            # koşu sayılır ve kaç tane olduğu ayrıca yazılır.
+            'n_safety_limit_runs': n_safety_limit_runs,
+            'failed_runs_basis': (
+                f'{n_failed_runs} of {n_samples} samples produced no result '
+                f'and are excluded from the statistics below; '
+                f'{n_safety_limit_runs} of them stopped on the simulation '
+                f'safety limit (chamber pressure above '
+                f'{SOLID_SIMULATION_PRESSURE_LIMIT_BAR:g} bar or burn longer '
+                f'than {SOLID_SIMULATION_TIME_LIMIT_S:g} s). Every sample '
+                f'without a result counts as a failure in '
+                f'success_rate_percent, and the max_pressure statistics '
+                f'describe only the samples that ran to burnout.'),
             'success_rate_percent': round(100.0 * n_success / n_samples, 1),
             # Açıklama metni ÖLÇÜTÜN KENDİSİNDEN üretilir (sabit metin değil):
             # yukarıdaki kabul testi ile bu satır aynı sayıları kullanır.
@@ -13261,6 +13512,67 @@ class SolidRocketEngine:
                 f'verilen {area_m2!r}')
         self._pinned_throat_area_m2 = a
 
+    def pin_expansion_ratio(self, epsilon):
+        """Genleşme oranını SABİTLE — imal edilmiş lüle tektir.
+
+        V307/KATI-DOGRULAMA kalem 2. Doğrulama adaptörünün (statik ateşleme
+        kaydı: boğaz ve çıkış ölçüsü yayımlanmış donanım) kullanması içindir;
+        ``pin_throat_area``'nın lüle çıkışı karşılığıdır. Normal (tasarım)
+        akışta ÇAĞRILMAZ; çağrılmadığında ``_estimate_expansion_ratio``
+        tasarım ortamındaki optimum oranı çözmeye devam eder (bit-aynı).
+        Kabul aralığı ``SOLID_MIN_DESIGN_EXPANSION_RATIO`` ile aynı alt sınırı
+        kullanır; üst sınır yoktur (ayrılma hükmü çözücünün CF durumundadır).
+
+        epsilon: A_çıkış / A_boğaz (boyutsuz). None -> sabitlemeyi kaldırır.
+        """
+        if epsilon is None:
+            self._pinned_expansion_ratio = None
+            return
+        e = float(epsilon)
+        if not np.isfinite(e) or e < float(SOLID_MIN_DESIGN_EXPANSION_RATIO):
+            raise ValueError(
+                'pin_expansion_ratio: oran sonlu ve en az '
+                f'{float(SOLID_MIN_DESIGN_EXPANSION_RATIO):g} olmalı; '
+                f'verilen {epsilon!r}')
+        self._pinned_expansion_ratio = e
+
+    def pin_condensed_mass_fraction(self, fraction, source):
+        """İki fazlı kayıp hesabının yoğun faz kesrini SABİTLE.
+
+        V307/KATI-DOGRULAMA faz 3. Katalogda OLMAYAN iticili doğrulama
+        kayıtları içindir (NASA-CR-158815 BATES koşuları egzozdaki Al2O3
+        kesrini Tablo 2-2'de verir). Yalnız iki fazlı kayıp tahminini ve
+        kayıp dökümünü besler (``_two_phase_condensed_fraction``); çıkış
+        durumu ve yalıtım hesapları katalog yolunda kalır. Normal (tasarım)
+        akışta ÇAĞRILMAZ; çağrılmadığında davranış bit-aynıdır.
+
+        fraction: egzozdaki yoğun faz kütle kesri [0, 1). None -> kaldırır.
+        source: değerin kaynağı (kayıt künyesi) — yayımlanan künyeye girer.
+        """
+        if fraction is None:
+            self._pinned_condensed_fraction = None
+            self._two_phase_module_cache = None
+            return
+        x = float(fraction)
+        if not np.isfinite(x) or not (0.0 <= x < 1.0):
+            raise ValueError(
+                'pin_condensed_mass_fraction: kesir [0, 1) aralığında ve '
+                f'sonlu olmalı; verilen {fraction!r}')
+        self._pinned_condensed_fraction = (x, str(source))
+        self._two_phase_module_cache = None
+
+    def _two_phase_condensed_fraction(self):
+        """(X_p, kaynak_anahtar, künye) — iki fazlı kayıp hesabının kesri.
+
+        Sabitlenmişse (``pin_condensed_mass_fraction``) kaydın değeri;
+        değilse ``_condensed_mass_fraction`` (katalog/formülasyon).
+        """
+        sabit = getattr(self, '_pinned_condensed_fraction', None)
+        if sabit is not None:
+            anahtar = str(self.propellant_type or '').strip().lower()
+            return sabit[0], anahtar, f'validation record: {sabit[1]}'
+        return _condensed_mass_fraction(self.propellant_type)
+
     def pin_burn_rate_lot(self, scale=1.0, exponent_shift=0.0):
         """PARÇALI yanma yasasına üretim partisi saçılımı uygula.
 
@@ -13481,6 +13793,12 @@ class SolidRocketEngine:
         sayısıyla değiştirilir. Kullanıcı ε girdisi katı çözücüde yoktur
         (``unwired_inputs`` 'computed_by_solver').
         """
+        sabit = getattr(self, '_pinned_expansion_ratio', None)
+        if sabit is not None:
+            # Donanım sabitlemesi (``pin_expansion_ratio``): imal edilmiş
+            # lülenin oranı; optimum çözülmez, sınır beyanı da yoktur.
+            self._expansion_ratio_bound = None
+            return sabit
         gamma = self._nozzle_gamma()
         P_atm = float(getattr(self, 'ambient_pressure_bar',
                               SEA_LEVEL_PRESSURE_BAR))  # bar
@@ -14644,9 +14962,9 @@ class SolidRocketEngine:
             pressure_integral = float(_trapezoid(
                 np.asarray(curve['pressure']) * 1e5, curve['time']))
             c_star_delivered = pressure_integral * A_t / m_prop
-            # Payda TEORİK c* (bkz. _c_star_theoretical) — aksi hâlde
-            # kullanıcının yanma verimi bu metrikte görünmezdi.
-            c_star_eff = 100.0 * c_star_delivered / self._c_star_theoretical()
+            # Payda TEORİK c* (bkz. _c_star_theoretical). 3.0.7: işlem sırası performance_metrics'le
+            # AYNI (x / c* * 100) — Linux'ta iki sıra son bitte ayrışıyordu (test_v306_sayi K1).
+            c_star_eff = c_star_delivered / self._c_star_theoretical() * 100.0
         else:
             c_star_eff = 100.0
         nozzle_eff = 100.0 * self._total_nozzle_efficiency()
@@ -16670,7 +16988,8 @@ class SolidRocketEngine:
             t += dt
 
             # Safety limits
-            if t > 1000 or P_c_actual > 500:  # 500 bar maximum pressure
+            if (t > SOLID_SIMULATION_TIME_LIMIT_S
+                    or P_c_actual > SOLID_SIMULATION_PRESSURE_LIMIT_BAR):
                 termination = 'safety_limit'
                 break
 
@@ -17155,6 +17474,93 @@ class SolidRocketEngine:
             'message': mesaj,
         }], 'port_smaller_than_throat')
 
+    def _safety_limit_rejection(self, curve):
+        """Emniyet sınırında duran yanma için ADLI RET (sonuç üretilmez).
+
+        V307/KATI-DOGRULAMA kalem 1 (S1). Zaman döngüsü kamara basıncı
+        ``SOLID_SIMULATION_PRESSURE_LIMIT_BAR``'ı ya da süre
+        ``SOLID_SIMULATION_TIME_LIMIT_S``'yi aşınca yakıt tükenmeden durur.
+        Eski kapı bu sonu yalnız çözücü YAKINSAMADIYSA reddediyordu;
+        yakınsamış ama sınırda durmuş koşu HTTP 200 / status CALCULATED ile
+        kesik eğriyi motor performansı diye yayımlıyordu.
+
+        ÖLÇÜLDÜ (16 Kasım 2026, taban 9dd10f531; kanıt
+        ``docs/scofield/raw/OH/V307/kati-dogrulama/f2_s1_mc_once.json``):
+          * tek koşu (sabit boğaz 12,7 mm, erozif katsayı 0,25): 1 örnek,
+            P = 504,9 bar, burn_time = 0, Isp = 0, toplam impuls = 0,
+            status = CALCULATED.
+          * Monte Carlo (APCP, Ø100 / çekirdek 40 / L 500 mm, 200 örnek,
+            tohum 42): tasarım basıncı 450 bar (form 500 bar'a kadar kabul
+            eder) -> Isp ortalaması 266,7 s (nominal 290,5), p5 = 0,0 s,
+            yanma süresi p5 = 0,0 s, ``n_failed_runs`` = 0. 480 bar -> Isp
+            ortalaması 194,4 s. Sınırı aşan örnekler istatistiğe SIFIR olarak
+            giriyordu; aşmayan uçta (300 bar) istatistik sağlıklıydı.
+
+        Ret, depodaki yakınsamama sözleşmesini kullanır (``error`` +
+        ``error_i18n`` + status NOT_CONVERGED -> uç 422; ``run_monte_carlo``
+        ve ``uq_adapters`` ``error`` anahtarını zaten tanır). Çözücü tanısı
+        OLDUĞU GİBİ yayımlanır: ``convergence_achieved`` adımların gerçekten
+        yakınsadığını söyler, ``termination_reason`` neden sonuç olmadığını.
+        """
+        # ``or []`` KULLANILMAZ: eğri alanları numpy dizisi olabilir ve tek
+        # elemanlı [0.0] dizisi yanlış değerlidir (örnek sayısı 0 okunurdu).
+        _p = curve.get('pressure')
+        _t = curve.get('time')
+        basinc = [float(p) for p in ([] if _p is None else _p)]
+        zaman = [float(x) for x in ([] if _t is None else _t)]
+        p_son = basinc[-1] if basinc else None
+        t_son = zaman[-1] if zaman else None
+        uyari = _w('warn.solid.safety_limit_termination', 'critical')
+        tum_uyarilar = list(self.design_warnings) + [
+            w for w in self._design_health_warnings(curve)]
+        if not any(isinstance(w, dict) and w.get('code') == uyari['code']
+                   for w in tum_uyarilar):
+            tum_uyarilar.append(uyari)
+        return {
+            'error': (
+                f'The burn simulation stopped on a safety limit (chamber '
+                f'pressure above {SOLID_SIMULATION_PRESSURE_LIMIT_BAR:g} bar '
+                f'or burn longer than {SOLID_SIMULATION_TIME_LIMIT_S:g} s) '
+                f'before the propellant burned out: {len(zaman)} time '
+                f'sample(s), last chamber pressure '
+                + (f'{p_son:.1f} bar' if p_son is not None else 'not available')
+                + '. No performance, CAD or acceptability result is produced '
+                'from a truncated burn.'),
+            'error_i18n': uyari,
+            'status': DESIGN_STATUS_NOT_CONVERGED,
+            'solver_diagnostics': {
+                'convergence_achieved': bool(
+                    curve.get('convergence_achieved', True)),
+                'pressure_solver_steps': int(
+                    curve.get('pressure_solver_steps', 0) or 0),
+                'pressure_solver_failed_steps': int(
+                    curve.get('pressure_solver_failed_steps', 0) or 0),
+                'pressure_solver_max_residual': float(
+                    curve.get('pressure_solver_max_residual', 0.0) or 0.0),
+                'pressure_solver_tolerance': float(
+                    curve.get('pressure_solver_tolerance', 0.0) or 0.0),
+                'termination_reason': 'safety_limit',
+                'safety_limit_pressure_bar': float(
+                    SOLID_SIMULATION_PRESSURE_LIMIT_BAR),
+                'safety_limit_time_s': float(SOLID_SIMULATION_TIME_LIMIT_S),
+                'burn_rate_exponent': float(self.n),
+                'time_step_s': curve.get('time_step_s'),
+                **self._pressure_solver_boundary_publication(curve),
+            },
+            # Kesik eğrinin son örneği yalnız TEŞHİS içindir; adı performans
+            # alanlarıyla karışmayacak biçimde seçildi.
+            'truncated_burn_diagnostic_only': {
+                'note': ('Values from a burn that was cut at a simulation '
+                         'safety limit. They are NOT a motor result and must '
+                         'not be reported as performance.'),
+                'sample_count': int(len(zaman)),
+                'last_sample_time_s': t_son,
+                'max_chamber_pressure_bar': (max(basinc) if basinc else None),
+            },
+            'design_warnings': tum_uyarilar,
+            'warnings': tum_uyarilar,
+        }
+
     def calculate_performance(self):
         """Calculate overall motor performance with comprehensive analysis"""
         # V301/K-A (KT-23): port boğazdan küçükse eğri hiç koşmaz (RET).
@@ -17311,6 +17717,12 @@ class SolidRocketEngine:
                 'design_warnings': tum_uyarilar,
                 'warnings': tum_uyarilar,
             }
+
+        # V307/KATI-DOGRULAMA (kalem 1, S1): emniyet sınırında duran yanma
+        # yakınsamış olsa da SONUÇ DEĞİLDİR — gerekçe ve ölçüm
+        # ``_safety_limit_rejection`` künyesinde.
+        if curve.get('termination_reason') == 'safety_limit':
+            return self._safety_limit_rejection(curve)
 
         # V301/K-D: n ≥ 1'de çözücü yakınsadıysa port kapısı burada (sıranın
         # gerekçesi yukarıda, ``_n_denge_yok``). Kapı atlanmaz.
@@ -18454,8 +18866,38 @@ class SolidRocketEngine:
         # anahtarının işaret ettiği AYNI listedir; tek ekleme iki kanalı da
         # besler.
         _tp_durum = results['two_phase_loss']
-        if isinstance(_tp_durum, dict) and not _tp_durum.get(
-                'two_phase_correction_verified', False):
+        # B1 (V307 faz 3): modül tahmini UYGULANDIYSA "Isp iki-faz düzeltmesi
+        # taşımıyor" uyarısı yanlış olurdu; onun YERİNE (aynı kanalda, tek
+        # kayıt) bilgi düzeyinde "uygulandı" kaydı yazılır. Rapor katmanı
+        # (PDF) yalnız uyarı kayıtlarını okuduğu için durum bu kanalda da
+        # durmak zorundadır (ÖH D32 hükmü); kayıt sayısı değişmez, düzeyi
+        # 'warning' -> 'info' olur.
+        _tp_uygulanan_modul = self._two_phase_module_state()
+        if (isinstance(_tp_durum, dict) and _tp_uygulanan_modul
+                and _tp_durum.get('two_phase_correction_status')
+                == TWO_PHASE_STATUS_MODULE_APPLIED):
+            _tp_bant = _tp_uygulanan_modul.get('band_percent') or [None, None]
+            if (isinstance(_tp_bant[0], (int, float))
+                    and isinstance(_tp_bant[1], (int, float))):
+                all_warnings.append(dict(_w(
+                    'warn.solid.two_phase_estimate_applied', 'info',
+                    loss_percent=round(
+                        float(_tp_uygulanan_modul['loss_percent']), 2),
+                    band_low_percent=round(float(_tp_bant[0]), 2),
+                    band_high_percent=round(float(_tp_bant[1]), 2)),
+                    fallback=(
+                        'The specific impulse, thrust and total impulse '
+                        'shown here include a two-phase (condensed-particle) '
+                        'nozzle loss of {loss_percent} % (band '
+                        '{band_low_percent}-{band_high_percent} %). It is the '
+                        'built-in size-corrected estimate based on NASA '
+                        'SP-8039, an engineering estimate rather than a '
+                        'verified value for this propellant. Entering your '
+                        'own two-phase loss factor replaces it.')))
+        if (isinstance(_tp_durum, dict) and not _tp_durum.get(
+                'two_phase_correction_verified', False)
+                and _tp_durum.get('two_phase_correction_status')
+                != TWO_PHASE_STATUS_MODULE_APPLIED):
             # ``fallback``: i18n anahtarı bu dalgada EKLENEMEZ
             # (i18n_common.js arayuz-i18n kulvarının sahasıdır), bu yüzden
             # kayıt İngilizce cümlesini kendisi taşır ve ekran katmanı
@@ -18517,6 +18959,184 @@ class SolidRocketEngine:
                         'performance. The full reason is published as '
                         'two_phase_correction_status_basis in the same '
                         'response.')))
+
+        # V307/KATI-DOGRULAMA faz 2 (karar 6-7) — TESLİM PERFORMANSININ
+        # DAYANAĞI, okunur biçimde. "Pencere dışı" = "kayıp sıfır" DEĞİLDİR:
+        # KN-şeker gibi yoğun faz kesri yayımlanmış korelasyonun aralığı
+        # dışındaki iticide iki fazlı lüle kaybı HESAPLANAMAZ ve yayımlanan
+        # Isp / itki / toplam impuls onu İÇERMEZ. Ölçüm (faz 1): KDX-002'de
+        # ölçülen C_F 1,444 ⟷ HRMA 1,630. Tek ateşlemeden katsayı üretilmez
+        # (karar 6); sayı değişmez, beyan eklenir. Yanma (c*) verimi
+        # varsayılanı 1,0 da DEĞİŞMEZ; "varsayım, doğrulanmadı" diye ayrı
+        # görünür (karar 7).
+        _tp_pencere, _tp_pencere_kaynak = _two_phase_anchor_envelope()
+        # Yukarıdaki uyarı bloğunun yerel adları koşulludur (doğrulanmış
+        # durumda hiç kurulmaz); bu blok kendi okumasını yapar.
+        _tpd = _tp_durum if isinstance(_tp_durum, dict) else {}
+        _tp_kayip = _tpd.get('two_phase_loss_pct')
+        _tp_status = str(_tpd.get('two_phase_correction_status'))
+        _tp_x = (_tpd.get('inputs_used') or {}).get('condensed_mass_fraction')
+        _tp_pencere_disi = (
+            _tpd.get('two_phase_correction_status')
+            == TWO_PHASE_STATUS_OUT_OF_ENVELOPE)
+        _eta_c_kullanici = self._override_val(
+            'combustion_efficiency', 0.50, 1.0) is not None
+        _tp_kullanici = abs(float(getattr(
+            self, 'two_phase_efficiency', 1.0)) - 1.0) > 1e-12
+        _tp_modul_uyg = self._two_phase_module_state()
+        # KARAR 0 (b): istek verimi yüzünden uygulanmayan tahmin (teşhis).
+        _tp_tutulan = (None if _tp_kullanici
+                       else self._two_phase_withheld_estimate())
+        # Faz 3 (görsel ölçümde bulundu): katı sayfası nozul/kinetik/yanma
+        # verimi alanlarını HER koşuda gönderir (form varsayılanları 0,95 /
+        # 0,97 / 0,95). Gönderilen nozul verimi tablo değerinin YERİNE geçer;
+        # blok bunu "tablo değeri" diye yayımlayamaz. Kaynak adıyla ayrılır.
+        _noz_form = (self._override_val('nozzle_efficiency', 0.80, 1.0)
+                     is not None
+                     or self._override_val('cf_efficiency', 0.80, 1.0)
+                     is not None)
+        _kin = float(getattr(self, 'kinetic_efficiency', 1.0))
+        results['delivered_performance_basis'] = {
+            'combustion_efficiency': {
+                'value': float(getattr(self, 'combustion_efficiency', 1.0)),
+                'source': ('user_input' if _eta_c_kullanici
+                           else 'assumed_default_not_verified'),
+                'verified': False,
+                'basis': (
+                    'Entered by the user; applied to c* as given and not '
+                    'checked against any measurement.' if _eta_c_kullanici else
+                    'Assumed default: combustion (c*) efficiency = 1.0, i.e. '
+                    'the theoretical characteristic velocity is delivered in '
+                    'full. This is an assumption, not a verified value: '
+                    'measured c* efficiencies of aluminised composite '
+                    'propellants in 32 kg test motors are 0.92-0.98 '
+                    '(NASA-CR-158815, Tables 3-21, 3-26, 3-52). A lower '
+                    'efficiency lowers chamber pressure, thrust and Isp and '
+                    'lengthens the burn.'),
+            },
+            'kinetic_efficiency': {
+                'value': _kin,
+                'source': ('request_field' if abs(_kin - 1.0) > 1e-12
+                           else 'not_applied'),
+            },
+            'nozzle_efficiency_table': {
+                'value': float(self.nozzle_efficiency),
+                'source': ('request_field' if _noz_form
+                           else 'propellant_table'),
+                'covers': ('not known to the solver (supplied with the '
+                           'request)' if _noz_form else
+                           'divergence and friction of the reference cone'),
+                'includes_two_phase_loss': (None if _noz_form else False),
+                'basis': (
+                    'Supplied with the request (the page sends its nozzle '
+                    'efficiency field on every run); it replaces the '
+                    'propellant-table value. The solver does not know which '
+                    'losses a supplied value covers. A supplied value is '
+                    'taken to be a delivered efficiency that already covers '
+                    'the two-phase loss, so the built-in two-phase estimate '
+                    'is not applied on top of it; supplying a two-phase loss '
+                    'factor applies that factor.'
+                    if _noz_form else
+                    'HRMA propellant-table value for the 15 deg reference '
+                    'cone. It corresponds to the zero-condensed-oxide '
+                    'intercept of NASA SP-8039 (1971) Fig. 8, read as about '
+                    '0.979; the two-phase loss is the separate, '
+                    'oxide-dependent drop of the same figure and is not '
+                    'part of it. Checked together with the two-phase '
+                    'estimate against six 32 kg BATES firings of '
+                    'NASA-CR-158815: mean measured nozzle efficiency 0.945 '
+                    'versus 0.943 from 0.985 x (1 - two-phase loss).'),
+            },
+            'two_phase_loss': {
+                'applied_to_isp': bool(_tp_kullanici or _tp_modul_uyg),
+                'applied_source': ('user_input' if _tp_kullanici else
+                                   'module_estimate' if _tp_modul_uyg
+                                   else None),
+                'applied_loss_percent': (
+                    float(100.0 * (1.0 - float(getattr(
+                        self, 'two_phase_efficiency', 1.0))))
+                    if _tp_kullanici else
+                    float(_tp_modul_uyg['loss_percent'])
+                    if _tp_modul_uyg else None),
+                'applied_loss_band_percent': (
+                    list(_tp_modul_uyg['band_percent'])
+                    if (_tp_modul_uyg and not _tp_kullanici
+                        and _tp_modul_uyg.get('band_percent')) else None),
+                'not_applied_reason': ('request_efficiency_supplied'
+                                       if _tp_tutulan else None),
+                'not_applied_estimate_percent': (
+                    float(_tp_tutulan['loss_percent'])
+                    if _tp_tutulan else None),
+                'calculable': bool(isinstance(_tp_kayip, (int, float))),
+                'status': _tp_status,
+                'condensed_mass_fraction': _tp_x,
+                'published_window': (list(_tp_pencere)
+                                     if _tp_pencere else None),
+                'published_window_source': _tp_pencere_kaynak,
+                'module_loss_percent': (
+                    float(_tp_kayip)
+                    if isinstance(_tp_kayip, (int, float)) else None),
+                'basis': (
+                    'A user two-phase efficiency was supplied and is applied '
+                    'to the thrust coefficient; it replaces the built-in '
+                    'estimate (the two are never multiplied).'
+                    if _tp_kullanici else
+                    'INCLUDED: the size-corrected two-phase (particle-lag) '
+                    'loss estimate is applied to the thrust coefficient, so '
+                    'the published Isp, thrust and total impulse carry it. '
+                    'Source: NASA SP-8039 (1971) Fig. 8 anchors; cross-checked '
+                    'against six BATES firings of NASA-CR-158815. An '
+                    'engineering estimate, not a verified value for this '
+                    'propellant.' if _tp_modul_uyg else
+                    'NOT APPLIED: a nozzle or kinetic efficiency was supplied '
+                    'with the request. A supplied efficiency is taken to be '
+                    'a delivered value that already covers the two-phase '
+                    'loss, so the built-in estimate is not applied on top of '
+                    'it (the loss would be counted twice). Supply a '
+                    'two-phase loss factor to apply one explicitly, or leave '
+                    'the nozzle and kinetic efficiency empty to use the '
+                    'built-in estimate.' if _tp_tutulan else
+                    'NOT INCLUDED and NOT CALCULABLE for this propellant '
+                    'class: its condensed-phase mass fraction lies outside '
+                    'the range of the published correlation, so no loss '
+                    'number exists. This is not a zero loss - the delivered '
+                    'Isp, thrust and total impulse will be lower than the '
+                    'values published here.' if _tp_pencere_disi else
+                    'NOT INCLUDED and NOT CALCULABLE for this motor: an '
+                    'input of the published correlation is outside its '
+                    'range (for example a throat below 25.4 mm), so no loss '
+                    'number exists. This is not a zero loss - the delivered '
+                    'Isp, thrust and total impulse will be lower than the '
+                    'values published here.'
+                    if (isinstance(_tp_x, (int, float)) and float(_tp_x) > 0.0
+                        and not isinstance(_tp_kayip, (int, float))) else
+                    'Not required: this propellant has no condensed phase '
+                    'in its exhaust.'
+                    if (isinstance(_tp_x, (int, float)) and float(_tp_x) == 0.0)
+                    else
+                    'NOT INCLUDED: no condensed-phase fraction is known for '
+                    'this propellant, so the two-phase nozzle loss cannot be '
+                    'estimated.'),
+            },
+        }
+        if (_tp_pencere_disi and not _tp_kullanici
+                and isinstance(_tp_x, (int, float)) and _tp_pencere):
+            all_warnings.append(dict(_w(
+                'warn.solid.delivered_isp_excludes_two_phase_loss', 'warning',
+                condensed_percent=round(100.0 * float(_tp_x), 1),
+                window_low_percent=round(100.0 * float(_tp_pencere[0]), 1),
+                window_high_percent=round(100.0 * float(_tp_pencere[1]), 1)),
+                fallback=(
+                    'The specific impulse, thrust and total impulse shown '
+                    'here do NOT include the two-phase (condensed-particle) '
+                    'nozzle loss, and for this propellant class that loss '
+                    'cannot be calculated: {condensed_percent} % of the '
+                    'exhaust is condensed, outside the '
+                    '{window_low_percent}-{window_high_percent} % range of '
+                    'the published correlation. This does not mean the loss '
+                    'is zero - a real motor will deliver less than these '
+                    'values. The combustion efficiency is also the assumed '
+                    'default unless you entered one.')))
 
         # 2) Kamara akustik modları. Katıda enjektör yok: chug marjı yerine
         #    yalnız mod tablosu + tehlike bandı, uygulanabilirlik beyanıyla.

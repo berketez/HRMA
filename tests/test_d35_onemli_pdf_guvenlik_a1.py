@@ -36,6 +36,10 @@ PDFTOTEXT = '/opt/homebrew/bin/pdftotext'
 #: ``/calculate`` yanıtının ``motor`` sözlüğü bu yolları taşıyor).
 HIBRIT_MOTOR_DATA = {
     'chamber_pressure': 30.0,
+    # V307/GÜVERTE-ISIL kalem 4: oda sıcaklığı zorunlu (uçta ve PDF
+    # güvenlik bölümünde; 3000 K varsayılanı kalktı). Eski örtük değer
+    # açık yazıldı: sayılar bit-aynı.
+    'chamber_temperature': 3000.0,
     'chamber_diameter': 0.12990938145592826,
     'propellant_mass': 13.59674741958306,
     'chamber_wall_policy': {'wall_thickness_m': 0.024847193113908518},
@@ -47,6 +51,7 @@ HIBRIT_MOTOR_DATA = {
 #: bir itici sınıfı yok.
 KIMLIKSIZ_MOTOR_DATA = {
     'chamber_pressure': 30.0,
+    'chamber_temperature': 3000.0,   # V307/GÜVERTE-ISIL kalem 4 (yukarıda)
     'chamber_diameter': 0.12990938145592826,
     'propellant_mass': 13.59674741958306,
     'chamber_wall_policy': {'wall_thickness_m': 0.024847193113908518},
@@ -67,6 +72,7 @@ def _uc_patlayici(istemci, **kimlik):
         'wall_thickness': HIBRIT_MOTOR_DATA[
             'chamber_wall_policy']['wall_thickness_m'],
         'propellant_mass': HIBRIT_MOTOR_DATA['propellant_mass'],
+        'chamber_temperature': HIBRIT_MOTOR_DATA['chamber_temperature'],
     }
     govde.update(kimlik)
     yanit = istemci.post('/analyze_safety', json=govde)
@@ -362,6 +368,7 @@ class TestOHON07BasamakKurali:
 #: sıvı motorun patlayıcı eksenini "kimlik çözülemedi" diye geri çekiyordu.
 SIVI_MOTOR_DATA = {
     'chamber_pressure': 70.0,
+    'chamber_temperature': 3000.0,   # V307/GÜVERTE-ISIL kalem 4 (yukarıda)
     'chamber_diameter': 0.10944,
     'propellant_mass': 40.0,
     'chamber_wall_policy': {'wall_thickness_m': 0.005},

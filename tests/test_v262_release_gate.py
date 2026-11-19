@@ -768,10 +768,21 @@ class TestInputGuardCagriEnvanteri:
     # ``n_channels``, ``input_guard.num`` ``motor_data`` sayı alanları ve
     # ``carbon_deposit_context.mixture_ratio``. Sayı olmayan / sonsuz değer
     # adıyla reddedilir (alan yolu iletide), sessiz varsayılan yok.
-    TABAN_DEGER = 58
+    # V307/FS-HARİTA-VERİ faz 2 (16 Kas): taban 58 -> 64 (``app.py`` 44 -> 50).
+    # Sınıfın KENDİ yönergesi: kapsam büyüdü, ölçülen değere çekildi (gevşetme
+    # değil). EKLENEN ALTI ÇAĞRI ÖLÇÜLDÜ (bu sınıfın AST envanteri; taban
+    # 9dd10f531'de 58): ``hrma/app.py`` ``map_packs_labels`` —
+    # ``/api/map-packs/labels`` sorgusunun ``lang`` (``input_guard.choice``,
+    # yalnız tr/en), ``z`` (``input_guard.integer``, 0-15) ve ``bbox``'ın dört
+    # bileşeni (``input_guard.num``, boylam ±180 / enlem ±90, sonlu). Liste
+    # dışı / sayı olmayan / aralık dışı değer adıyla 400 (``invalid_input``).
+    # V307/ÇALKANTI-ARAYÜZ (16 Kas, ölçüldü): 64 -> 67, app.py 50 -> 53 —
+    # tank geometrisi yükleme ucu (birim choice + burun yönü text) ve
+    # aktarım tablosu ucu (tank_id/bicim choice) değer kapısına bağlandı.
+    TABAN_DEGER = 67
     TABAN_DEGER_DOSYA = {'hrma/engines/hybrid_rocket_engine.py': 7,
                          'hrma/utils/common_fixes.py': 7,
-                         'hrma/app.py': 44}
+                         'hrma/app.py': 53}
     TABAN_AD = 23
     TABAN_AD_DOSYALARI = {'hrma/app.py',
                           'hrma/export/step_export.py',

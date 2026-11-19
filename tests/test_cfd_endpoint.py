@@ -410,7 +410,9 @@ class TestZorunluAlanlar:
         # varsayılan üretmek uydurmadır.
         assert 'ambient' in gerekce
         assert 'separation' in gerekce
-        assert 'fabricated' in gerekce or 'invent' in gerekce
+        # V307/DİL-SUNUCU: 'fabricated input' -> 'would substitute an input
+        # you did not give' (yalın cümle; kilit aynı: varsayılan konmaz).
+        assert 'substitute an input you did not give' in gerekce
 
     def test_bos_dize_de_eksik_sayilir(self, client):
         """Panel boş form alanını '' olarak gönderirse de 422 gelmeli."""

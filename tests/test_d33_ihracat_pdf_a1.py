@@ -67,6 +67,10 @@ class TestOHD3317OksitleyiciTekKaynak:
         g = {'motor_type': motor_type,
              'propellant_type': 'composite',
              'chamber_pressure': 20.0,
+             # V307/GÜVERTE-ISIL kalem 4: oda sıcaklığı zorunlu (uçta ve PDF
+             # güvenlik bölümünde; 3000 K varsayılanı kalktı). Eski örtük değer
+             # açık yazıldı: sayılar bit-aynı.
+             'chamber_temperature': 3000.0,
              'propellant_mass': 5.0,
              'chamber_diameter': 0.1,
              'wall_thickness': 0.005,

@@ -287,7 +287,10 @@ def test_k9_guvenlik_ucu_sivi_form_araligini_okur(client):
     from hrma.engines.liquid_rocket_engine import BURN_TIME_MAX_S
     temel = {'motor_type': 'liquid', 'chamber_pressure': 66.5,
              'propellant_mass': 376938.0, 'chamber_diameter': 1.0,
-             'wall_thickness': 0.02}
+             'wall_thickness': 0.02,
+             # V307/GÜVERTE-ISIL kalem 4: oda sıcaklığı zorunlu (3000 K varsayılanı
+             # kalktı); eski örtük değer açık yazıldı, sayılar bit-aynı.
+             'chamber_temperature': 3000.0}
     # F-1 ölçeği (7,7 MN) ve RL10 süresi (700 s) artık adlı 422 değil
     for itki, sure in ((7.7e6, 160.0), (9.0e4, 700.0)):
         r = client.post('/analyze_safety', headers=HEADERS,

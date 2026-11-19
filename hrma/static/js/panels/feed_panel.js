@@ -130,7 +130,7 @@
                     + 'the product'))
             + '  ·  ' + U.esc(String(z.radius_band_status)),
             T('panel.feed.szBandTip',
-              'This status string is the declaration made by the endpoint; '
+              'This status string is the declaration made by the calculation; '
               + 'the panel does not classify it')]);
         rows.push([
             T('panel.feed.szGate', 'Radius gate applied to this run'),
@@ -155,7 +155,7 @@
                 U.esc(String(z.missing_input_for_bond_number))]);
         }
         let html = U.sectionTitle(T('panel.feed.secSizeEnvelope',
-            'Size envelope — what the endpoint could and could NOT judge'))
+            'Size envelope — what the calculation could and could NOT judge'))
             + U.kvTable(rows);
         if (z.basis) {
             html += duzyaziBlok(T('panel.feed.szBasis',
@@ -322,9 +322,11 @@
                 ? data.confidence : null);
         if (c === null) return '';
         const metin = (typeof c === 'object') ? JSON.stringify(c) : String(c);
-        return U.kvTable([['confidence',
+        // V307/DİL-EKRAN (DİL-HİBRİT O6): satır etiketi kullanıcı dilinde;
+        // makine adı ipucunda (kvTable üçüncü sütunu = title).
+        return U.kvTable([[T('panel.feed.lblConfidence', 'Confidence'),
             '<span style="font-family:var(--hd-mono); font-size:0.75rem;">'
-            + U.esc(metin) + '</span>']]);
+            + U.esc(metin) + '</span>', 'confidence']]);
     }
 
     /* ÖH D28 / arayuz a1 (OH-D27-16) — KÜTLEYİ ÖLÇEKLEYEN VARSAYIM EKRANDA.
@@ -1023,8 +1025,8 @@
             const f = tab.fields.filter(function (x) { return x[0] === zorunlu[1]; })[0];
             const etiket = f ? T(f[4], f[1]) : zorunlu[1];
             return U.tf('panel.feed.requiredEmpty', { field: etiket },
-                'Required field is empty: {field}. The endpoint rejected the '
-                + 'request; nothing was computed.');
+                'Required field is empty: {field}. The request was refused; '
+                + 'nothing was computed.');
         }
         const cumle = (/^[a-z][a-z0-9_]*$/.test(ham) && govde.message)
             ? String(govde.message) : ham;
@@ -1183,6 +1185,14 @@
             });
             applyTabSuggestions(tab, pane);
         });
+        // 3.0.7 (V307/ÇALKANTI-ARAYÜZ, K5): tank çalkantı modeli bölümü
+        // Çalkantı sekmesinin altına (calkanti_panel.js); katı motorda sekme
+        // yok, bölümün başına tek satır "çalkantı uygulanmaz".
+        if (window.HRMACalkanti) {
+            const sp = root.querySelector('.feed-pane[data-pane="slosh"]');
+            if (sp) window.HRMACalkanti.mount(sp);
+            else if (window.AnalysisDock.getMotorType() === 'solid') window.HRMACalkanti.mountSolid(root);
+        }
         return true;
     }
 
@@ -1244,6 +1254,8 @@
         // sekmeler burada yeniden tohumlanır (dock alanı yok: {} döner).
         fromResults: function () {
             try { applyAllTabSuggestions(); } catch (e) { /* tohum yoksa alan boş kalır */ }
+            // 3.0.7 (K5): yeni motor sonucu → eski tank modeli sonucu bayat.
+            try { if (window.HRMACalkanti) window.HRMACalkanti.motorDegisti(); } catch (e) { /* bölüm yok */ }
             return {};
         },
         render: function () { mountFeedTools(); },

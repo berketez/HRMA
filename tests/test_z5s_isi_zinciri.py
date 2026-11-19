@@ -336,7 +336,13 @@ class TestBogazTekTanim:
 # ======================================================================
 class TestSogutmaTipiKapisi:
 
-    DESTEKSIZ = ['film', 'ablative', 'radiation', 'kırmızı balık', 'none']
+    # V307/SEKME-GÜVERTE (NK3-S-3, 16 Kas): 'ablative' bu listeden çıktı —
+    # artık ADLI bir yolla değerlendiriliyor (astar + çıplak cidar sınırı,
+    # dış yüz modeli beyanlı, soğutma bütçesi yayımlanmaz); sessizce doğal
+    # taşınıma düşmüyor. Davranışı aşağıdaki
+    # ``test_ablatif_adli_yolla_ya_da_adli_retle`` ve
+    # tests/test_v307_sekme_guverte.py kilitler.
+    DESTEKSIZ = ['film', 'radiation', 'kırmızı balık', 'none']
 
     def test_beyaz_liste_TEK_kaynak(self):
         """Eşik listesi modülde; uç onu kopyalamaz, okur."""
@@ -363,6 +369,27 @@ class TestSogutmaTipiKapisi:
         # Fail-closed: hiçbir hüküm/profil üretilmedi.
         assert 'thermal_analysis' not in govde
         assert 'wall_profile' not in govde
+
+    def test_ablatif_adli_yolla_ya_da_adli_retle(self, client):
+        """Ablatif: astarsız istek ADLI retle (hüküm yok); duvar profili
+        çıplak cidar sınırıdır ve dış yüz modelini adıyla söyler."""
+        from hrma.analysis.heat_transfer_analysis import (
+            BARE_WALL_BOUND_OUTER_COOLING, LINER_PROTECTED_COOLING_TYPES)
+        assert 'ablative' in LINER_PROTECTED_COOLING_TYPES
+        assert not is_supported_cooling_type('ablative')
+        r = _sessiz(client.post, '/analyze_thermal_safety',
+                    json=dict(PK5_TAM_GOVDE, cooling_type='ablative'))
+        assert r.status_code == 422, _govde_metni(r)[:300]
+        govde = r.get_json()
+        (kayit,) = govde['invalid_fields']
+        assert kayit['reason'] == 'ablative_cooling_requires_liner'
+        assert 'thermal_analysis' not in govde
+        r = _sessiz(client.post, '/api/analysis/wall-profile',
+                    json=dict(PK5_TAM_GOVDE, cooling_type='ablative'))
+        assert r.status_code == 200, _govde_metni(r)[:300]
+        govde = r.get_json()
+        assert govde['motor_cooling_type'] == 'ablative'
+        assert govde['bare_wall_outer_cooling'] == BARE_WALL_BOUND_OUTER_COOLING
 
     @pytest.mark.parametrize('tip', ['natural', 'forced', 'regenerative'])
     def test_taninan_tip_hala_hukum_uretir(self, client, tip):

@@ -105,6 +105,7 @@ HEAT_SINK_INPUT = {
     'burn_time_s': 10.0,
     'wall_thickness_m': 0.005,
     'wall_material': 'steel',
+    'T_initial_K': 300.0,   # V307/KÜÇÜKLER kalem 5: T_initial_K ısı kuyusunda zorunlu; eski örtük değer (300) açık yazıldı.
 }
 
 HEAT_SINK_KEYS = (
@@ -423,6 +424,7 @@ class TestHeatSinkContract:
             'mode': 'heat_sink', 'h_gas_W_m2K': 200.0, 'T_recovery_K': 900.0,
             'burn_time_s': 3.0, 'wall_thickness_m': 0.01,
             'wall_material': 'copper',
+            'T_initial_K': 300.0,   # V307/KÜÇÜKLER kalem 5: zorunlu; eski örtük değer
         })
         assert body['exceeds_limit'] is False
         assert body['time_to_limit_s'] is None

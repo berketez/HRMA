@@ -219,14 +219,20 @@ def test_turkce_yuzde_imi_hep_onek():
 
 
 def test_dock_diff_basis_yuzde_oneki_ve_yer_tutucu():
-    """Onarılan tekil kalem: ölçü hem düzeni hem yer tutucuyu kilitler."""
+    """Onarılan tekil kalem: ölçü hem düzeni hem yer tutucuyu kilitler.
+
+    V307/ŞERİT-GÜRÜLTÜ: ``dock.diff.basis`` (göreli eşik cümlesi) şeridin
+    genel farkla birlikte kalktı; şeridin yüzdesini artık ``dock.diff.pct``
+    basar. Aynı kilit oraya taşındı: TR önek düzeni + iki dilde aynı yer
+    tutucu."""
     tr = sozluk(JS / 'i18n_common.js', 'tr')
     en = sozluk(JS / 'i18n_common.js', 'en')
-    deger = tr['dock.diff.basis']
-    assert '%{pct}' in deger, 'TDK önek düzeni kayboldu: %r' % deger
+    assert 'dock.diff.basis' not in tr and 'dock.diff.basis' not in en
+    deger = tr['dock.diff.pct']
+    assert deger.startswith('%{v}'), 'TDK önek düzeni kayboldu: %r' % deger
     # Yer tutucu kümesi iki dilde AYNI kalmalı — çeviri sayı uyduramaz.
     assert (set(re.findall(r'\{(\w+)\}', deger))
-            == set(re.findall(r'\{(\w+)\}', en['dock.diff.basis'])))
+            == set(re.findall(r'\{(\w+)\}', en['dock.diff.pct'])))
 
 
 # ---------------------------------------------------------------------------
@@ -321,7 +327,11 @@ def test_sozluk_hicbir_ceviri_kuralini_golgelemiyor(liste):
 # ---------------------------------------------------------------------------
 #: Şablonun tek dinamik anahtar kurulumu (launch_site.html:549):
 #: `t('site.src.' + src, src)` — bu aile ADIYLA aranamaz, önekle korunur.
-_DINAMIK_ONEKLER = ('site.src.',)
+#: V307/FS-HARİTA-KÜRE: harita paketi adları (`site.mapPackName.<id>`)
+#: SUNUCUNUN paket listesindeki `name_key` alanından gelir (uç sözleşmesi);
+#: panel anahtarı kendisi kurmaz, listeden okur. Önek yalnız listede gerçekten
+#: bulunan kimlikler için canlıdır (aşağıdaki canlılık sınavı).
+_DINAMIK_ONEKLER = ('site.src.', 'site.mapPackName.')
 
 
 def test_launch_site_sozlugunde_olu_anahtar_yok():
@@ -341,6 +351,10 @@ def test_launch_site_sozlugunde_olu_anahtar_yok():
     # Tüketici yüzeyi: launch_site ile ilgili şablon + JS.
     tuketiciler = [TPL / 'launch_site.html',
                    JS / 'launch_site_globe.js',
+                   # V307/FS-İZLEME: görev izleme ekranı (site.track* anahtarları)
+                   JS / 'launch_site_tracking.js',
+                   # V307/FS-HARİTA-KÜRE: "Harita paketleri" paneli (site.mapPack* anahtarları)
+                   JS / 'launch_site_map_packs.js',
                    JS / 'user_guide.js']
     govde = '\n'.join(_oku(p) for p in tuketiciler if p.exists())
     olu = [k for k in sorted(en)
@@ -362,6 +376,18 @@ def test_launch_site_dinamik_onek_gercekten_kullaniliyor():
     en = sozluk(JS / 'i18n_launch_site.js', 'en')
     aile = [k for k in en if k.startswith('site.src.')]
     assert len(aile) >= 3, 'site.src.* ailesi beklenmedik biçimde küçüldü: %s' % aile
+    # V307/FS-HARİTA-KÜRE: 'site.mapPackName.' önekindeki her anahtar,
+    # uygulamayla gelen paket listesinde bir paketin name_key'idir (ölü ad yok)
+    # ve listedeki her paketin adı sözlükte vardır.
+    import json as _json
+    liste = _json.loads(_oku(REPO / 'hrma' / 'static' / 'map' / 'harita_paketleri.json'))
+    adlar = {p['name_key'] for p in liste['packs']}
+    paket_aile = {k for k in en if k.startswith('site.mapPackName.')}
+    assert paket_aile == adlar, (
+        'site.mapPackName.* ailesi paket listesiyle ayrıştı: yalnız sözlükte %s / yalnız listede %s'
+        % (sorted(paket_aile - adlar), sorted(adlar - paket_aile)))
+    assert "p.name_key" in _oku(JS / 'launch_site_map_packs.js'), (
+        'panel paket adını artık listedeki name_key alanından okumuyor — muafiyet gerekçesi düştü')
 
 
 def test_launch_site_en_tr_paritesi():
@@ -501,12 +527,14 @@ REGEN_UYARILARI = [
     "NOTE: Jackson wall-side property ratios evaluated at the methane EOS temperature limit (625 K) at 5 station(s) — the coolant-side coefficient there is an extrapolation (wall-limit warnings apply independently).",
 ]
 
-#: structural_analysis.py:2057-2084 dört gerekçe dalı (OH-Z4-04).
+#: structural_analysis.py dört gerekçe dalı (OH-Z4-04). V307 DİL-SON:
+#: sunucu alan adı ve istasyon anahtarı yerine okunur İngilizce ad basar
+#: (STRUCTURAL_STATION_NAMES_EN); örnekler bugünkü cümle biçimidir.
 HUKUM_GEREKCELERI = [
-    "No acceptance is issued and no verdict is issued at all: every safety factor in this response (chamber_hoop, end_cap, nozzle_throat) is the design target read back - HRMA sized those sections to meet the target, so the number cannot fall below it and carries no information about a wall you built. Supply the real wall / throat / head thickness to earn a verdict; the target itself is graded in design_target_assessment.",
-    "No acceptance is issued: the measured sections (chamber_hoop) would pass, but end_cap, nozzle_throat were sized by HRMA and therefore not verified. An acceptance that does not cover every station is not an acceptance. The measured-scope result is published separately in measured_scope_status.",
-    "The verdict comes from verdict_safety_factor, the lowest safety factor actually measured on a drawn wall (chamber_hoop, end_cap). This is a measured warning and is never suppressed. Sections not verified: nozzle_throat; of those, nozzle_throat only read the design target back.",
-    "Every station in the basket was evaluated against a user-supplied thickness (chamber_hoop, end_cap, nozzle_throat), so the verdict is an independent verification drawn from verdict_safety_factor.",
+    "No acceptance is issued and no verdict is issued at all: every safety factor in this response (chamber hoop stress, end cap, nozzle) is the design target read back - HRMA sized those sections to meet the target, so the number cannot fall below it and carries no information about a wall you built. Supply the real wall / throat / head thickness to earn a verdict; the target itself is graded separately (sections HRMA sized, design target read back).",
+    "No acceptance is issued: the measured sections (chamber hoop stress) would pass, but end cap, nozzle were sized by HRMA and therefore not verified. An acceptance that does not cover every station is not an acceptance. The measured-scope result is published separately (measured-scope status).",
+    "The verdict comes from the safety factor behind the verdict: the lowest safety factor actually measured on a drawn wall (chamber hoop stress, end cap). This is a measured warning and is never suppressed. Sections not verified: nozzle; of those, nozzle only read the design target back.",
+    "Every station in the basket was evaluated against a user-supplied thickness (chamber hoop stress, end cap, nozzle), so the verdict is an independent verification drawn from the safety factor behind the verdict.",
 ]
 
 
@@ -569,17 +597,28 @@ def test_yapisal_hukum_gerekceleri_turkceye_geciyor(tmp_path):
         'Yapısal hüküm gerekçesi İngilizce kaldı:\n  %s'
         % '\n  '.join(cevrilmeyen))
     for r in sonuc:
-        for ad in ('chamber_hoop', 'end_cap', 'nozzle_throat',
-                   'verdict_safety_factor', 'design_target_assessment'):
+        # V307 DİL-SON: cümle artık makine adı taşımaz (girdi de çıktı da).
+        # Bu sürücüde sözlük (I18N.t) yok: istasyon adı Türkçeye eşlenemez,
+        # liste AYNEN taşınmalı (kaybolmamalı, yerine başka ad konmamalı).
+        # Sözlüklü TR ölçümü: tests/test_v307_dil_son.py.
+        for ad in ('verdict_safety_factor', 'design_target_assessment',
+                   'measured_scope_status', 'chamber_hoop', 'end_cap'):
+            assert ad not in r['in'] and ad not in r['out'], (ad, r['out'][:160])
+        for ad in ('chamber hoop stress', 'end cap', 'nozzle'):
             if ad in r['in']:
                 assert ad in r['out'], (
-                    'Makine adı %r çeviride kayboldu: %r' % (ad, r['out'][:120]))
+                    'İstasyon adı %r çeviride kayboldu: %r' % (ad, r['out'][:120]))
         # V301/T-ÇAPA-D: T-ÇAPA-C1 parti 3 (d6e71d17b; DİL-2 kök 7'nin eksik
         # dalı, test_v301_dil_ekran ham_anahtar[hybrid]) "ölçülen kapsamın
         # sonucu ayrı bir ALANDA yayımlanır" cümlesinde ham alan adını
         # (measured_scope_status) TR'de okunur adla basıyor; iki bekçi aynı
         # cümlede çelişiyordu. Ad kaybolmaz, okunur karşılığıyla durur.
-        if 'measured_scope_status' in r['in']:
+        # V307/DİL-EKRAN (KILAVUZ ÜB-3): 'verdict_safety_factor' alan adı TR
+        # cümlede okunur adla durur (T-ÇAPA-D'nin measured_scope_status emsali).
+        if 'safety factor behind the verdict' in r['in']:
+            assert 'emniyet katsayısı' in r['out'], (
+                'hükmün dayandığı katsayı çeviride adsız kaldı: %r' % r['out'][:160])
+        if 'measured-scope status' in r['in']:
             assert 'ölçülen kapsam durumu' in r['out'], (
                 'measured_scope_status çeviride adsız kaldı: %r'
                 % r['out'][:160])

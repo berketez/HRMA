@@ -33,9 +33,24 @@ makensis -DVERSION=X.Y.Z hrma.nsi  # HRMA-Setup-X.Y.Z.exe
 # 5) Yayın (sürüm bump → build → publish sırası):
 #    a) hrma/__init__.py içinde __version__ değerini yükselt
 #    b) Yukarıdaki 3. ve 4. adımlarla dmg + exe'yi yeni sürümle derle
-#    c) GitHub Release oluştur + README indirme linklerini güncelle:
+#    c) GitHub Release oluştur (README indirme bağlantılarını artık sürüm adı
+#       commit'i yazar — tools/surum_commit_uret.py; yayın betiği ağaca dokunmaz):
 bash publish_release.sh "Sürüm notları..."
 ```
+
+### Yayın treni betikleri (3.0.7'den itibaren depoda)
+
+| Betik | İş | Kullanım |
+|---|---|---|
+| `tools/surum_commit_uret.py` | Sürüm adı commit'inin dosyaları: `__version__`, `hrma/data/changelog.json`, `release_notes_vX.Y.Z.md`, `CHANGELOG.md`, README'nin 4 indirme satırı + `**HRMA vX.Y.Z**` (kapı 1/10'un aradığı her şey) | `python3 tools/surum_commit_uret.py --surum X.Y.Z --tarih AAAA-AA-GG --baslik "…" --surum-notu <taslak> --changelog <taslak> [--kuru]` |
+| `packaging/aday_uret.sh` | Bakım hattından aday dalı `aday/vX.Y.Z-rc.N` (kaynak eksi iç doküman dizinleri, ebeveyn `origin/main`, tek commit); denetim tutmazsa dal yok, çıkış 4 | `packaging/aday_uret.sh <rc-no> [kaynak] [--push [--ci]]` |
+| `packaging/paket/mac.sh` | `.app` + duman testi + DMG; önce kapı 2/10 ön denetimi | paket worktree'sinde, aday dalında: `bash packaging/paket/mac.sh` |
+| `packaging/paket/win.sh` | Windows payload + NSIS kurucusu (Mac üstünde); önce aynı ön denetim | `bash packaging/paket/win.sh` (`MAKENSIS=<yol>` isteğe bağlı) |
+
+Paket worktree'si AYRIK HEAD'de değil aday dalında durur:
+`git -C <paket-worktree> switch aday/vX.Y.Z-rc.N` (dalın üst akışını
+`aday_uret.sh --push` ayarlar). Ön denetim tutmazsa paket betikleri derlemeye
+başlamadan 8 ile çıkar; günlükler `dist/paket_gunluk/` (ya da `PAKET_GUNLUK`).
 
 ### Yayın sırası (3.0.6'dan itibaren: etiket yayınlanan commit'e açılır)
 

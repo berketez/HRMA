@@ -792,7 +792,7 @@ def solve_plane_strain_section(mesh: PlanarSectionMesh,
             f"en küçük {eps_basma:.6g} — hepsi basma). Kopma uzaması "
             "(strain_capability) bir ÇEKME kabiliyetidir; basma gerinimini "
             "ona bölmek farklı iki büyüklüğü oranlar. Basma kabiliyeti "
-            "modellenmiyor, bu yüzden sayı uydurulmaz (P8B2-08).")
+            "modellenmiyor, bu yüzden sayı yayımlanmaz (P8B2-08).")
     elif max_bore_tensile > 0.0:
         margin = float(strain_capability / max_bore_tensile)
     else:                                    # tam sıfır çekme
@@ -832,7 +832,7 @@ def solve_plane_strain_section(mesh: PlanarSectionMesh,
     if strain_capability is None:
         meta["strain_margin_durumu"] = (
             "HESAPLANMADI — kopma uzaması (strain_capability) verilmedi; "
-            "uydurma değer konmaz")
+            "yerine başka değer konmaz")
     elif margin_geri_cekme is not None:
         meta["strain_margin_durumu"] = margin_geri_cekme
     else:

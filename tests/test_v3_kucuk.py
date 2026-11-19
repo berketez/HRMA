@@ -315,7 +315,10 @@ class TestDockMotorSfHedefi:
         assert d['uc']['design_basis']['design_safety_factor_source'] == (
             'user_supplied')
         yol = 'motor.' + '.'.join(p for p in _HEDEF_YOLU[tur] if p != 'motor')
-        assert f'source: motor design target ({yol})' in d['metin']
+        # V307/DİL-EKRAN (KILAVUZ ÜB-3): kaynak adıyla beyan edilir; makine
+        # yolu kullanıcı metninde basılmaz.
+        assert 'source: motor design target' in d['metin']
+        assert yol not in d['metin']
         assert 'material database default' not in d['metin']
 
     def test_sivi_olculen_vaka(self, client, ornek_motorlar):

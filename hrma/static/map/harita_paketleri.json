@@ -1,0 +1,933 @@
+{
+ "schema": "hrma.map_packs/1",
+ "release_tag": "harita-paketleri-v1",
+ "note": "Files are published as assets of the HRMA GitHub release named by release_tag; the application downloads only the files listed here and verifies size and sha256 before use.",
+ "packs": [
+  {
+   "id": "ksc_lc39a",
+   "kind": "site",
+   "name_key": "site.mapPackName.ksc_lc39a",
+   "bbox": [
+    -81.627535,
+    27.710089,
+    -79.581065,
+    29.506711
+   ],
+   "zoom_max": 15,
+   "radius_km": 100.0,
+   "components": [
+    {
+     "kind": "vector",
+     "file": "hrma-harita-ksc_lc39a-v1.pmtiles",
+     "size_bytes": 164678968,
+     "sha256": "05a7f3913b3c3466508037a3d32b6cba321eab6abaf7ae3a434b5b036a63c4d8",
+     "license": "ODbL-1.0",
+     "attribution": "© OpenStreetMap contributors (ODbL 1.0); Protomaps Basemap schema; Natural Earth (public domain)"
+    },
+    {
+     "kind": "imagery",
+     "file": "hrma-goruntu-ksc_lc39a-v2.sqlite",
+     "size_bytes": 14725120,
+     "sha256": "8094aaae2710b4fc90c6f474753d4e7708cead6b7bd72659d0e0535e1af08fa1",
+     "license": "Copernicus-Sentinel-Data-Legal-Notice",
+     "attribution": "Contains modified Copernicus Sentinel data 2024, 2025, 2026",
+     "detail": {
+      "full_zoom_max": 11,
+      "rings": [
+       {
+        "radius_km": 50.0,
+        "zoom": 12
+       },
+       {
+        "radius_km": 25.0,
+        "zoom": 13
+       }
+      ]
+     },
+     "source": {
+      "collection": "sentinel-2-l2a (Copernicus Sentinel-2 Level-2A)",
+      "catalogue": "Element 84 Earth Search STAC; AWS Open Data bucket sentinel-cogs",
+      "zoom_min": 9,
+      "zoom_max": 13,
+      "acquisition_dates": [
+       "2024-03-20",
+       "2024-04-12",
+       "2024-12-03",
+       "2025-01-12",
+       "2025-02-26",
+       "2025-04-12",
+       "2025-04-14",
+       "2025-04-17",
+       "2025-11-13",
+       "2025-11-15",
+       "2025-11-18",
+       "2026-02-06"
+      ],
+      "scenes": [
+       "S2A_17RML_20240412_0_L2A",
+       "S2A_17RNL_20240320_0_L2A",
+       "S2A_17RNM_20240320_0_L2A",
+       "S2A_17RNN_20240320_0_L2A",
+       "S2A_17RPL_20240320_0_L2A",
+       "S2A_17RPM_20240320_0_L2A",
+       "S2B_17RML_20241203_0_L2A",
+       "S2B_17RML_20260206_0_L2A",
+       "S2B_17RMM_20241203_0_L2A",
+       "S2B_17RMM_20250112_0_L2A",
+       "S2B_17RMM_20260206_0_L2A",
+       "S2B_17RMN_20241203_0_L2A",
+       "S2B_17RMN_20250112_0_L2A",
+       "S2B_17RMN_20260206_0_L2A",
+       "S2B_17RNL_20251115_0_L2A",
+       "S2B_17RNL_20260206_0_L2A",
+       "S2B_17RNM_20241203_0_L2A",
+       "S2B_17RNM_20250412_0_L2A",
+       "S2B_17RNM_20251115_0_L2A",
+       "S2B_17RNM_20260206_0_L2A",
+       "S2B_17RNN_20241203_0_L2A",
+       "S2B_17RNN_20250112_0_L2A",
+       "S2B_17RNN_20251115_0_L2A",
+       "S2B_17RNN_20251118_0_L2A",
+       "S2B_17RNN_20260206_0_L2A",
+       "S2B_17RPL_20251115_0_L2A",
+       "S2B_17RPM_20251115_0_L2A",
+       "S2B_17RPN_20251115_0_L2A",
+       "S2C_17RNM_20250226_0_L2A",
+       "S2C_17RNM_20250417_0_L2A",
+       "S2C_17RNM_20251113_0_L2A",
+       "S2C_17RPN_20250414_0_L2A"
+      ],
+      "produced": "2026-11-16"
+     }
+    }
+   ],
+   "source": {
+    "build": "20261115.pmtiles",
+    "version": "4.15.2",
+    "osm_replication_time": "2026-11-15T04:00:00Z",
+    "etag": "\"7fec872c142562ded7dffae739e8f032-520\""
+   }
+  },
+  {
+   "id": "ccsfs_slc40",
+   "kind": "site",
+   "name_key": "site.mapPackName.ccsfs_slc40",
+   "bbox": [
+    -81.599983,
+    27.663589,
+    -79.554417,
+    29.460211
+   ],
+   "zoom_max": 15,
+   "radius_km": 100.0,
+   "components": [
+    {
+     "kind": "vector",
+     "file": "hrma-harita-ccsfs_slc40-v1.pmtiles",
+     "size_bytes": 164084667,
+     "sha256": "a3844194a06eb6b5c7592079c8251c7393d5edfd75e7c4908fb032e93244d43b",
+     "license": "ODbL-1.0",
+     "attribution": "© OpenStreetMap contributors (ODbL 1.0); Protomaps Basemap schema; Natural Earth (public domain)"
+    },
+    {
+     "kind": "imagery",
+     "file": "hrma-goruntu-ccsfs_slc40-v2.sqlite",
+     "size_bytes": 12718080,
+     "sha256": "04a68ea344ee4a039afaa24ebdf305e0103f8b00ba461feb68068c1b415ed4b7",
+     "license": "Copernicus-Sentinel-Data-Legal-Notice",
+     "attribution": "Contains modified Copernicus Sentinel data 2024, 2025, 2026",
+     "detail": {
+      "full_zoom_max": 11,
+      "rings": [
+       {
+        "radius_km": 50.0,
+        "zoom": 12
+       },
+       {
+        "radius_km": 25.0,
+        "zoom": 13
+       }
+      ]
+     },
+     "source": {
+      "collection": "sentinel-2-l2a (Copernicus Sentinel-2 Level-2A)",
+      "catalogue": "Element 84 Earth Search STAC; AWS Open Data bucket sentinel-cogs",
+      "zoom_min": 9,
+      "zoom_max": 13,
+      "acquisition_dates": [
+       "2024-03-20",
+       "2024-11-23",
+       "2025-01-04",
+       "2025-01-12",
+       "2025-04-12",
+       "2025-04-14",
+       "2025-04-17",
+       "2025-11-13",
+       "2025-11-15",
+       "2025-11-18",
+       "2026-02-06",
+       "2026-02-21"
+      ],
+      "scenes": [
+       "S2A_17RNL_20240320_0_L2A",
+       "S2A_17RNL_20250104_0_L2A",
+       "S2A_17RNM_20240320_0_L2A",
+       "S2A_17RNN_20240320_0_L2A",
+       "S2A_17RPL_20240320_0_L2A",
+       "S2A_17RPL_20250104_0_L2A",
+       "S2A_17RPM_20240320_0_L2A",
+       "S2A_17RPN_20240320_0_L2A",
+       "S2B_17RML_20241123_0_L2A",
+       "S2B_17RML_20250112_0_L2A",
+       "S2B_17RML_20260206_0_L2A",
+       "S2B_17RMM_20250112_0_L2A",
+       "S2B_17RMM_20251118_0_L2A",
+       "S2B_17RMM_20260206_0_L2A",
+       "S2B_17RMN_20250112_0_L2A",
+       "S2B_17RMN_20251118_0_L2A",
+       "S2B_17RMN_20260206_0_L2A",
+       "S2B_17RNL_20250112_0_L2A",
+       "S2B_17RNL_20251115_0_L2A",
+       "S2B_17RNM_20250112_0_L2A",
+       "S2B_17RNM_20250412_0_L2A",
+       "S2B_17RNM_20251115_0_L2A",
+       "S2B_17RNM_20260206_0_L2A",
+       "S2B_17RNN_20250112_0_L2A",
+       "S2B_17RNN_20251115_0_L2A",
+       "S2B_17RNN_20251118_0_L2A",
+       "S2B_17RNN_20260206_0_L2A",
+       "S2B_17RPM_20251115_0_L2A",
+       "S2B_17RPN_20251115_0_L2A",
+       "S2C_17RNM_20250417_0_L2A",
+       "S2C_17RNM_20251113_0_L2A",
+       "S2C_17RNM_20260221_0_L2A",
+       "S2C_17RPN_20250414_0_L2A"
+      ],
+      "produced": "2026-11-16"
+     }
+    }
+   ],
+   "source": {
+    "build": "20261115.pmtiles",
+    "version": "4.15.2",
+    "osm_replication_time": "2026-11-15T04:00:00Z",
+    "etag": "\"7fec872c142562ded7dffae739e8f032-520\""
+   }
+  },
+  {
+   "id": "vandenberg_slc4e",
+   "kind": "site",
+   "name_key": "site.mapPackName.vandenberg_slc4e",
+   "bbox": [
+    -121.702349,
+    33.733789,
+    -119.518851,
+    35.530411
+   ],
+   "zoom_max": 15,
+   "radius_km": 100.0,
+   "components": [
+    {
+     "kind": "vector",
+     "file": "hrma-harita-vandenberg_slc4e-v1.pmtiles",
+     "size_bytes": 37076350,
+     "sha256": "bb43f434349821221a721ab426b1337fc26d2f0dd6106db182a03a732fe12ca0",
+     "license": "ODbL-1.0",
+     "attribution": "© OpenStreetMap contributors (ODbL 1.0); Protomaps Basemap schema; Natural Earth (public domain)"
+    },
+    {
+     "kind": "imagery",
+     "file": "hrma-goruntu-vandenberg_slc4e-v2.sqlite",
+     "size_bytes": 14442496,
+     "sha256": "570e2cf05ab8d8cd64cbd67a1b9728ab3f0bb07f26b8d045b4a863b7548c648b",
+     "license": "Copernicus-Sentinel-Data-Legal-Notice",
+     "attribution": "Contains modified Copernicus Sentinel data 2024, 2025, 2026",
+     "detail": {
+      "full_zoom_max": 11,
+      "rings": [
+       {
+        "radius_km": 50.0,
+        "zoom": 12
+       },
+       {
+        "radius_km": 25.0,
+        "zoom": 13
+       }
+      ]
+     },
+     "source": {
+      "collection": "sentinel-2-l2a (Copernicus Sentinel-2 Level-2A)",
+      "catalogue": "Element 84 Earth Search STAC; AWS Open Data bucket sentinel-cogs",
+      "zoom_min": 9,
+      "zoom_max": 13,
+      "acquisition_dates": [
+       "2024-03-14",
+       "2024-04-10",
+       "2024-10-02",
+       "2024-10-22",
+       "2025-10-04",
+       "2026-03-11",
+       "2026-04-30"
+      ],
+      "scenes": [
+       "S2A_10SFD_20240314_0_L2A",
+       "S2A_10SFE_20240314_0_L2A",
+       "S2A_10SFE_20240410_0_L2A",
+       "S2A_10SGC_20240410_0_L2A",
+       "S2A_10SGC_20251004_0_L2A",
+       "S2A_10SGD_20240410_0_L2A",
+       "S2A_11SKT_20240410_0_L2A",
+       "S2B_10SFC_20241022_0_L2A",
+       "S2B_10SFD_20241002_0_L2A",
+       "S2B_10SFE_20241002_0_L2A",
+       "S2B_10SFE_20241022_1_L2A",
+       "S2B_10SGC_20241022_0_L2A",
+       "S2C_10SFC_20260311_0_L2A",
+       "S2C_10SFD_20260311_0_L2A",
+       "S2C_10SFD_20260430_0_L2A",
+       "S2C_10SFE_20260311_0_L2A",
+       "S2C_10SFE_20260430_0_L2A",
+       "S2C_10SGC_20260311_0_L2A",
+       "S2C_10SGD_20260311_0_L2A",
+       "S2C_10SGD_20260430_0_L2A",
+       "S2C_10SGE_20260311_0_L2A",
+       "S2C_10SGE_20260430_0_L2A",
+       "S2C_11SKT_20260311_0_L2A",
+       "S2C_11SKT_20260430_0_L2A",
+       "S2C_11SKU_20260311_0_L2A",
+       "S2C_11SKU_20260430_0_L2A",
+       "S2C_11SKV_20260311_0_L2A",
+       "S2C_11SKV_20260430_0_L2A"
+      ],
+      "produced": "2026-11-16"
+     }
+    }
+   ],
+   "source": {
+    "build": "20261115.pmtiles",
+    "version": "4.15.2",
+    "osm_replication_time": "2026-11-15T04:00:00Z",
+    "etag": "\"7fec872c142562ded7dffae739e8f032-520\""
+   }
+  },
+  {
+   "id": "wallops_0a",
+   "kind": "site",
+   "name_key": "site.mapPackName.wallops_0a",
+   "bbox": [
+    -76.625499,
+    36.935389,
+    -74.350701,
+    38.732011
+   ],
+   "zoom_max": 15,
+   "radius_km": 100.0,
+   "components": [
+    {
+     "kind": "vector",
+     "file": "hrma-harita-wallops_0a-v1.pmtiles",
+     "size_bytes": 78467502,
+     "sha256": "f5e63904d916492df43be14aeb4c6f2a1cd56f09dbd33265e402240f4fb327fa",
+     "license": "ODbL-1.0",
+     "attribution": "© OpenStreetMap contributors (ODbL 1.0); Protomaps Basemap schema; Natural Earth (public domain)"
+    },
+    {
+     "kind": "imagery",
+     "file": "hrma-goruntu-wallops_0a-v2.sqlite",
+     "size_bytes": 10715136,
+     "sha256": "79be5e6dcc40efa08b0021828e5614be96d9a54a928fd03662384b00296b0d5f",
+     "license": "Copernicus-Sentinel-Data-Legal-Notice",
+     "attribution": "Contains modified Copernicus Sentinel data 2024, 2025, 2026",
+     "detail": {
+      "full_zoom_max": 11,
+      "rings": [
+       {
+        "radius_km": 50.0,
+        "zoom": 12
+       },
+       {
+        "radius_km": 25.0,
+        "zoom": 13
+       }
+      ]
+     },
+     "source": {
+      "collection": "sentinel-2-l2a (Copernicus Sentinel-2 Level-2A)",
+      "catalogue": "Element 84 Earth Search STAC; AWS Open Data bucket sentinel-cogs",
+      "zoom_min": 9,
+      "zoom_max": 13,
+      "acquisition_dates": [
+       "2024-07-15",
+       "2024-10-06",
+       "2024-10-11",
+       "2024-10-13",
+       "2024-10-21",
+       "2024-10-31",
+       "2025-06-03",
+       "2025-07-08",
+       "2025-07-25",
+       "2026-10-26"
+      ],
+      "scenes": [
+       "S2A_18SUH_20250725_0_L2A",
+       "S2A_18SVF_20241006_0_L2A",
+       "S2A_18SVF_20241013_0_L2A",
+       "S2A_18SVG_20241013_0_L2A",
+       "S2A_18SVH_20241013_0_L2A",
+       "S2A_18SWF_20240715_0_L2A",
+       "S2A_18SWF_20241013_0_L2A",
+       "S2A_18SWG_20240715_0_L2A",
+       "S2A_18SWG_20241013_0_L2A",
+       "S2A_18SWH_20240715_0_L2A",
+       "S2A_18SWH_20241013_0_L2A",
+       "S2B_18SUF_20241011_0_L2A",
+       "S2B_18SUF_20250708_0_L2A",
+       "S2B_18SUG_20241011_0_L2A",
+       "S2B_18SUG_20241021_0_L2A",
+       "S2B_18SUG_20250708_0_L2A",
+       "S2B_18SUH_20241011_0_L2A",
+       "S2B_18SVF_20241011_0_L2A",
+       "S2B_18SVG_20241011_0_L2A",
+       "S2B_18SVH_20241011_0_L2A",
+       "S2B_18SVH_20241031_0_L2A",
+       "S2B_18SWH_20241011_0_L2A",
+       "S2C_18SUF_20261026_0_L2A",
+       "S2C_18SUG_20250603_0_L2A",
+       "S2C_18SUG_20261026_0_L2A",
+       "S2C_18SUH_20261026_0_L2A",
+       "S2C_18SVG_20261026_0_L2A",
+       "S2C_18SVH_20261026_0_L2A"
+      ],
+      "produced": "2026-11-16"
+     }
+    }
+   ],
+   "source": {
+    "build": "20261115.pmtiles",
+    "version": "4.15.2",
+    "osm_replication_time": "2026-11-15T04:00:00Z",
+    "etag": "\"7fec872c142562ded7dffae739e8f032-520\""
+   }
+  },
+  {
+   "id": "kourou_ela3",
+   "kind": "site",
+   "name_key": "site.mapPackName.kourou_ela3",
+   "bbox": [
+    -53.67038,
+    4.340689,
+    -51.86622,
+    6.137311
+   ],
+   "zoom_max": 15,
+   "radius_km": 100.0,
+   "components": [
+    {
+     "kind": "vector",
+     "file": "hrma-harita-kourou_ela3-v1.pmtiles",
+     "size_bytes": 14942912,
+     "sha256": "2512fa60c6463909b71a6e8c48be7561e652408255323dbf297c0eebe1f59b68",
+     "license": "ODbL-1.0",
+     "attribution": "© OpenStreetMap contributors (ODbL 1.0); Protomaps Basemap schema; Natural Earth (public domain)"
+    }
+   ],
+   "source": {
+    "build": "20261115.pmtiles",
+    "version": "4.15.2",
+    "osm_replication_time": "2026-11-15T04:00:00Z",
+    "etag": "\"7fec872c142562ded7dffae739e8f032-520\""
+   }
+  },
+  {
+   "id": "baikonur_1_5",
+   "kind": "site",
+   "name_key": "site.mapPackName.baikonur_1_5",
+   "bbox": [
+    62.050896,
+    45.021689,
+    64.633504,
+    46.818311
+   ],
+   "zoom_max": 15,
+   "radius_km": 100.0,
+   "components": [
+    {
+     "kind": "vector",
+     "file": "hrma-harita-baikonur_1_5-v1.pmtiles",
+     "size_bytes": 6463509,
+     "sha256": "2972e0675aa5403f2cc35a4f9f8d74a0831bb154549ca0231e51dbe1cc5761a4",
+     "license": "ODbL-1.0",
+     "attribution": "© OpenStreetMap contributors (ODbL 1.0); Protomaps Basemap schema; Natural Earth (public domain)"
+    },
+    {
+     "kind": "imagery",
+     "file": "hrma-goruntu-baikonur_1_5-v2.sqlite",
+     "size_bytes": 31952896,
+     "sha256": "bab5a43916faff260faf4eef344e9443e04112648b27caa22265382b58c5a22f",
+     "license": "Copernicus-Sentinel-Data-Legal-Notice",
+     "attribution": "Contains modified Copernicus Sentinel data 2024, 2025, 2026",
+     "detail": {
+      "full_zoom_max": 11,
+      "rings": [
+       {
+        "radius_km": 50.0,
+        "zoom": 12
+       },
+       {
+        "radius_km": 25.0,
+        "zoom": 13
+       }
+      ]
+     },
+     "source": {
+      "collection": "sentinel-2-l2a (Copernicus Sentinel-2 Level-2A)",
+      "catalogue": "Element 84 Earth Search STAC; AWS Open Data bucket sentinel-cogs",
+      "zoom_min": 9,
+      "zoom_max": 13,
+      "acquisition_dates": [
+       "2024-06-13",
+       "2025-07-20",
+       "2025-08-12",
+       "2025-08-27",
+       "2026-08-10",
+       "2026-09-14"
+      ],
+      "scenes": [
+       "S2A_41TMK_20250812_1_L2A",
+       "S2A_41TML_20250812_1_L2A",
+       "S2A_41TMM_20250812_1_L2A",
+       "S2A_41TNK_20250812_1_L2A",
+       "S2A_41TNL_20250720_0_L2A",
+       "S2A_41TNL_20250812_1_L2A",
+       "S2A_41TNM_20250720_0_L2A",
+       "S2A_41TNM_20250812_1_L2A",
+       "S2A_41TPK_20240613_0_L2A",
+       "S2A_41TPL_20250720_1_L2A",
+       "S2A_41TPM_20250812_1_L2A",
+       "S2B_41TML_20260810_0_L2A",
+       "S2B_41TMM_20260810_0_L2A",
+       "S2B_41TNL_20260810_0_L2A",
+       "S2B_41TNM_20260810_0_L2A",
+       "S2C_41TMK_20250827_0_L2A",
+       "S2C_41TML_20250827_0_L2A",
+       "S2C_41TMM_20260914_0_L2A",
+       "S2C_41TNK_20250827_0_L2A",
+       "S2C_41TNL_20250827_0_L2A",
+       "S2C_41TNM_20250827_0_L2A",
+       "S2C_41TPK_20250827_0_L2A",
+       "S2C_41TPL_20250827_0_L2A",
+       "S2C_41TPM_20250827_0_L2A"
+      ],
+      "produced": "2026-11-17"
+     }
+    }
+   ],
+   "source": {
+    "build": "20261115.pmtiles",
+    "version": "4.15.2",
+    "osm_replication_time": "2026-11-15T04:00:00Z",
+    "etag": "\"7fec872c142562ded7dffae739e8f032-520\""
+   }
+  },
+  {
+   "id": "esrange",
+   "kind": "site",
+   "name_key": "site.mapPackName.esrange",
+   "bbox": [
+    18.717307,
+    66.994789,
+    23.491293,
+    68.791411
+   ],
+   "zoom_max": 15,
+   "radius_km": 100.0,
+   "components": [
+    {
+     "kind": "vector",
+     "file": "hrma-harita-esrange-v1.pmtiles",
+     "size_bytes": 233667200,
+     "sha256": "ea3ab3067d82041f3ba544f8459d7b592f4874cc59c1be17bcfd86e8b172f041",
+     "license": "ODbL-1.0",
+     "attribution": "© OpenStreetMap contributors (ODbL 1.0); Protomaps Basemap schema; Natural Earth (public domain)"
+    }
+   ],
+   "source": {
+    "build": "20261115.pmtiles",
+    "version": "4.15.2",
+    "osm_replication_time": "2026-11-15T04:00:00Z",
+    "etag": "\"7fec872c142562ded7dffae739e8f032-520\""
+   }
+  },
+  {
+   "id": "andoya",
+   "kind": "site",
+   "name_key": "site.mapPackName.andoya",
+   "bbox": [
+    13.48012,
+    68.395789,
+    18.56148,
+    70.192411
+   ],
+   "zoom_max": 15,
+   "radius_km": 100.0,
+   "components": [
+    {
+     "kind": "vector",
+     "file": "hrma-harita-andoya-v1.pmtiles",
+     "size_bytes": 127961506,
+     "sha256": "ab6be3bd5548faa37787bb890c807ed33f945b9810358aadd76c07447117778f",
+     "license": "ODbL-1.0",
+     "attribution": "© OpenStreetMap contributors (ODbL 1.0); Protomaps Basemap schema; Natural Earth (public domain)"
+    }
+   ],
+   "source": {
+    "build": "20261115.pmtiles",
+    "version": "4.15.2",
+    "osm_replication_time": "2026-11-15T04:00:00Z",
+    "etag": "\"7fec872c142562ded7dffae739e8f032-520\""
+   }
+  },
+  {
+   "id": "mahia_lc1",
+   "kind": "site",
+   "name_key": "site.mapPackName.mahia_lc1",
+   "bbox": [
+    176.704786,
+    -40.160011,
+    179.025214,
+    -38.363389
+   ],
+   "zoom_max": 15,
+   "radius_km": 100.0,
+   "components": [
+    {
+     "kind": "vector",
+     "file": "hrma-harita-mahia_lc1-v1.pmtiles",
+     "size_bytes": 30376927,
+     "sha256": "5350b5ea967a861d19f5df6745a9611c79c21ac1320ee506ca3403ff3c51974f",
+     "license": "ODbL-1.0",
+     "attribution": "© OpenStreetMap contributors (ODbL 1.0); Protomaps Basemap schema; Natural Earth (public domain)"
+    }
+   ],
+   "source": {
+    "build": "20261115.pmtiles",
+    "version": "4.15.2",
+    "osm_replication_time": "2026-11-15T04:00:00Z",
+    "etag": "\"7fec872c142562ded7dffae739e8f032-520\""
+   }
+  },
+  {
+   "id": "tanegashima",
+   "kind": "site",
+   "name_key": "site.mapPackName.tanegashima",
+   "bbox": [
+    129.928496,
+    29.501689,
+    132.011504,
+    31.298311
+   ],
+   "zoom_max": 15,
+   "radius_km": 100.0,
+   "components": [
+    {
+     "kind": "vector",
+     "file": "hrma-harita-tanegashima-v1.pmtiles",
+     "size_bytes": 9901143,
+     "sha256": "9cd3c4f147604d25ca3a3d259dc80a2e9b2f61d6e5305427b068aa0ac270bf21",
+     "license": "ODbL-1.0",
+     "attribution": "© OpenStreetMap contributors (ODbL 1.0); Protomaps Basemap schema; Natural Earth (public domain)"
+    }
+   ],
+   "source": {
+    "build": "20261115.pmtiles",
+    "version": "4.15.2",
+    "osm_replication_time": "2026-11-15T04:00:00Z",
+    "etag": "\"7fec872c142562ded7dffae739e8f032-520\""
+   }
+  },
+  {
+   "id": "sriharikota",
+   "kind": "site",
+   "name_key": "site.mapPackName.sriharikota",
+   "bbox": [
+    79.310253,
+    12.834689,
+    81.159747,
+    14.631311
+   ],
+   "zoom_max": 15,
+   "radius_km": 100.0,
+   "components": [
+    {
+     "kind": "vector",
+     "file": "hrma-harita-sriharikota-v1.pmtiles",
+     "size_bytes": 39549058,
+     "sha256": "5ded7847b978a15b467259051896e211f4127cdfe5761403f33d7e2994244379",
+     "license": "ODbL-1.0",
+     "attribution": "© OpenStreetMap contributors (ODbL 1.0); Protomaps Basemap schema; Natural Earth (public domain)"
+    }
+   ],
+   "source": {
+    "build": "20261115.pmtiles",
+    "version": "4.15.2",
+    "osm_replication_time": "2026-11-15T04:00:00Z",
+    "etag": "\"7fec872c142562ded7dffae739e8f032-520\""
+   }
+  },
+  {
+   "id": "jiuquan_43",
+   "kind": "site",
+   "name_key": "site.mapPackName.jiuquan_43",
+   "bbox": [
+    99.102178,
+    40.059989,
+    101.481222,
+    41.856611
+   ],
+   "zoom_max": 15,
+   "radius_km": 100.0,
+   "components": [
+    {
+     "kind": "vector",
+     "file": "hrma-harita-jiuquan_43-v1.pmtiles",
+     "size_bytes": 4271826,
+     "sha256": "348578212fb08cdf39e2015964cd87f60885b5e85981531c77bceeb608fe8765",
+     "license": "ODbL-1.0",
+     "attribution": "© OpenStreetMap contributors (ODbL 1.0); Protomaps Basemap schema; Natural Earth (public domain)"
+    }
+   ],
+   "source": {
+    "build": "20261115.pmtiles",
+    "version": "4.15.2",
+    "osm_replication_time": "2026-11-15T04:00:00Z",
+    "etag": "\"7fec872c142562ded7dffae739e8f032-520\""
+   }
+  },
+  {
+   "id": "sinop_tr",
+   "kind": "site",
+   "name_key": "site.mapPackName.sinop_tr",
+   "bbox": [
+    33.943864,
+    41.124789,
+    36.362336,
+    42.921411
+   ],
+   "zoom_max": 15,
+   "radius_km": 100.0,
+   "components": [
+    {
+     "kind": "vector",
+     "file": "hrma-harita-sinop_tr-v1.pmtiles",
+     "size_bytes": 34513554,
+     "sha256": "089675d8c8932af2a7d0a126cb9e15d0b726678b974c4eddc45c778f74fb660e",
+     "license": "ODbL-1.0",
+     "attribution": "© OpenStreetMap contributors (ODbL 1.0); Protomaps Basemap schema; Natural Earth (public domain)"
+    },
+    {
+     "kind": "imagery",
+     "file": "hrma-goruntu-sinop_tr-v2.sqlite",
+     "size_bytes": 15134720,
+     "sha256": "aa5f8d0dad64f35017dc81b792cf71d192d2a57052558fe73ca5e063217b1cf3",
+     "license": "Copernicus-Sentinel-Data-Legal-Notice",
+     "attribution": "Contains modified Copernicus Sentinel data 2024, 2025",
+     "detail": {
+      "full_zoom_max": 11,
+      "rings": [
+       {
+        "radius_km": 50.0,
+        "zoom": 12
+       },
+       {
+        "radius_km": 25.0,
+        "zoom": 13
+       }
+      ]
+     },
+     "source": {
+      "collection": "sentinel-2-l2a (Copernicus Sentinel-2 Level-2A)",
+      "catalogue": "Element 84 Earth Search STAC; AWS Open Data bucket sentinel-cogs",
+      "zoom_min": 9,
+      "zoom_max": 13,
+      "acquisition_dates": [
+       "2024-07-29",
+       "2024-08-13",
+       "2024-09-29",
+       "2025-06-26",
+       "2025-07-13"
+      ],
+      "scenes": [
+       "S2A_36TWN_20240729_0_L2A",
+       "S2A_36TXM_20250713_0_L2A",
+       "S2B_36TWL_20240813_0_L2A",
+       "S2B_36TWL_20240929_0_L2A",
+       "S2B_36TWL_20250626_1_L2A",
+       "S2B_36TWM_20240813_0_L2A",
+       "S2B_36TWM_20240929_0_L2A",
+       "S2B_36TWM_20250626_0_L2A",
+       "S2B_36TWN_20240813_0_L2A",
+       "S2B_36TWN_20250626_0_L2A",
+       "S2B_36TXL_20240813_0_L2A",
+       "S2B_36TXL_20240929_0_L2A",
+       "S2B_36TXL_20250626_1_L2A",
+       "S2B_36TXM_20240813_0_L2A",
+       "S2B_36TXM_20240929_0_L2A",
+       "S2B_36TXM_20250626_0_L2A",
+       "S2B_36TXN_20240813_0_L2A",
+       "S2B_36TXN_20250626_0_L2A",
+       "S2B_36TYL_20240929_0_L2A",
+       "S2B_36TYL_20250626_0_L2A",
+       "S2B_36TYM_20240929_0_L2A",
+       "S2B_36TYM_20250626_0_L2A",
+       "S2B_36TYN_20240929_0_L2A",
+       "S2B_36TYN_20250626_0_L2A",
+       "S2B_37TBF_20240929_0_L2A",
+       "S2B_37TBF_20250626_0_L2A",
+       "S2B_37TBG_20240929_0_L2A",
+       "S2B_37TBG_20250626_0_L2A"
+      ],
+      "produced": "2026-11-16"
+     }
+    }
+   ],
+   "source": {
+    "build": "20261115.pmtiles",
+    "version": "4.15.2",
+    "osm_replication_time": "2026-11-15T04:00:00Z",
+    "etag": "\"7fec872c142562ded7dffae739e8f032-520\""
+   }
+  },
+  {
+   "id": "konya_tr",
+   "kind": "site",
+   "name_key": "site.mapPackName.konya_tr",
+   "bbox": [
+    31.35517,
+    36.976289,
+    33.63123,
+    38.772911
+   ],
+   "zoom_max": 15,
+   "radius_km": 100.0,
+   "components": [
+    {
+     "kind": "vector",
+     "file": "hrma-harita-konya_tr-v1.pmtiles",
+     "size_bytes": 33738268,
+     "sha256": "3c199b17ced5ee97e07a030a51b8f135b56ea534c4304483bcf9caf483ebc5a3",
+     "license": "ODbL-1.0",
+     "attribution": "© OpenStreetMap contributors (ODbL 1.0); Protomaps Basemap schema; Natural Earth (public domain)"
+    },
+    {
+     "kind": "imagery",
+     "file": "hrma-goruntu-konya_tr-v2.sqlite",
+     "size_bytes": 44498944,
+     "sha256": "c473669e6ef3d467715b5499a6e602b21627aacb79c024de3752505fd5c8f974",
+     "license": "Copernicus-Sentinel-Data-Legal-Notice",
+     "attribution": "Contains modified Copernicus Sentinel data 2024, 2026",
+     "detail": {
+      "full_zoom_max": 11,
+      "rings": [
+       {
+        "radius_km": 50.0,
+        "zoom": 12
+       },
+       {
+        "radius_km": 25.0,
+        "zoom": 13
+       }
+      ]
+     },
+     "source": {
+      "collection": "sentinel-2-l2a (Copernicus Sentinel-2 Level-2A)",
+      "catalogue": "Element 84 Earth Search STAC; AWS Open Data bucket sentinel-cogs",
+      "zoom_min": 9,
+      "zoom_max": 13,
+      "acquisition_dates": [
+       "2024-06-19",
+       "2024-06-21",
+       "2024-06-26",
+       "2024-08-15",
+       "2024-08-18",
+       "2024-09-07",
+       "2026-06-28",
+       "2026-07-01",
+       "2026-07-21",
+       "2026-09-12"
+      ],
+      "scenes": [
+       "S2A_36SUF_20260701_0_L2A",
+       "S2A_36SUG_20240619_0_L2A",
+       "S2A_36SUG_20260701_0_L2A",
+       "S2A_36SUG_20260721_0_L2A",
+       "S2A_36SUH_20240619_0_L2A",
+       "S2A_36SUH_20240907_0_L2A",
+       "S2A_36SUH_20260701_0_L2A",
+       "S2A_36SUH_20260721_0_L2A",
+       "S2A_36SUJ_20260701_0_L2A",
+       "S2A_36SVF_20240619_0_L2A",
+       "S2A_36SVF_20260701_1_L2A",
+       "S2A_36SVG_20240818_0_L2A",
+       "S2A_36SVG_20260701_1_L2A",
+       "S2A_36SVH_20260628_0_L2A",
+       "S2A_36SVH_20260701_1_L2A",
+       "S2A_36SWG_20240815_0_L2A",
+       "S2A_36SWG_20260701_1_L2A",
+       "S2A_36SWH_20240626_0_L2A",
+       "S2A_36SWH_20260628_0_L2A",
+       "S2A_36SWH_20260701_1_L2A",
+       "S2A_36SWJ_20260701_1_L2A",
+       "S2B_36SVF_20240621_0_L2A",
+       "S2B_36SVG_20240621_0_L2A",
+       "S2B_36SVH_20240621_0_L2A",
+       "S2B_36SVH_20260701_0_L2A",
+       "S2B_36SVH_20260912_0_L2A",
+       "S2B_36SWF_20240621_0_L2A",
+       "S2B_36SWG_20240621_0_L2A",
+       "S2B_36SWG_20260701_0_L2A",
+       "S2B_36SWH_20240621_0_L2A",
+       "S2B_36SWH_20260701_0_L2A",
+       "S2B_36SWJ_20240621_0_L2A"
+      ],
+      "produced": "2026-11-17"
+     }
+    }
+   ],
+   "source": {
+    "build": "20261115.pmtiles",
+    "version": "4.15.2",
+    "osm_replication_time": "2026-11-15T04:00:00Z",
+    "etag": "\"7fec872c142562ded7dffae739e8f032-520\""
+   }
+  },
+  {
+   "id": "turkiye",
+   "kind": "region",
+   "name_key": "site.mapPackName.turkiye",
+   "bbox": [
+    25.6,
+    35.8,
+    44.9,
+    42.2
+   ],
+   "zoom_max": 15,
+   "radius_km": null,
+   "components": [
+    {
+     "kind": "vector",
+     "file": "hrma-harita-turkiye-v1.pmtiles",
+     "size_bytes": 1628223566,
+     "sha256": "e02c04c65f7d6a2b98440c2f21d65d5a13a91ede2b6d02e958239dd87ffc58e2",
+     "license": "ODbL-1.0",
+     "attribution": "© OpenStreetMap contributors (ODbL 1.0); Protomaps Basemap schema; Natural Earth (public domain)"
+    }
+   ],
+   "source": {
+    "build": "20261115.pmtiles",
+    "version": "4.15.2",
+    "osm_replication_time": "2026-11-15T04:00:00Z",
+    "etag": "\"7fec872c142562ded7dffae739e8f032-520\""
+   }
+  }
+ ]
+}

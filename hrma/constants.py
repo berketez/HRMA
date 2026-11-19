@@ -167,6 +167,52 @@ def isa_pressure(altitude_m: float) -> float:
     T = T_base + lapse * (h - h_base)
     return float(P_base * (T / T_base) ** (-G_0 * M_AIR / (R_STAR_ICAO * lapse)))
 
+
+#: Geopotansiyel <-> geometrik irtifa dönüşümünün etkin yarıçapı r0 [m]
+#: (US Standard Atmosphere 1976). TEK TANIM (V307/SIVI-ORTAM, ana model
+#: kararı 16 Kas 2026): yörünge çözücüsünün ``_atm_full``u
+#: (``TrajectoryAnalyzer.R_geopotential``) ve sıvı motor bu sabiti okur.
+#: Değer yeni değildir: iki dosyada duran 6356766.0'ın taşınmış hâlidir.
+ISA_GEOPOTENTIAL_EARTH_RADIUS_M = 6356766.0  # m
+
+
+def geometric_to_geopotential(altitude_m: float) -> float:
+    """Geometrik irtifa h [m] -> geopotansiyel irtifa H [m].
+
+    H = h·r0/(r0 + h) (US Standard Atmosphere 1976, Denk. 18);
+    ``TrajectoryAnalyzer._atm_full`` ile aynı ifade, aynı işlem sırası.
+    """
+    h = float(altitude_m)
+    return h * ISA_GEOPOTENTIAL_EARTH_RADIUS_M / (
+        ISA_GEOPOTENTIAL_EARTH_RADIUS_M + h)
+
+
+def isa_pressure_geometric(altitude_m: float) -> float:
+    """US Standard Atmosphere 1976 basıncı [Pa], GEOMETRİK irtifa [m].
+
+    Kullanıcının girdiği irtifa (deniz seviyesinden yükseklik) geometriktir;
+    USSA 1976 tablosu geopotansiyel irtifayla tanımlıdır. Bu yardımcı
+    dönüşümü yapıp ``isa_pressure``ı çağırır (o işlevin davranışı değişmedi:
+    geopotansiyel bekler). h = 0'da ``isa_pressure(0)`` ile bit-aynıdır;
+    yörünge çözücüsünün ``_atm_full`` basıncıyla aynı okumadır. Fark
+    irtifayla büyür: doğrudan (dönüşümsüz) okuma 20 km'de ~%1, 50 km'de ~%5
+    düşük basınç verir.
+    """
+    return isa_pressure(geometric_to_geopotential(altitude_m))
+
+
+def isa_temperature_geometric(altitude_m: float) -> float:
+    """US Standard Atmosphere 1976 sıcaklığı [K], GEOMETRİK irtifa [m].
+
+    ``isa_pressure_geometric``in sıcaklık eşi (V307/İRTİFA-TEK, 17 Kas):
+    aynı dönüşüm, ``isa_temperature``a verilir (o işlev değişmedi:
+    geopotansiyel bekler). Basınçla birlikte yoğunluk ve ses hızı türeten
+    çağıranlar (Fırlatma Sahası atmosferi, OpenRocket uçuş profili, hibrit
+    irtifa tablosu, irtifa → basınç ucu) aynı irtifada aynı katmanı okur.
+    h = 0'da ``isa_temperature(0)`` ile bit-aynıdır.
+    """
+    return isa_temperature(geometric_to_geopotential(altitude_m))
+
 # -----------------------------------------------------------------------------
 # Birim Çevirim Sabitleri
 # -----------------------------------------------------------------------------

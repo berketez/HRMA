@@ -500,7 +500,7 @@ _KESME_GOVDE = (
     'TRUNCATED TAIL-OFF: the march stops the instant the liquid is '
     'exhausted, so no vapour step is integrated. 0.821 kg of oxidiser is '
     'still in the tank; valued at the oxidiser-specific impulse of the last '
-    'integrated step (F/mdot_ox) that is worth 2241 N*s, 28.1 % of the '
+    'integrated step (F/mdot_ox) that is worth 2241 N·s, 28.1 % of the '
     'impulse reported above. It is NOT modelled here'
 )
 _KESME_IKI_HAL = (

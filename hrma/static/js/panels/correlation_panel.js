@@ -85,6 +85,18 @@
          'panel.correlation.layerAnomalyNote',
          'Records flagged as statistical outliers versus the model; '
          + 'kept visible for engineering review instead of being deleted.'],
+        // V307 KATI-DOĞRULAMA faz 3 (karar 4): MODELİN kapsamı dışındaki
+        // kayıtlar uç gövdesinde 'out_of_scope' katmanıyla geliyordu ama
+        // panelde hiç çizilmiyordu (KSB-001/002 ve hibrit swirl kayıtları
+        // tabloda görünmüyordu). Kapsam içi satırlar üstte, bunlar altta:
+        // iki istatistik yan yana okunur.
+        ['out_of_scope', 'panel.correlation.layerOutOfScope',
+         'Records outside the model scope',
+         'panel.correlation.layerOutOfScopeNote',
+         'Records the model declares outside its scope by a criterion fixed '
+         + 'in advance, independent of the size of the error. They are not '
+         + 'deleted: their errors are shown here next to the in-scope '
+         + 'statistics above.'],
     ];
 
     let lastData = null;
@@ -245,6 +257,21 @@
         });
     }
 
+    // İtici ailesinin okunur adı (V307 karar 3). Tablo kapalıdır; bilinmeyen
+    // aile kodu AYNEN gösterilir (çeviri uydurulmaz).
+    const AILE_ANAHTARLARI = {
+        sugar: ['panel.correlation.family.sugar', 'KN-sugar'],
+        composite: ['panel.correlation.family.composite', 'composite'],
+        double_base: ['panel.correlation.family.double_base', 'double-base'],
+        an_ap_al_htpb: ['panel.correlation.family.an_ap_al_htpb', 'AN/AP/Al/HTPB composite'],
+        an_hmx_ap_al_htpb: ['panel.correlation.family.an_hmx_ap_al_htpb', 'AN/HMX/AP/Al/HTPB composite'],
+        unclassified: ['panel.correlation.family.unclassified', 'unclassified'],
+    };
+    function familyLabel(aile) {
+        const k = AILE_ANAHTARLARI[String(aile)];
+        return k ? T(k[0], k[1]) : String(aile);
+    }
+
     function cellRowHtml(c, enBuyukBias) {
         const page = window.AnalysisDock.getMotorType();
         const isPage = c.motor_type === page;
@@ -273,7 +300,14 @@
                     style="color:var(--hd-orange, #ff8c33);">${c.n}&#8202;&#9888;</span>`)
             : '—';
         return `<tr title="${tip}">
-            <td style="${U.TD} ${motorStyle}">${escapeHtml(c.motor_type)}</td>
+            <td style="${U.TD} ${motorStyle}">${escapeHtml(c.motor_type)}${
+                c.propellant_family
+                    ? `<span data-propellant-family="${escapeHtml(String(c.propellant_family))}"
+                        title="${escapeHtml(T('panel.correlation.familyTip',
+                            'Propellant family: solid-motor statistics are kept separate per family.'))}"
+                        style="color:var(--hd-ink-dim, #7d97a5); font-weight:normal;"> [${
+                            escapeHtml(familyLabel(c.propellant_family))}]</span>`
+                    : ''}</td>
             <td style="${U.TD}">${escapeHtml(c.quantity)}</td>
             <td style="${U.TD} text-align:right; font-family:var(--hd-mono);">${nHucre}</td>
             <td style="${U.TD} text-align:right; font-family:var(--hd-mono);">${
@@ -331,7 +365,7 @@
             escapeHtml(T('panel.correlation.barNote',
                 'Bar length is |bias| relative to the largest |bias| in this '
                 + 'table — a magnitude cue from the data itself, not a '
-                + 'pass/fail threshold (the endpoint publishes none).'))}</p>`;
+                + 'pass/fail threshold (the calculation publishes none).'))}</p>`;
     }
 
     function collapsibleLayerHtml(title, note, cells) {

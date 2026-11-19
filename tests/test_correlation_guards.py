@@ -92,8 +92,30 @@ from hrma.validation.correlation_runner import run_correlation
 # (docs/scofield/raw/OH/V306/olcut/rl10/{once,sonra}_korelasyon.json): db
 # hash dışındaki deterministic_view sha256 BİT AYNI (74c76f7b…), yani
 # aşağıdaki BASELINE hücreleri ve her kayıt sonucu değişmedi.
+# Hash güncellemesi (2026-11-16, V307 KATI-DOĞRULAMA faz 2, ana model kararları
+# 2-4): 212 -> 220 kayıt. (a) 6 NASA-CR-158815 (JPL 79-29) 70-lb BATES statik
+# ateşlemesi eklendi (AN/AP/Al/HTPB ve HMX'li türevi; kendi itici
+# özellikleriyle koşar, tane ölçüsü ve gamma/M 'türetildi' diye işaretli);
+# (b) 2 kısmi, KOŞMAYAN tanım/kaynak kaydı (AEDC FW-4S, S-5K); (c) üç Kappa
+# kaydında ölçülen süre alanı 'burn_time_s' -> 'action_time_5pct_s' (değer
+# aynı; yüzde 5 eşikli etki süresi, HRMA'nın web tükenme süresiyle eş tanımlı
+# değil); (d) KSB-001/002'ye model_scope (kapsam ölçütü hata büyüklüğünden
+# bağımsız: KNSB motor içi üçgen profil tek üslü yasa kapsamı dışında).
+# Katı istatistiği artık itici ailesine göre AYRI hücrelerde. MEVCUT BASELINE
+# HÜCRELERİ DEĞİŞMEDİ (ölçüldü: solid [sugar] burn_rate n=27, bias -0.4,
+# medAPE 0.5; hibrit ve sıvı satırları VALIDATION_STATUS önce/sonra farkında
+# bit aynı). Kanıt: docs/scofield/raw/OH/V307/kati-dogrulama/RAPOR.md (faz 2).
+# Hash güncellemesi (2026-11-17, ana model; V307/SIVI-ORTAM §9-6 bulgusu):
+# liq-vinci-ariane6-spec genişleme oranı 240 -> 174, çıkış çapı 1,84 -> 1,82 m.
+# Kayıt ε 240 (açılır lüle sürümü, Ø ~2,15 m) ile 1,84 m çıkışı birlikte
+# taşıyordu; kaydın kendi tanımladığı sabit kompozit uzatma IAC-17-C4.1
+# özetinde Ø1820 mm, Σ 174. Kayıt yolunda Vinci Isp_vak sapması +%0,62 ->
+# -%0,19. Hücre ölçümü (önce -> sonra, aynı ağaç): liquid isp_vac n 14 -> 14,
+# bias +0,747 -> +0,688, medAPE 0,869 -> 0,869; isp_sl ve thrust_vac aynı.
+# BASELINE hücreleri DEĞİŞMEDİ (kapı içinde). Kanıt:
+# docs/scofield/raw/OH/V307/ana-model/vinci_kayit_duzeltmesi_2026-11-17.md
 EXPECTED_DB_HASH = (
-    "13c3f1073a0f1337d055c5c5498d1e94e019b123ecfdbd082c6dba9d375985a1")
+    "0cda6f7da57fcf359f56045059ce2d0149fec13e78bf13889d646ac6374306ee")
 
 # (motor, quantity) -> (bias_pct, median_ape_pct, n)
 BASELINE = {

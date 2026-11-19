@@ -4,13 +4,13 @@
   "record_type": "engine_spec",
   "motor_type": "liquid",
   "source": {
-    "citation": "ArianeGroup Vinci veri fisi (docslib.org/doc/11643959 uzerinde cogaltilmis uretici tablosu); P. Alliot, J-F. Delange, V. De Korver, J-M. Sannino, A. Lekeux, B. Vieille, 'VINCI, the European reference for Ariane 6 upper stage cryogenic propulsive system', 6th EUCASS, 2015 (birincil, cevrim/itki/MR-bandi teyidi); ESA 'The engines of Ariane 6' (genisleme orani 240)",
+    "citation": "ArianeGroup Vinci veri fisi (docslib.org/doc/11643959 uzerinde cogaltilmis uretici tablosu); P. Alliot, J-F. Delange, V. De Korver, J-M. Sannino, A. Lekeux, B. Vieille, 'VINCI, the European reference for Ariane 6 upper stage cryogenic propulsive system', 6th EUCASS, 2015 (birincil, cevrim/itki/MR-bandi teyidi); ESA 'The engines of Ariane 6' (genisleme orani 240); H. Coperet (Airbus Safran Launchers), 'Vinci engine thermo-structural composite nozzle extension for Ariane 6', IAC-17-C4.1.7 (x37293), 2017, ozet: sabit kompozit lule uzatmasi giris O655 mm (Sigma 22.5), cikis O1820 mm (Sigma 174) — genisleme orani ve cikis capi bu kaynaktan (17 Kas 2026)",
     "doi": null,
     "access": "vendor_datasheet",
     "confidence": "medium",
-    "date_checked": "2026-07-23",
+    "date_checked": "2026-11-17",
     "data_extraction": "table",
-    "extraction_note": "Pc 60 bar, Isp 457.2 s, MR 6.1, itki 180 kN ArianeGroup veri fisinden (docslib cogaltimi) okundu; ayrica 130 kN dusuk-itki noktasi 45 bar/MR 5.5/458.2 s. EUCASS 2015 (Snecma/Airbus Safran/ESA-CNES) birincil olarak itki 180 kN, expander cevrim, 'typically MR=5.7/6.2', LOX/LH2 ve sabit radyatif kompozit lule uzatmasini DOGRUDAN teyit eder (okundu). Genisleme orani 240 ESA/ArianeGroup kamu tanimindan (ikincil); veri fisinde eps yoktu. Confidence 'medium': Pc/Isp uretici fisinin cogaltimi + eps ikincil. [access orijinal etiketi: 'vendor_datasheet_reproduced']"
+    "extraction_note": "Pc 60 bar, Isp 457.2 s, MR 6.1, itki 180 kN ArianeGroup veri fisinden (docslib cogaltimi) okundu; ayrica 130 kN dusuk-itki noktasi 45 bar/MR 5.5/458.2 s. EUCASS 2015 (Snecma/Airbus Safran/ESA-CNES) birincil olarak itki 180 kN, expander cevrim, 'typically MR=5.7/6.2', LOX/LH2 ve sabit radyatif kompozit lule uzatmasini DOGRUDAN teyit eder (okundu). Genisleme orani 240 ESA/ArianeGroup kamu tanimindan (ikincil); veri fisinde eps yoktu. Confidence 'medium': Pc/Isp uretici fisinin cogaltimi + eps ikincil. [access orijinal etiketi: 'vendor_datasheet_reproduced'] | 17 Kas 2026 duzeltmesi (V307/SIVI-ORTAM bulgusu, ana model): kayit eps 240 ile cikis capi 1.84 m'yi birlikte tasiyordu; ikisi ayni lulenin degil. eps 240 acilir (deployable) lule surumunun degeri (O ~2.15 m; D_t 138.1 mm ile (2.15/0.1381)^2 = 242); kaydin kendi tanimi (EUCASS 2015: sabit radyatif kompozit lule uzatmasi) IAC-17-C4.1 ozetindeki sabit uzatmadir: cikis O1820 mm, Sigma 174 (D_t = 655/sqrt(22.5) = 138.1 mm; (1820/138.1)^2 = 173.7). Isp 457.2 s ve 180 kN uretici fisinden; fisin hangi lule surumune ait oldugu fiste yazmiyor — eps 174 secimi kaydin kendi lule tanimiyla tutarlilik geregidir (confidence medium kalir). Etki (kayit yolu, 10 kN boyutlandirma): Isp_vak 460.05 s (+%0.62) -> 456.32 s (-%0.19)."
   },
   "propellants": {
     "oxidizer": "lox",
@@ -19,9 +19,9 @@
     "hrma_fuel_key": "lh2"
   },
   "geometry": {
-    "expansion_ratio": 240,
+    "expansion_ratio": 174,
     "cycle": "expander",
-    "nozzle_exit_diameter_m": 1.84,
+    "nozzle_exit_diameter_m": 1.82,
     "length_m": 3.22
   },
   "inputs": {
@@ -42,5 +42,5 @@
     "europe_esa",
     "high_expansion"
   ],
-  "notes": "Ariane 6 ust kademe motoru (ArianeGroup). KAPALI expander cevrim (bleed degil), sabit kompozit lule; cok yuksek genisleme (240) + dusuk Pc (60 bar) -> yuksek vakum Isp 457.2 s. Genisleme orani 240 kritik girdi (verilmezse HRMA deniz-seviyesi optimum lule tasarlar ve Isp'yi ~70-80 s dusuk tahmin eder); 240 ESA/ArianeGroup kamu degeridir (ikincil, isaretlendi). MR 6.1 nominal nokta; EUCASS 2015 paper calisma bandini MR 5.7/6.2 verir. 130 kN dusuk-itki noktasi (45 bar, MR 5.5, Isp 458.2 s) ayri kayit yapilmadi."
+  "notes": "Ariane 6 ust kademe motoru (ArianeGroup). KAPALI expander cevrim (bleed degil), sabit kompozit lule; cok yuksek genisleme (174, sabit kompozit uzatma; IAC-17-C4.1) + dusuk Pc (60 bar) -> yuksek vakum Isp 457.2 s. Genisleme orani kritik girdi (verilmezse HRMA deniz-seviyesi optimum lule tasarlar ve Isp'yi ~70-80 s dusuk tahmin eder); ESA'nin kamu degeri 240 acilir lule surumune aittir; kayit sabit uzatmanin 174'unu kullanir (17 Kas 2026). MR 6.1 nominal nokta; EUCASS 2015 paper calisma bandini MR 5.7/6.2 verir. 130 kN dusuk-itki noktasi (45 bar, MR 5.5, Isp 458.2 s) ayri kayit yapilmadi."
 }
