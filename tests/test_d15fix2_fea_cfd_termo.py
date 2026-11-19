@@ -65,7 +65,8 @@ class TestTermalKorumaBilinmeyenMod:
         r = client.post('/api/thermal-protection', json={
             'mode': 'heat_sink', 'h_gas_W_m2K': 5000.0,
             'T_recovery_K': 3000.0, 'burn_time_s': 300.0,
-            'wall_thickness_m': 0.0005, 'n_nodes': 201})
+            'wall_thickness_m': 0.0005, 'n_nodes': 201,
+            'T_initial_K': 300.0})  # V307/KÜÇÜKLER kalem 5: T_initial_K ısı kuyusunda zorunlu; eski örtük değer (300) açık yazıldı.
         assert r.status_code == 422, f'HTTP {r.status_code}'
         j = r.get_json()
         assert j['error'] == 'thermal_protection_compute_budget_exceeded'

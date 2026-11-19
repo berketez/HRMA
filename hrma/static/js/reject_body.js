@@ -95,8 +95,27 @@
                 : ((x && typeof x.field === 'string') ? x.field : '');
             if (!ad || (haric && haric[ad]) || gorulen[ad]) return '';
             gorulen[ad] = true;
+            // V307/DİL-EKRAN (DİL-KATI D15): katı sayfasında oda çapı boşsa
+            // çözücü oda çapını yakıt bloğu dış çapından alır; sunucunun
+            // `missing_fields` sözleşmesi 'chamber_diameter' der (3 test
+            // kilitliyor) ama kullanıcının boş bıraktığı kutu "Dış Çap"tır.
+            // Ekran ikisini birlikte adlandırır (yalnız iki kutu da varsa ve
+            // dış çap kutusu gerçekten boşsa; başka sayfada davranış aynı).
+            if (ad === 'chamber_diameter') {
+                var ikili = _bosDisCapEtiketi();
+                if (ikili) return ikili + ' / ' + (_etiket(ad) || ad);
+            }
             return _etiket(ad) || ad;
         }).filter(function (t) { return t; });
+    }
+
+    function _bosDisCapEtiketi() {
+        var d = kok.document;
+        if (!d || typeof d.getElementById !== 'function') return null;
+        var dis = d.getElementById('outer_diameter');
+        if (!dis || !d.getElementById('chamber_diameter')) return null;
+        if (String(dis.value == null ? '' : dis.value).trim() !== '') return null;
+        return _etiket('outer_diameter');
     }
 
     function _adlar(ham) {
@@ -187,6 +206,23 @@
         return (cikti === kod) ? String(kod).replace(/_/g, ' ') : cikti;
     }
 
+    /** Sunucunun serbest ret cümlesi (``message`` / ``error`` / ``details``)
+     *  → etkin dilde metin.
+     *
+     * V307/DİL-EKRAN-2 (DİL-SUNUCU DEVİR §5-d): ``metni()`` bu cümleyi
+     * ``I18N.serverText``ten GEÇİRMİYORDU; sözlükte TR kaydı hazır olan 20
+     * adlı ret cümlesi TR ekranda İngilizce kalıyordu (ölçüm
+     * ``docs/scofield/raw/OH/V307/dil-ekran/olcum/k3_ret_once.json``: 0/40).
+     * Kalıbı olmayan cümle AYNEN kalır; EN ekranda ``serverText`` metni
+     * değiştirmez. Sözlük yüklü değilse (düğüm) cümle aynen döner.
+     */
+    function _sunucuCumlesi(cumle) {
+        var I = kok.I18N;
+        if (!cumle || !I || typeof I.serverText !== 'function') return cumle;
+        var t = I.serverText(cumle);
+        return (typeof t === 'string' && t) ? t : cumle;
+    }
+
     /** ``failed_generators[].reason`` → etkin dilde gerekçe listesi.
      *
      * Sunucu cümlesi ``I18N.serverText`` ile çevrilir (sözlükte kalıbı
@@ -250,6 +286,10 @@
         var gerekceler = _kapiGerekceleri(govde);
         if (gerekceler !== null) {
             cumle = _ceviri(govde.message_key, govde.message_params, cumle);
+        } else {
+            // V307/DİL-EKRAN-2: anahtarsız gövdenin cümlesi ekranın sunucu
+            // çevirmeninden geçer (kalıbı yoksa aynen).
+            cumle = _sunucuCumlesi(cumle);
         }
         if (cumle) parcalar.push(cumle);
         if (gerekceler !== null && gerekceler.length) {
@@ -303,6 +343,7 @@
                 && Array.isArray(govde.details) && govde.details.length) {
             parcalar.push(govde.details
                 .filter(function (d) { return typeof d === 'string' && d; })
+                .map(_sunucuCumlesi)
                 .join(' · '));
         }
         if (!parcalar.length) return _gerekcesiz(durum, '');

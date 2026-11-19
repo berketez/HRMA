@@ -908,6 +908,20 @@ class InjectorDesign:
         }
 
     def calculate(self):
+        # V307/S2-KALINTI (NK3-H-6): GAZ FAZINDA DELİK PLANI ÜRETİLMEZ.
+        # ÖLÇÜLDÜ (docs/scofield/raw/OH/V307/s2-kalinti/h6_once.json,
+        # Carmicino t01: gaz N2O, tank 16 bar, Pc 8,52 bar): motorun devre
+        # çözücüsü gaz beslemeyi 'not_analyzed' bırakıyor ve uyarısı "delik
+        # planı … verilmiyor" diyor (GAS_PHASE_FEED_NOT_MODELLED, M-HIBRIT-10);
+        # bu blok ise AYNI yanıtta sıvı yoğunluğu + SPI ile 1 delik × 2,00 mm,
+        # ΔP 1,70 bar (otomatik %20·Pc, tankın 7,48 bar'ı değil) yayımlıyor ve
+        # o plana bağlı dört uyarı basıyordu (çıkış hızı bandı, "Treat these
+        # hole sizes as liquid-phase values", L/D, hedef hız / "şu an 1,70
+        # bar"). Tek hüküm: gaz beslemede bu blok da boyutlandırmaz; plaka
+        # kalınlığı (kullanıcının plakası, delik planından bağımsız) künyesiyle
+        # kalır, sayı uydurulmaz.
+        if self.ox_phase != 'liquid':
+            return self._faz_modellenmedi_blogu()
         if self.injector_type == 'showerhead':
             return self._calculate_showerhead()
         elif self.injector_type == 'pintle':
@@ -920,6 +934,39 @@ class InjectorDesign:
             return self._calculate_coaxial()
         else:
             raise ValueError(f"Unknown injector type: {self.injector_type}")
+
+    def _faz_modellenmedi_blogu(self):
+        """Gaz (sıvı olmayan) faz: delik planı YOK, nedeni adıyla.
+
+        Neden metni motorun TEK tanımıdır (``hybrid_rocket_engine.
+        GAS_PHASE_FEED_NOT_MODELLED``; kod ``gas_phase_feed_not_modelled``) —
+        ikinci bir cümle yazılmaz. Plaka kalınlığı delik planından bağımsız
+        bir kullanıcı girdisidir: kazanılmışsa sayısı ve künyesi aynen
+        yayımlanır (CAD/kütle plakayı deliksiz tartar), değilse sayı yok.
+        Bu blok UYARI ÜRETMEZ: kullanıcıya giden tek cümle motorun
+        ``warn.hybrid.gas_phase_feed_not_modelled`` uyarısıdır."""
+        from hrma.engines.hybrid_rocket_engine import (
+            GAS_PHASE_FEED_NOT_MODELLED)
+        blok = {
+            'type': self.injector_type,
+            'status': 'not_analyzed',
+            'reason_code': 'gas_phase_feed_not_modelled',
+            'reason': GAS_PHASE_FEED_NOT_MODELLED,
+            'oxidizer_phase': self.ox_phase,
+            'oxidizer_type': self.oxidizer_type,
+            'warnings': [],
+        }
+        params = None
+        if self.injector_type == 'showerhead':
+            params = self.showerhead_params
+        elif self.injector_type == 'impingement':
+            params = self.impingement_params
+        if params and 't_plate' in params:
+            kazanildi = bool(params.get('t_plate_earned'))
+            blok['plate_thickness'] = _yayin_plaka_mm(params, kazanildi)
+            blok['plate_thickness_earned'] = kazanildi
+            blok['plate_thickness_basis'] = params.get('t_plate_basis')
+        return blok
 
     # ------------------------------------------------------------------
     # Ortak çıktı sözleşmesi — TÜM tipler bu anahtarları döndürür
@@ -2183,6 +2230,9 @@ class InjectorDesign:
         # (engines/injector_design.py::compressible_orifice_flow, izentropik,
         # boğulma ayrımlı) ama bu yola bağlı değil. Bağlanana kadar durum
         # açıkça bildirilir.
+        # V307/S2-KALINTI (NK3-H-6): ``calculate`` sıvı olmayan fazda artık
+        # boyutlandırmıyor (``_faz_modellenmedi_blogu``); bu dal yalnız
+        # ``_check_warnings``i doğrudan çağıran için savunma olarak kalır.
         if self.ox_phase != 'liquid':
             warn_list.append(
                 f"Oxidiser phase '{self.ox_phase}' is NOT modelled here: the "

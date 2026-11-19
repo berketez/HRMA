@@ -39,7 +39,8 @@ from hrma.data.propellant_database import (
 from hrma.constants import (G_0, LAMBDA_BELL, LAMBDA_PARABOLIC,
                             LAMBDA_CONICAL_15DEG, C_STAR_PLAUSIBLE_BAND_MPS,
                             C_STAR_BAND_DEFAULT_MPS, R_UNIVERSAL, PA_PER_BAR,
-                            AMBIENT_TEMPERATURE_BAND_K)
+                            AMBIENT_TEMPERATURE_BAND_K, BAR_PER_PA,
+                            P_SEA_LEVEL_PA)
 # Ayrılma eşiği TEK tanım noktasından gelir (magic-number yasağı): aynı 0,40
 # hrma/flow/separation.py ve engines/nozzle_design.py içinde de bu addan
 # türetilir. Buraya sayı KOPYALANMAZ.
@@ -162,6 +163,68 @@ OX_FLUX_FLOODING_WARN_KG_M2S = 600.0
 # değil. Değeri ileride değiştirmek isteyen tek satırı değiştirir; motor,
 # uç ve künye üçü birden aynı sayıyı söyler.
 CHAMBER_PRESSURE_PLACEHOLDER_BAR = 20.0
+
+#: V307/TEK-TANIM kalem 6 (ana model kararı b): tasarım ortam basıncı
+#: istekte yoksa ISA deniz seviyesi (US Standard Atmosphere 1976) —
+#: sayı ``hrma.constants.P_SEA_LEVEL_PA``'dan, burada yalnız bar'a
+#: çevrilir. /calculate, Optimumu Bul, belirsizlik, kurucu (ORTAM-TEK),
+#: /api/quick-geometry, /api/transient-analysis okur (eski kaynaksız 1,0).
+HYBRID_DEFAULT_AMBIENT_BAR = P_SEA_LEVEL_PA * BAR_PER_PA
+
+
+def bind_design_row_isp_to_headline(rows, pressure_key, pressure_to_pa,
+                                    isp_key, design_ambient_pa, headline_isp):
+    """Tasarım ortamının irtifa satırı Isp'si = BAŞLIK Isp'si (tek hesap).
+
+    V307/ORTAM-TEK kalem 4. İrtifa tabloları (``altitude_performance``,
+    ``thrust_altitude_analysis``) ve İrtifa Profili satır Isp'sini
+    F(h)/(ṁ·g0) ile (Sutton & Biblarz 9. bs. Denk. 2-5), başlık Isp'yi
+    C_F·c*/g0 ile kurar (Denk. 3-32). Tasarım ortamının satırında
+    F(h) = F_tasarım (p_a = p_tasarım), yani iki sayı AYNI büyüklüktür ve
+    yalnız işlem sırası yüzünden son basamakta ayrışıyordu (ölçüldü, ISA
+    tasarımı: başlık 195.47482623442536 ⟷ 0 m satırı ...534;
+    docs/scofield/raw/OH/V307/ortam-tek/olcum/k4_once.json). O satırın
+    Isp'si başlığın kendisi yazılır. Satır seçimi tablonun kendi tasarım
+    satırı ölçütüyle aynıdır (|p_a − p_tas| ≤ 1e-12·max(p_tas, 1) Pa);
+    sayısız (ayrılmış) satıra dokunulmaz. Dönüş: bağlanan satırların listesi.
+    """
+    p_tas = float(design_ambient_pa)
+    bagli = []
+    for satir in rows or []:
+        if headline_isp is None or not isinstance(satir, dict) or satir.get(isp_key) is None:
+            continue
+        p_a = float(satir[pressure_key]) * pressure_to_pa
+        if abs(p_a - p_tas) <= 1e-12 * max(p_tas, 1.0):
+            satir[isp_key] = float(headline_isp)
+            bagli.append(satir)
+    return bagli
+
+#: V307/HİBRİT-ORTAM — ``design_ambient`` bloğunun dayanağı (kullanıcıya
+#: dönük, İngilizce). Sıvının ``DESIGN_AMBIENT_BASIS`` metninin hibrit
+#: karşılığıdır; ölçüt ve sabit aynı tek tanımdan (Summerfield k).
+HYBRID_DESIGN_AMBIENT_BASIS = (
+    'The thrust you enter is the motor thrust at the design ambient '
+    'pressure p_a (atmospheric_pressure, bar; the hybrid page fills it from '
+    'the altitude field with the ISA / US Standard Atmosphere 1976 pressure, '
+    'or takes the measured site pressure you type). The thrust coefficient, '
+    'the specific impulse, the propellant flow and the throat are solved at '
+    'that ambient. The flow separation check (Summerfield criterion, P_e < '
+    f'{SUMMERFIELD_FACTOR_DEFAULT:g} x p_a; Summerfield, Foster & Swan, Jet '
+    'Propulsion 24(9), 1954) is applied at the design ambient and, '
+    'separately, at sea level (design_ambient.sea_level).')
+#: Deniz seviyesi durumunun (yer testi bilgisi) dayanağı.
+HYBRID_DESIGN_AMBIENT_SEA_LEVEL_BASIS = (
+    'sea-level state of THIS nozzle (same expansion ratio, same chamber '
+    'pressure, same propellant flow) at 1.01325 bar: the exit pressure is '
+    'the exit pressure of the nozzle at its design point (independent of '
+    'ambient), the flow is attached when P_e >= '
+    f'{SUMMERFIELD_FACTOR_DEFAULT:g} x 1.01325 bar (Summerfield criterion on '
+    'the one-dimensional exit pressure, the same test as the design point), '
+    'and thrust / Isp come from the 0 m row of the altitude performance '
+    'table (same-nozzle identity F(0) = F_design + (p_design - p_sl)*A_e, '
+    'Sutton & Biblarz 9th ed., Eq. 2-14 / 3-29). They are published only '
+    'for attached flow. When the design ambient is sea level the sea-level '
+    'state is the design point itself.')
 
 # c* (yanma) veriminin fiziksel bandı (D15/P1B1-06). Eşik çifti kurucudaki
 # denetimde çıplak literal olarak duruyordu; hüküm defteri aynı sayıyı
@@ -2030,7 +2093,7 @@ def resolve_impulse_inputs(thrust=None, burn_time=None, total_impulse=None):
 class HybridRocketEngine:
     def __init__(self, thrust=None, burn_time=None, total_impulse=None, of_ratio=1.0,
                  chamber_pressure=CHAMBER_PRESSURE_PLACEHOLDER_BAR,
-                 atmospheric_pressure=1.0, chamber_temperature=None,
+                 atmospheric_pressure=HYBRID_DEFAULT_AMBIENT_BAR, chamber_temperature=None,
                  gamma=1.15, gas_constant=None, l_star=1.0,
                  expansion_ratio=0, nozzle_type='conical',
                  thrust_coefficient=0, regression_a=None,
@@ -4559,6 +4622,9 @@ class HybridRocketEngine:
                     # 0 km'de manşetin 1000 N'u yerine ideal 1033,02 N
                     # yazıyordu (%3,45; Isp'de 192,04 s ↔ manşet 185,90 s).
                     'thrust_sea_level': self.F,
+                    # V307/TEK-TANIM kalem 5: satır C_F'i başlıkla TEK tanım
+                    # (F/(P_c·A_t)); eski F/(ṁ·c*_ideal) = C_F·η_c* idi.
+                    'thrust_coefficient': self.CF,
                     # V306/HİBRİT-MODEL kalem 6 (UÇUŞ-2 devri): TEK çıkış
                     # alanı — lülenin geometrisi (A_e = ε·A_t, yanıttaki
                     # ``exit_area``); çapa teslim itkisinin ait olduğu
@@ -4567,6 +4633,12 @@ class HybridRocketEngine:
                     # ve ``nozzle_loss_model.exit_area_m2`` = ``exit_area``.
                     'exit_area_m2': float(self.Ae),
                     'thrust_reference_pressure_pa': float(self.P_a) * 1e5,
+                    # V307/HİBRİT-ORTAM (S1): satır başına ayrılma ölçütü
+                    # motorun aşırı genişleme denetimiyle AYNI çıkış
+                    # basıncından (İrtifa Profili de bunu okur).
+                    'separation_exit_pressure_bar':
+                        self._separation_exit_pressure_bar(
+                            combustion_results),
                 },
                 altitudes
             )
@@ -4626,9 +4698,26 @@ class HybridRocketEngine:
                     # ve aynı çapa (tek tanım).
                     'exit_area_m2': float(self.Ae),
                     'thrust_reference_pressure_pa': float(self.P_a) * 1e5,
+                    'separation_exit_pressure_bar':
+                        self._separation_exit_pressure_bar(
+                            combustion_results),
                 }, altitudes_thrust
             )
-        
+
+        # V307/ORTAM-TEK kalem 4: tasarım ortamının satırı başlığın KENDİSİ
+        # (iki tablo; 0 m satırıysa tablonun ``sea_level_isp``ı da).
+        for _tablo, _anahtar in ((altitude_performance, 'altitude_performance'),
+                                 (thrust_altitude_analysis,
+                                  'thrust_altitude_data')):
+            if not isinstance(_tablo, dict):
+                continue
+            for _satir in bind_design_row_isp_to_headline(
+                    _tablo.get(_anahtar), 'pressure', PA_PER_BAR, 'isp',
+                    float(self.P_a) * PA_PER_BAR, self.Isp):
+                if (float(_satir.get('altitude', float('nan'))) == 0.0
+                        and 'sea_level_isp' in _tablo):
+                    _tablo['sea_level_isp'] = _satir['isp']
+
         # Isı transferi analizi
         #
         # v2.6.25 DÜZELTMESİ — ÜÇ KULLANICI GİRDİSİ BURAYA HİÇ ULAŞMIYORDU.
@@ -5784,6 +5873,149 @@ class HybridRocketEngine:
         self.nozzle_expansion_screen = ekran
         return self._gate_finite_cf(cf_attached, ekran)
 
+    def _publish_design_ambient(self, results, combustion_results=None):
+        """``design_ambient`` bloğu ve ``isp_design_ambient`` — V307/HİBRİT-ORTAM.
+
+        Hibritin tasarım ortamı ``atmospheric_pressure`` girdisidir (bar):
+        girilen itki o ortamdaki itkidir; C_F, Isp, ṁ ve boğaz o ortamda
+        çözülür. Blok bunu TEK yerde, sıvı/katı ile ORTAK anahtar adlarıyla
+        söyler (``pressure_bar``, ``pressure_kpa``, ``altitude_m``,
+        ``source``, ``is_sea_level``, ``isp_design_ambient_s``,
+        ``isp_sea_level_s``, ``sea_level_flow_separated``; ``mode`` sıvının
+        kip adlarıyla: ``sea_level`` / ``pressure`` / ``vacuum``).
+
+        Deniz seviyesi durumu aynı lülenin irtifa tablosundaki 0 m
+        satırıdır (ISA 1,01325 bar; F(0) = F_tas + (p_tas − p_ds)·A_e).
+        Ayrılma ölçütü motorun tasarım noktası denetimiyle aynıdır
+        (Summerfield, P_e < k·p_a). Lüle deniz seviyesinde ayrılıyorsa
+        deniz seviyesi itkisi ve Isp YAYIMLANMAZ (``None``) ve nedeni adıyla
+        yazılır. Tasarım ortamı deniz seviyesiyse deniz seviyesi durumu
+        tasarım noktasının kendisidir (motor orada kendi ayrılma tabanını
+        uygular; sayılar başlık sayılarıyla aynıdır).
+        """
+        k = float(SUMMERFIELD_FACTOR_DEFAULT)
+        p_a = float(self.P_a)
+        p_ds = float(P_SEA_LEVEL_PA * BAR_PER_PA)     # ISA 0 m, bar
+        ds = bool(p_a == p_ds)
+        kip = ('sea_level' if ds else 'vacuum' if p_a == 0.0
+               else 'pressure')
+        pe = self._separation_exit_pressure_bar(combustion_results)
+        ekran = getattr(self, 'nozzle_expansion_screen', None)
+        ekran = ekran if isinstance(ekran, dict) else {}
+
+        def _sonlu(v):
+            if isinstance(v, bool) or not isinstance(v, (int, float)):
+                return None
+            return float(v) if np.isfinite(v) else None
+
+        isp_tas = _sonlu(results.get('isp'))
+        itki_tas = _sonlu(results.get('thrust'))
+        ap = results.get('altitude_performance')
+        satirlar = (ap.get('altitude_performance')
+                    if isinstance(ap, dict) else None) or []
+        satir0 = next((r for r in satirlar if isinstance(r, dict)
+                       and float(r.get('altitude', float('nan'))) == 0.0),
+                      None)
+        ayrik_ds = None if pe is None else bool(pe < k * p_ds)
+        if ds:
+            # Tasarım noktası deniz seviyesidir. Sayılar yanıtın üst
+            # düzey ``sea_level_isp``ıyla AYNI bitler olsun diye 0 m
+            # satırından okunur (satır tasarım noktasıdır; başlık sayısıyla
+            # en son basamakta ayrışabilir); satır yoksa başlık sayıları.
+            if satir0 is not None and satir0.get('thrust') is not None:
+                itki_ds = _sonlu(satir0.get('thrust'))
+                isp_ds = _sonlu(satir0.get('isp'))
+            else:
+                itki_ds, isp_ds = itki_tas, isp_tas
+            durum = 'design_point'
+            neden = None
+        elif satir0 is None:
+            itki_ds = isp_ds = None
+            durum = 'not_evaluated'
+            neden = ('the altitude performance table was not computed for '
+                     'this run, so the sea-level state is not evaluated')
+        elif satir0.get('flow_separated'):
+            itki_ds = isp_ds = None
+            durum = 'separated'
+            neden = (
+                'the nozzle separates at sea level by the Summerfield '
+                f'criterion (P_e = {pe:.4f} bar < {k:g} x 1.01325 bar = '
+                f'{k * p_ds:.4f} bar): attached-flow relations do not hold '
+                'there and separated nozzle flow is NOT modelled, so no '
+                'sea-level thrust or Isp is published. The test uses the '
+                'one-dimensional exit pressure: a contoured nozzle whose '
+                'wall pressure at the exit is higher than that value can '
+                'stay attached, and the wall pressure distribution is not '
+                'solved here.')
+        else:
+            itki_ds = _sonlu(satir0.get('thrust'))
+            isp_ds = _sonlu(satir0.get('isp'))
+            durum = ('not_evaluated' if ayrik_ds is None else 'attached')
+            neden = (None if ayrik_ds is not None else
+                     'the nozzle exit pressure could not be resolved, so '
+                     'the separation check was not applied')
+
+        results['design_ambient'] = {
+            'mode': kip,
+            'source': 'entered_pressure',
+            'pressure_bar': p_a,
+            'pressure_kpa': p_a * 100.0,
+            'altitude_m': None,
+            'is_sea_level': ds,
+            'thrust_design_ambient_N': itki_tas,
+            'isp_design_ambient_s': isp_tas,
+            'isp_sea_level_s': isp_ds,
+            'sea_level_flow_separated': ayrik_ds,
+            'design_point': {
+                'exit_pressure_bar': pe,
+                'separation_pressure_bar': k * p_a,
+                'separation_pressure_ratio': k,
+                'flow_separated': ekran.get('separation_predicted'),
+                'separation_floor_applied': bool(
+                    ekran.get('floor_applied') is True),
+            },
+            'sea_level': {
+                'ambient_pressure_bar': p_ds,
+                'exit_pressure_bar': pe,
+                'separation_pressure_bar': k * p_ds,
+                'separation_pressure_ratio': k,
+                'flow_separated': ayrik_ds,
+                'status': durum,
+                'thrust_N': itki_ds,
+                'isp_s': isp_ds,
+                'not_published_reason': neden,
+                'basis': HYBRID_DESIGN_AMBIENT_SEA_LEVEL_BASIS,
+            },
+            'basis': HYBRID_DESIGN_AMBIENT_BASIS,
+        }
+        results['isp_design_ambient'] = isp_tas
+
+    def _separation_exit_pressure_bar(self, combustion_results=None):
+        """Ayrılma ölçütünün çıkış basıncı [bar] — V307/HİBRİT-ORTAM.
+
+        Önce motorun aşırı genişleme denetiminin (``nozzle_expansion_screen``)
+        çıkış basıncı: tasarım noktasının ayrılma hükmü ve İrtifa Profili
+        aynı sayıyı okur. Kullanıcı C_F verdiğinde denetim koşmaz; o zaman
+        irtifa taramasının kendi bağıntısındaki çıkış basıncı (denge
+        çözümünün çıkış istasyonu) kullanılır. İkisi de yoksa ``None``
+        (ölçüt uygulanamaz; ``design_ambient.sea_level.status`` bunu
+        ``not_evaluated`` diye yazar).
+        """
+        ekran = getattr(self, 'nozzle_expansion_screen', None)
+        adaylar = []
+        if isinstance(ekran, dict):
+            adaylar.append(ekran.get('exit_pressure_bar'))
+        try:
+            adaylar.append(combustion_results['conditions']['exit']['P'])
+        except (KeyError, TypeError):
+            pass
+        for aday in adaylar:
+            if isinstance(aday, bool) or not isinstance(aday, (int, float)):
+                continue
+            if np.isfinite(aday) and aday > 0.0:
+                return float(aday)
+        return None
+
     @staticmethod
     def _gate_finite_cf(cf, ekran):
         """C_F sonluluk/pozitiflik kapısı — NaN aşağı akmaz.
@@ -5946,9 +6178,10 @@ class HybridRocketEngine:
 
     def _grain_sizing_formula(self):
         if int(self.port_count) == 1:
-            return 'D_grain_outer = D_port_final + 2*t_residual'
-        return ('D_grain_outer = D_port_final*(1 + 1/sin(pi/N)) + '
-                '2*t_residual')
+            return ('grain outer diameter = final port diameter + '
+                    '2 × residual web')
+        return ('grain outer diameter = final port diameter × '
+                '(1 + 1/sin(π/N)) + 2 × residual web')
 
     def _raise_grain_envelope_exceeded(self, max_port, t_asim):
         """Kullanıcı kamara çapı son portları taşıyamıyor: adlı ret.
@@ -6682,6 +6915,10 @@ class HybridRocketEngine:
             _tank_m0_buhar = (float(tb.tank.vapor_mass)
                               if getattr(tb, 'tank', None) is not None
                               else None)
+            # V307/ÇALKANTI-KARARLILIK: ateşleme anındaki tank sıcaklığı
+            # (sıvı yoğunluğu serisinin t = 0 noktası).
+            _tank_T0 = (float(tb.tank.T)
+                        if getattr(tb, 'tank', None) is not None else None)
             if _yuruyussuz_uq:
                 return {
                     'status': 'NOT_MODELLED',
@@ -6739,6 +6976,18 @@ class HybridRocketEngine:
         _tank_m_son = (float(tb.tank.liquid_mass) + float(tb.tank.vapor_mass)
                        if getattr(tb, 'tank', None) is not None else None)
         _yayin = blowdown_published_series(sol, tb.dt, _tank_m0, _tank_m_son)
+        # V307/ÇALKANTI-MOTOR: tankın SIVI kütlesi serisi (adım sınırları;
+        # çalkantı bağlantısının m_t'si). Tankın KENDİ adım kaydından.
+        _sivi_seri = tank_liquid_mass_series(
+            getattr(getattr(tb, 'tank', None), '_history', None), tb.dt,
+            _tank_m0_sivi, sol.get('end_event'), len(sol['time']),
+            _yayin['time_s'][-1])
+        # V307/ÇALKANTI-KARARLILIK: aynı sınırlarda sıvı yoğunluğu ρ_l(T)
+        # (çalkantı bağlantısının doluluğu hacimden kursun diye).
+        _sivi_yogunluk = (tank_liquid_density_series(
+            getattr(getattr(tb, 'tank', None), '_history', None), _tank_T0,
+            getattr(getattr(getattr(tb, 'tank', None), 'props', None),
+                    'use_coolprop', True)) if _sivi_seri else None)
         _kaynak = _yayin['source_index']
         _m_yayin = len(_kaynak)
         # ~TANK_BLOWDOWN_MAX_POINTS noktaya seyreltme (port_history deseni):
@@ -7042,6 +7291,15 @@ class HybridRocketEngine:
                     if _yayin['oxidizer_tank_delivered_kg'] is not None
                     else None),
                 'last_step_fraction': _yayin['last_step_fraction'],
+                # V307/ÇALKANTI-MOTOR: sıvı kütlesi serisi (yeni anahtarlar;
+                # künyesi TANK_LIQUID_MASS_SERIES_BASIS).
+                'liquid_mass_time_s': (_sivi_seri[0] if _sivi_seri
+                                       else None),
+                'liquid_mass_kg': (_sivi_seri[1] if _sivi_seri else None),
+                'liquid_mass_basis': TANK_LIQUID_MASS_SERIES_BASIS,
+                # V307/ÇALKANTI-KARARLILIK: aynı sınırlarda sıvı yoğunluğu.
+                'liquid_density_kg_m3': _sivi_yogunluk,
+                'liquid_density_basis': TANK_LIQUID_DENSITY_SERIES_BASIS,
                 'basis': (
                     'tank_initial_kg is the N2O the tank holds at ignition '
                     '(liquid plus ullage vapour, solver tank object), '
@@ -8403,7 +8661,7 @@ class HybridRocketEngine:
                 + ('' if g_local is not None else
                    '; it is None because no latitude was supplied and '
                    'local gravity is latitude-dependent — it is not '
-                   'fabricated')),
+                   'assumed')),
             'not_modelled': [
                 'nozzle flow separation is not re-assessed at the site '
                 'ambient pressure; the nozzle design block carries its own '
@@ -8429,8 +8687,8 @@ class HybridRocketEngine:
         tank için iki farklı hacim OLAMAZ; blowdown koşamadıysa aynı
         boyutlandırma formülü beyanla uygulanır), sıvı kütlesi çözücünün
         m_ox'u, tank çapı beyanlı L/D tasarım oranından. g_eff SABİT 1 g'dir
-        ve öyle beyan edilir — uçuş ivmesiyle (g_eff = T/m) bağlaşım
-        yörünge bağlamasına bırakılmıştır (NOT_MODELLED notu blokta).
+        ve öyle beyan edilir — uçuş ivmesiyle (g_eff(t)) bağlaşım
+        6-DOF panelinin çalkantı alt bölümündedir (g_eff_basis notu).
         """
         basis = (
             'linear free-surface slosh of the oxidizer liquid in an upright '
@@ -8479,7 +8737,13 @@ class HybridRocketEngine:
                 v_tank = None
         if v_tank and v_tank > 0 and fill and 0 < fill <= 1:
             v_liquid = v_tank * fill
-            rho_liquid = m_ox / v_liquid
+            # V307/CI-KIRMIZI: ρ_l(T0) boşalma envanterinin t = 0 noktasından
+            # (tek hesap; m_ox/V_sıvı Linux'ta son basamakta ayrışıyordu).
+            _rs = (blowdown.get('oxidizer_inventory') or {}).get(
+                'liquid_density_kg_m3') or [None]
+            rho_liquid = (float(_rs[0]) if isinstance(_rs[0], (int, float))
+                          and np.isfinite(_rs[0]) and _rs[0] > 0
+                          else m_ox / v_liquid)
             volume_source = (
                 'tank_blowdown block of this run (one tank, one volume); '
                 'the liquid density is the value implied by that sizing '
@@ -8522,7 +8786,11 @@ class HybridRocketEngine:
         d_tank = (4.0 * v_tank / (np.pi * OX_TANK_LD_RATIO)) ** (1.0 / 3.0)
         l_tank = d_tank * OX_TANK_LD_RATIO
         r_tank = d_tank / 2.0
-        h_fill = v_liquid / (np.pi * r_tank ** 2)  # = fill · L_tank
+        # V307/TEK-TANIM (CI-KIRMIZI K1): h = fill·V_iç/(πR²), çalkantı
+        # tablosunun satırıyla AYNI işlev; fill tablo ızgara düğümüyse
+        # motor kartının f1'i tablonun düğüm satırıyla tek hesap.
+        from hrma.analysis.slosh_analysis import silindir_dolu_yukseklik
+        h_fill = silindir_dolu_yukseklik(r_tank, l_tank, fill)
 
         try:
             from hrma.analysis.slosh_analysis import analyze_slosh
@@ -8554,12 +8822,12 @@ class HybridRocketEngine:
             'g_eff_m_s2': float(self.g0),
             'g_eff_basis': (
                 'constant standard 1-g axial acceleration (ground / hover '
-                'condition). NOT_MODELLED: coupling g_eff to the flight '
-                'acceleration profile (g_eff = T/m during boost, which '
-                'raises the slosh frequency as sqrt(g_eff)) is not wired '
-                'to the trajectory yet — that is the follow-on work item; '
-                'the fill_sweep inside the slosh result covers the '
-                'draining-level dependence at 1 g only.'),
+                'condition): this motor card is evaluated at 1 g. Coupling '
+                'to the flight acceleration (g_eff(t) = the axial specific '
+                'force during boost, which raises the slosh frequency as '
+                'sqrt(g_eff)) is in the 6-DOF panel, Stability: slosh '
+                'subsection, once the tank location is entered; the '
+                'fill_sweep here covers the draining level at 1 g only.'),
             'slosh': slosh,
         }
         if rho_kunyesi is not None:   # yalnız kullanıcı tank kipi (H1)
@@ -8869,7 +9137,7 @@ class HybridRocketEngine:
                 'and wired to the liquid engine feed lines). It is NOT '
                 'evaluated for the hybrid oxidizer feed line because the '
                 'inputs do not exist in this solver - they are not '
-                'fabricated.'),
+                'assumed.'),
             'reason': (
                 'the hybrid solver sizes no feed line at all: no line '
                 'diameter, no line velocity and no line length are computed '
@@ -9285,7 +9553,7 @@ class HybridRocketEngine:
                     'reason': ('the mean square of the mode shape over the '
                                'fuel port window is not a usable average for '
                                'this mode (non-positive or non-finite), so no '
-                               'threshold is fabricated for it'),
+                               'threshold is published for it'),
                 })
                 continue
             try:
@@ -9393,7 +9661,7 @@ class HybridRocketEngine:
                 'burning-surface gain) are derived for psi = cos(q*pi*z/L). '
                 'For tangential/radial modes neither the nozzle integral nor '
                 'the mean square over the burning surface holds, and no '
-                'number is fabricated for them.'),
+                'number is published for them.'),
             'not_modelled': esik_beyanlari,
         }
         return forbid_verdict_key(
@@ -9718,7 +9986,7 @@ class HybridRocketEngine:
                 '_basis': (
                     'The oxidizer feed-coupled chug loop needs J, the '
                     'sensitive time lag tau, L* and c*. One or more were not '
-                    'solved on this run, so no loop result is fabricated.'),
+                    'solved on this run, so no loop result is published.'),
             }
 
         from hrma.stability.chamber import chamber_time_constant
@@ -9744,7 +10012,7 @@ class HybridRocketEngine:
             return {
                 'status': 'NOT_EVALUATED',
                 'reason': f'the chug loop rejected the inputs: {exc}',
-                '_basis': ('No number is fabricated when the core refuses an '
+                '_basis': ('No number is published when the core refuses an '
                            'input.'),
             }
 
@@ -10377,7 +10645,7 @@ class HybridRocketEngine:
                 'the constant-volume hard-start window (Sutton & Biblarz 9th '
                 'ed. Ch. 8/15; NASA SP-8051). It is NOT evaluated here - the '
                 'inputs it requires are not computed by the hybrid solver '
-                'and are not fabricated.'),
+                'and no values are assumed for them.'),
             'reason': (
                 'the hybrid solver has no ignition model and no propellant '
                 'ignition data: the fuel property table carries density, '
@@ -11546,7 +11814,7 @@ class HybridRocketEngine:
                     + ('' if cap_len_m is not None else
                        ' with_caps is None because the structural end-cap '
                        'analysis is unavailable in this run; the length is '
-                       'not fabricated.')),
+                       'not estimated.')),
                 'total_mass_kg': total_mass,
                 # F3-2: kütle bütçesi tanımı ADIYLA — tüketici (T/W, araç
                 # bütçesi, rapor) hangi kütleyi okuduğunu bilmek zorunda.
@@ -11688,6 +11956,10 @@ class HybridRocketEngine:
         
         if thrust_altitude_analysis:
             basic_results['thrust_altitude_analysis'] = thrust_altitude_analysis
+
+        # V307/HİBRİT-ORTAM kalem 2: tasarım ortamı TEK blokta, sıvı/katı ile
+        # ortak anahtar adlarıyla (güverte okuyucuları aynı bloğu okur).
+        self._publish_design_ambient(basic_results, combustion_results)
         
         if heat_transfer_results:
             basic_results['heat_transfer_analysis'] = heat_transfer_results
@@ -11834,8 +12106,8 @@ class HybridRocketEngine:
             'named computation exists nowhere in the hybrid chain, and items '
             'already declared at their own source (rigid-throat erosion, '
             'kinetic-efficiency diagnosis, multi-port equivalent-model '
-            'warning) are not duplicated here. A declared absence is honest; '
-            'a fabricated number is not.')
+            'warning) are not duplicated here. A missing value is declared as '
+            'missing, not replaced by a number.')
 
         # v2.6.26: hibrit motor uyarıları TOPLUYOR ama sonuç sözlüğüne HİÇ
         # koymuyordu; ``self.design_warnings`` listesi nesneyle birlikte
@@ -13307,6 +13579,110 @@ def blowdown_published_series(sol, dt, tank_mass_initial_kg=None,
         'oxidizer_euler_kg': euler_ox,
         'basis': BLOWDOWN_PUBLICATION_BASIS,
     }
+
+
+#: V307/ÇALKANTI-MOTOR — tank SIVI kütlesi serisinin künyesi (yalnız
+#: ``oxidizer_inventory.liquid_mass_*``; bloğun öbür alanları değişmedi).
+TANK_LIQUID_MASS_SERIES_BASIS = (
+    'Liquid N2O left in the tank at the step boundaries of THIS blowdown '
+    'solution, read from the tank model of this run step by step (the '
+    'equilibrium liquid/vapour split of N2OTankBlowdown, Whitmore & Chandler '
+    '2011): t = 0 is the ignition state (tank_initial_liquid_kg), t = '
+    '(k+1)*dt the state after step k; when the liquid runs out inside the '
+    'last step that boundary is the end of the shortened step (the end of '
+    'the published burn) and the liquid there is 0. The liquid falls faster '
+    'than the oxidiser flow alone: part of it evaporates to keep the ullage '
+    'at saturation pressure, so liquid left differs from tank_initial_liquid_kg '
+    'minus the oxidiser delivered. Vapour is not liquid and is not in this '
+    'series. Consumer: the slosh connection of the 6-DOF tank list '
+    '(hrma/analysis/slosh_motor_baglanti.py).')
+
+
+def tank_liquid_mass_series(history, dt, m_liquid_0, end_event,
+                            n_samples, end_time_s,
+                            max_points=TANK_BLOWDOWN_MAX_POINTS):
+    """Tankın sıvı kütlesi adım sınırlarında: ``(zaman_s, kütle_kg)``.
+
+    V307/ÇALKANTI-MOTOR (CALKANTI §A.2): çalkantı bağlantısı tankın SIVI
+    kütlesini ister. Çözücünün tank nesnesi her adımın sonundaki durumu
+    (``N2OTankBlowdown._pack_state``: ``m_liquid``) kaydeder; seri buradan
+    okunur, yeniden türetilmez. ``m_liquid_0 − ∫ṁ_ox dt`` KULLANILMAZ:
+    sıvının bir kısmı ullage'ı doyma basıncında tutmak için buharlaşır
+    (ölçüldü, örnek hibrit: sıvı 12,502 kg biterken teslim edilen
+    oksitleyici 11,328 kg).
+
+    Zaman ekseni yayımlanan serinin (``blowdown_published_series``) adım
+    sınırlarıdır: 0, dt, 2dt, … Sıvı son adımın içinde bittiyse
+    (``end_event == 'oxidizer_depleted'`` ve tank her örnek için bir kez
+    ilerledi) son sınır kısaltılmış adımın sonudur (``end_time_s``) ve
+    sıvı orada 0'dır. Yanma başka sebeple bittiyse (ör. ``web_exhausted``)
+    tank son örnekte ilerletilmemiştir; seri tankın son ilerlediği sınırda
+    biter (dışdeğerleme yok). Kayıt yoksa ``None``.
+    """
+    if not history or m_liquid_0 is None:
+        return None
+    zaman = [0.0]
+    kutle = [float(m_liquid_0)]
+    for k, durum in enumerate(history):
+        zaman.append((k + 1) * float(dt))
+        kutle.append(float(durum['m_liquid']))
+    if (end_event == 'oxidizer_depleted' and len(history) == int(n_samples)
+            and end_time_s is not None and float(end_time_s) > zaman[-2]):
+        zaman[-1] = float(end_time_s)
+    stride = max(1, len(zaman) // int(max_points))
+    secilen = list(range(0, len(zaman), stride))
+    if secilen[-1] != len(zaman) - 1:
+        secilen.append(len(zaman) - 1)
+    return ([zaman[i] for i in secilen], [kutle[i] for i in secilen])
+
+
+#: V307/ÇALKANTI-KARARLILIK — tank SIVI yoğunluğu serisinin künyesi (yalnız
+#: ``oxidizer_inventory.liquid_density_kg_m3``).
+TANK_LIQUID_DENSITY_SERIES_BASIS = (
+    'Saturated-liquid density of the N2O in the tank at the same step '
+    'boundaries as liquid_mass_kg (time axis liquid_mass_time_s): rho_l(T) '
+    'of the tank temperature recorded by the tank model of THIS run at each '
+    'boundary, evaluated with the same saturation model the tank uses '
+    '(hrma.analysis.tank_blowdown.N2OSaturation). The tank cools as it '
+    'empties, so the liquid becomes denser during the burn; liquid volume = '
+    'liquid_mass_kg / liquid_density_kg_m3. null where the saturation model '
+    'has no liquid state at the recorded temperature. Consumer: the slosh '
+    'connection of the 6-DOF tank list (hrma/analysis/slosh_motor_baglanti.py).')
+
+
+def tank_liquid_density_series(history, T_0, use_coolprop=True,
+                               max_points=TANK_BLOWDOWN_MAX_POINTS):
+    """Tank sıvısının doyma yoğunluğu ρ_l(T) adım sınırlarında [kg/m³].
+
+    V307/ÇALKANTI-KARARLILIK (CALKANTI §A.2, karar 16 Kas): kendinden
+    basınçlı N₂O tankı boşalırken soğur ve sıvı yoğunlaşır (örnek hibrit:
+    293,15 → 273,64 K, 785,1 → 904,6 kg/m³). Çalkantı doluluğu hacimden
+    kurulur: V_sıvı = m_sıvı/ρ_l(T). Sınırlar ve seyreltme
+    :func:`tank_liquid_mass_series` ile AYNIDIR (t = 0 ateşleme durumu
+    ``T_0``; sonra her adımın sonundaki tank sıcaklığı
+    ``N2OTankBlowdown._pack_state['T']``). Yoğunluk tankın kullandığı doyma
+    modelinin AYRI bir örneğinden okunur (tankın kenetleme defteri
+    değişmesin). Doyma modelinin sıvı hâli vermediği sıcaklıkta ``None``.
+    Kayıt yoksa ``None``.
+    """
+    if not history or T_0 is None:
+        return None
+    from hrma.analysis.tank_blowdown import N2OSaturation
+    ozellik = N2OSaturation(use_coolprop=use_coolprop)
+    sicaklik = [float(T_0)] + [float(durum['T']) for durum in history]
+    stride = max(1, len(sicaklik) // int(max_points))
+    secilen = list(range(0, len(sicaklik), stride))
+    if secilen[-1] != len(sicaklik) - 1:
+        secilen.append(len(sicaklik) - 1)
+    out = []
+    for i in secilen:
+        try:
+            rho = float(ozellik.rho_l(sicaklik[i]))
+        except (ValueError, ArithmeticError):
+            rho = None
+        out.append(rho if rho is not None and np.isfinite(rho) and rho > 0.0
+                   else None)
+    return out
 
 
 #: V306/HİBRİT-ÇAPRAZ (kalem 1) — teslim büyüklüklerinin kaynağı.

@@ -305,6 +305,16 @@
             + 'swirl elements, whose Cd follows from their geometry.'],
     };
 
+    // V307/DİL-EKRAN (NK3-H-8): not satırı canlı dil geçişinde de çevrilsin
+    // diye sabit anahtarlı metin `data-i18n` ile yazılır; boş metinde
+    // nitelik kaldırılır.
+    function notYaz(el, key, metin) {
+        if (!el) return;
+        el.textContent = key ? T(key, metin) : (metin || '');
+        if (key) el.setAttribute('data-i18n', key);
+        else el.removeAttribute('data-i18n');
+    }
+
     function help(id) {
         const pair = (cfg.motorType === 'liquid' && LIQUID_FIELD_HELP_KEYS[id])
             || FIELD_HELP_KEYS[id];
@@ -908,8 +918,15 @@
 
     // Alan BOŞSA doldurur; kullanıcı bir değer girdiyse ASLA ezmez.
     // (Eski davranış her çalıştırmada elle girilen değeri siliyordu.)
+    // V307/DİL-EKRAN-2 (DİL-HİBRİT O10): `fmt` yalnız EKRAN metni üretir
+    // (rozet, tablo hücresi, satır; form alanına yazılmaz — 36 çağrı yeri
+    // ölçüldü). TR ekranda element tablosu "2.44 37.3 … v/v=0.10" noktalı
+    // basıyordu; basamak aynı kalır, ayraç `I18N.decimalText`ten.
     function fmt(x, d) {
-        return (x == null || !Number.isFinite(x)) ? '—' : x.toFixed(d == null ? 2 : d);
+        if (x == null || !Number.isFinite(x)) return '—';
+        const t = x.toFixed(d == null ? 2 : d);
+        return (window.I18N && typeof window.I18N.decimalText === 'function')
+            ? window.I18N.decimalText(t) : t;
     }
 
     // ------------------------------------------------------------------
@@ -1092,7 +1109,21 @@
             <td>${fmt(c.total_area_mm2, 1)}</td>
             <td>${fmt(c.delta_p_bar, 1)}</td>
             <td>${fmt(c.velocity_m_s, 1)}</td>
-            <td title="${c.cd_basis || ''}" style="cursor:help;">${fmt(c.cd)}</td>
+            <td${(function () {
+                /* V307/DİL-SON kalem 7 (O10): Cd dayanağı ipucu TR ekranda
+                   İngilizce ve KAÇIŞSIZ basılıyordu (tırnak/'<' içeren dayanak
+                   özniteliği kırardı). Metin sunucu çeviri kanalından
+                   (serverText; tanınmazsa AYNEN), öznitelik kaçışı depodaki
+                   AnalysisDock.ui.esc ile. Dayanak yoksa ya da kaçış
+                   yardımcısı yüklü değilse title HİÇ konmaz (fail-closed). */
+                const ui = (typeof window !== 'undefined' && window.AnalysisDock)
+                    ? window.AnalysisDock.ui : null;
+                if (!c.cd_basis || !ui || typeof ui.esc !== 'function') return '';
+                const I = (typeof window !== 'undefined') ? window.I18N : null;
+                const metin = (I && typeof I.serverText === 'function')
+                    ? I.serverText(String(c.cd_basis)) : String(c.cd_basis);
+                return ' title="' + ui.esc(metin) + '"';
+            }())} style="cursor:help;">${fmt(c.cd)}</td>
             <td>${fmt(man.d_mm, 1)} mm · v/v=${fmt(man.v_ratio)}</td>
         </tr>`;
     }
@@ -1534,11 +1565,10 @@
             }
         }
         if (note) {
-            note.textContent = twoPhase
-                ? T('inj.dpNote',
-                    'dP is set by tank temperature via Dyer NHNE when two-phase '
-                    + 'N2O is enabled. Change the tank temperature to change dP.')
-                : '';
+            notYaz(note, twoPhase ? 'inj.dpNote' : null, twoPhase
+                ? 'dP is set by tank temperature via Dyer NHNE when two-phase '
+                    + 'N2O is enabled. Change the tank temperature to change dP.'
+                : '');
         }
 
         const host = document.getElementById('inj_schematic');
@@ -1560,7 +1590,7 @@
             ? (cfg.circuitModel || {})[mainType] : MAIN_TO_PANEL[mainType];
         if (hedef && sel.value !== hedef) sel.value = hedef;
         const note = document.getElementById('inj_sync_note');
-        if (note && !cfg._synced) note.textContent = '';
+        if (note && !cfg._synced) notYaz(note, null, '');
         syncTypeFields();
     }
 
@@ -1581,7 +1611,7 @@
         cfg._synced = true;
         syncTypeFields();
         if (note) {
-            note.textContent = T('inj.syncedFromEngine',
+            notYaz(note, 'inj.syncedFromEngine',
                 'Filled from the injector circuit of the main design (this '
                 + 'calculation): the numbers below are that circuit. Change any '
                 + 'field to explore an alternative.');

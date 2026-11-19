@@ -71,8 +71,15 @@ GEO_TAM = {
 #: (kalem 1). Tolerans DEĞİŞMEDİ.
 #:   O/F 7,055120388715818 -> 7,055728090000841;
 #:   Isp 229,5180043954888 -> 229,9182755533293 s
+#: ÇAPA YENİLENDİ — V307/TEK-TANIM kalem 6 (ana model kararı b): ortam
+#: gönderilmezse varsayılan kaynaksız 1,0 bar yerine ISA deniz seviyesi
+#: 1,01325 bar (hrma.constants.P_SEA_LEVEL_PA; /calculate ile aynı ad).
+#: Ölçüm docs/scofield/raw/OH/V307/tek-tanim/k6_once.json → k6_sonra.json.
+#: Tolerans DEĞİŞMEDİ.
+#:   O/F 7,055728090000841 (değişmedi);
+#:   Isp 229,9182755533293 -> 229,5179738979474 s
 OPT_SAGLIKLI_OF = 7.055728090000841
-OPT_SAGLIKLI_ISP = 229.9182755533293
+OPT_SAGLIKLI_ISP = 229.5179738979474
 
 
 @pytest.fixture(scope='module')

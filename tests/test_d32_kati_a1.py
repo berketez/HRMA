@@ -143,15 +143,24 @@ class TestAZincirKimligi:
             _conical_divergence_efficiency)
         lam_ref = _conical_divergence_efficiency(
             SOLID_NOZZLE_REFERENCE_HALF_ANGLE_DEG)
-        eta = _tva(bos_yol)['nozzle_efficiency_applied']
+        # V307 KATI-DOĞRULAMA faz 3 (B1, 16 Kas 2026): iddia TABLO verimi içindir.
+        # Eski satır ``nozzle_efficiency_applied`` okuyordu; B1'den önce o
+        # tablo verimine eşitti (0,985), B1 ile modülün iki fazlı tahminini
+        # de taşır (0,9370). Ölçülen şey değişmedi: TABLO verimi referans
+        # koniden büyüktür, yani iki fazlı kaybı içeremez.
+        eta = bos_yol['delivered_performance_basis'][
+            'nozzle_efficiency_table']['value']
+        assert eta == 0.985
         assert eta > lam_ref, (eta, lam_ref)
         artik = 100.0 * (1.0 - eta / lam_ref)
         assert artik < 0.0
-        # Künye bu gerçeği SÖYLEMELİ: çifte sayım kanalı yalnız kullanıcı
-        # çarpanıdır; taban verime iki-faz yüklenmez.
+        # Künye bu gerçeği SÖYLEMELİ: tablo verimi iki-faz çarpanı taşımaz;
+        # modül tahmini AYRI çarpan olarak uygulanır ve kullanıcı çarpanı
+        # onun YERİNE geçer (çarpım yok).
         beyan = bos_yol['two_phase_loss']['overlap_declaration']
-        assert 'is NOT claimed to contain a two-phase factor' in beyan
-        assert 'divergence + friction' in beyan
+        assert 'does not contain a two-phase factor' in beyan
+        assert 'NASA SP-8039 Fig. 8' in beyan
+        assert 'REPLACED this estimate' in beyan
 
 
 # =====================================================================
@@ -163,15 +172,19 @@ class TestBDurumBeyani:
     hükmü üretilmez. ÖLÇÜLDÜ (once.json Z4): üç kanalda da 0 eşleşme."""
 
     def test_api_govdesi_durumu_yayimlar(self, bos_yol):
+        # V307 KATI-DOĞRULAMA faz 3 (B1, 16 Kas 2026): durum 'uygulanmadı'dan 'modül
+        # tahmini uygulandı'ya döndü (ana model kararı). "Doğrulandı" DENMEZ:
+        # tahmin kaynaklıdır ama bu itici için bağımsız ateşleme kaydı yok.
         from hrma.engines.solid_rocket_engine import (
-            TWO_PHASE_STATUS_NOT_APPLIED)
+            TWO_PHASE_STATUS_MODULE_APPLIED)
         tva = _tva(bos_yol)
         assert tva['two_phase_correction_status'] == \
-            TWO_PHASE_STATUS_NOT_APPLIED
+            TWO_PHASE_STATUS_MODULE_APPLIED
         assert tva['two_phase_correction_verified'] is False
         kunye = tva['two_phase_correction_status_basis']
-        assert 'NO verified two-phase' in kunye
-        assert 'Do not derive a verified delivered-performance claim' in kunye
+        assert 'IS applied to the thrust coefficient' in kunye
+        assert 'not a verified value for this propellant' in kunye
+        assert 'NASA SP-8039' in kunye and 'NASA-CR-158815' in kunye
 
     def test_teshis_blogu_ayni_durumu_tasir(self, bos_yol):
         """İki kanal AYNI tek tanım noktasından beslenir."""
@@ -188,16 +201,27 @@ class TestBDurumBeyani:
         from hrma.export.pdf_generator import PDFReportGenerator
         etiketler = {k for _, _, k in PDFReportGenerator.WARNING_SOURCES}
         assert 'design_warnings' in etiketler
+        # V307 KATI-DOĞRULAMA faz 3 (B1, 16 Kas 2026): PDF kanalındaki TEK kayıt artık
+        # 'uygulandı' kaydıdır (bilgi düzeyi). Eski kayıt
+        # ('…two_phase_correction_unverified', status not_applied_unverified,
+        # applied_efficiency 1,0) "Isp iki-faz düzeltmesi taşımıyor" diyordu;
+        # B1 ile bu yanlış olurdu. Kanal sözleşmesi aynı: durum uyarı
+        # listesinde DURUR, kayıt sayısı 1'dir.
+        eski = [w for w in bos_yol['design_warnings']
+                if isinstance(w, dict)
+                and w.get('code') == 'warn.solid.two_phase_correction'
+                                     '_unverified']
+        assert eski == []
         kayitlar = [w for w in bos_yol['design_warnings']
                     if isinstance(w, dict)
-                    and w.get('code') == 'warn.solid.two_phase_correction'
-                                         '_unverified']
+                    and w.get('code') == 'warn.solid.two_phase_estimate'
+                                         '_applied']
         assert len(kayitlar) == 1, bos_yol['design_warnings']
+        assert kayitlar[0]['severity'] == 'info'
         p = kayitlar[0]['params']
-        assert p['status'] == 'not_applied_unverified'
-        assert p['applied_efficiency'] == 1.0
-        assert p['module_loss_percent'] == pytest.approx(
-            bos_yol['two_phase_loss']['two_phase_loss_pct'], abs=1e-4)
+        assert p['loss_percent'] == pytest.approx(
+            bos_yol['two_phase_loss']['two_phase_loss_pct'], abs=5e-3)
+        assert p['band_low_percent'] < p['loss_percent'] < p['band_high_percent']
         # D-track sözleşmesi: params DİLSİZDİR — string parametre boşluk
         # taşıyamaz (cümle 'fallback'e ve künye alanına yazılır). Bu mandal
         # olmasaydı uzun künye parametreye geri sızabilirdi.
@@ -210,9 +234,9 @@ class TestBDurumBeyani:
         # KENDİ taşır (ZINCIR_BORCU imi kazanılmış olmalı), yoksa kullanıcı
         # ham anahtar görürdü.
         yedek = kayitlar[0].get('fallback') or ''
-        assert 'NO verified two-phase' in yedek
-        assert '{status}' in yedek and '{applied_efficiency}' in yedek
-        assert 'two_phase_correction_status_basis' in yedek
+        assert 'include a two-phase' in yedek
+        assert '{loss_percent}' in yedek and '{band_low_percent}' in yedek
+        assert 'rather than a verified value' in yedek
         from tests.test_engine_warning_i18n import ZINCIR_BORCU
         # fix-35e (ana model, 15 Eyl 2026): borç ÖDENDİ — anahtar EN+TR
         # sözlükte (hrma/static/js/i18n_common.js), ZINCIR_BORCU imi kalktı.
@@ -327,38 +351,50 @@ class TestCVarsayilanDegismedi:
     (berke_kararlari_2026-09-15.md §1 UYGULAMA satırı)."""
 
     def test_varsayilan_eta_bir_ve_Isp_tabandaki_sayi(self, bos_yol):
+        # V307 KATI-DOĞRULAMA faz 3 (B1, 16 Kas 2026) — VARSAYILAN BİLİNÇLİ DEĞİŞTİ.
+        # Eski (T-ÇAPA-A sonrası taban): eta 1,0 / applied False /
+        # Isp 250,8498930866734 / vakum 277,96092362420086 s.
+        # Yeni: modülün boyut düzeltmeli tahmini (%4,8698) uygulanır ->
+        # eta 0,951301840236341, Isp 238,65299346641592 (-%4,86), vakum
+        # 264,4247597381701 s. Bu test "varsayılan değişmedi"yi
+        # kilitliyordu; şimdi B1'in sayısını ve iç tutarlılığını (uygulanan
+        # çarpan = 1 - yayımlanan kayıp/100) kilitler.
         tva = _tva(bos_yol)
-        assert tva['two_phase_efficiency_applied'] == 1.0
-        assert tva['two_phase_losses_applied'] is False
-        assert bos_yol['two_phase_loss']['applied_to_isp'] is False
-        # Taban ağacındaki (dd1dcddc) sayının TA KENDİSİ.
-        # ÖH KİTAP p1b (B11, §28-36 Ş-3): eski 248,579123105323 /
-        # 272,1571436655543 APCP kaydının geri çözülmüş dörtlüsündendi;
-        # ölçülen yeni taban CEA denge dörtlüsüyle (main a6c7e755 → dal).
-        # V301/T-ÇAPA-A: N-CEA-2 (Berke "hepsi, lüle dahil") katı
-        # termokimyayı ve lüleyi motorun Pc'sinde NASA CEA'dan alıyor
-        # (``thermochemistry_source`` nasa_cea_at_pc). Yeniden ölçüldü:
-        # 251,9975279966961 -> 250,8498930866734 (deniz), 278,47639678923076
-        # -> 277,96092362420086 (vakum). CEA kapalı aynı yük eski iki sayıyı
-        # BİT-AYNI verir (kayma yalnız N-CEA-2'den; çekirdek 30 mm 50 bar'da
-        # geçerli, girdi değişmedi).
+        kayip = bos_yol['two_phase_loss']['two_phase_loss_pct']
+        assert tva['two_phase_efficiency_applied'] == pytest.approx(
+            1.0 - kayip / 100.0, rel=1e-12)
+        assert tva['two_phase_efficiency_applied'] == pytest.approx(
+            0.951301840236341, rel=1e-12)
+        assert tva['two_phase_losses_applied'] is True
+        assert tva['two_phase_applied_source'] == 'module_estimate'
+        assert bos_yol['two_phase_loss']['applied_to_isp'] is True
         assert bos_yol['isp_sea_level'] == pytest.approx(
-            250.8498930866734, rel=1e-12)
+            238.65299346641592, rel=1e-12)
         assert bos_yol['isp_vacuum'] == pytest.approx(
-            277.96092362420086, rel=1e-12)
+            264.4247597381701, rel=1e-12)
 
     def test_kayip_en_fazla_BIR_KEZ_uygulanir(self, istemci):
         """Kullanıcı çarpanı verildiğinde toplam nozul verimi TAM olarak
         bir kez düşer; modülün kaybı üstüne EKLENMEZ."""
         bos = _kos(istemci)
         kul = _kos(istemci, two_phase_loss=0.98)
+        # V307 KATI-DOĞRULAMA faz 3 (B1, 16 Kas 2026): kullanıcı çarpanı modül tahmininin
+        # YERİNE geçer. Eski iddia e1 == e0 x 0,98 idi (e0 o zaman tablo
+        # verimiydi); şimdi e0 modül tahminini de taşır, bu yüzden doğru
+        # iddia e1 == TABLO x 0,98'dir ve e1, e0 x 0,98 DEĞİLDİR (çarpım
+        # olsaydı kayıp iki kez sayılırdı).
+        tablo = bos['delivered_performance_basis'][
+            'nozzle_efficiency_table']['value']
         e0 = _tva(bos)['nozzle_efficiency_applied']
         e1 = _tva(kul)['nozzle_efficiency_applied']
-        assert e1 == pytest.approx(e0 * 0.98, rel=1e-12)
-        # Modülün kendi kaybı hiçbir yola girmemiştir.
-        assert bos['two_phase_loss']['two_phase_loss_pct'] > 0.0
+        assert e1 == pytest.approx(tablo * 0.98, rel=1e-12)
+        assert e1 != pytest.approx(e0 * 0.98, rel=1e-6)
         assert e0 == pytest.approx(
-            _tva(bos)['nozzle_efficiency_applied'], rel=1e-12)
+            tablo * (1.0 - bos['two_phase_loss']['two_phase_loss_pct'] / 100.0),
+            rel=1e-12)
+        assert _tva(kul)['two_phase_applied_source'] == 'user_input'
+        assert kul['two_phase_loss']['applied_to_isp'] is False
+        assert bos['two_phase_loss']['two_phase_loss_pct'] > 0.0
 
     def test_uc_yolun_onceden_olculen_sayilari(self, istemci):
         """0,98 yolu ⟷ boş yol ⟷ aday model — Berke'nin karar tablosu
@@ -367,20 +403,28 @@ class TestCVarsayilanDegismedi:
         kul = _kos(istemci, two_phase_loss=0.98)
         aday_eta = 1.0 - bos['two_phase_loss']['two_phase_loss_pct'] / 100.0
         aday = _kos(istemci, two_phase_loss=round(aday_eta, 6))
-        # ÖH KİTAP p1b (B11, §28-36 Ş-3): eski 243,6236 / 248,5791 /
-        # 236,7113 geri çözülmüş APCP dörtlüsündendi; ölçülen yeni taban.
-        # V301/T-ÇAPA-A: N-CEA-2 sonrası yeniden ölçüldü (gerekçe üstteki
-        # düğümde): 246,9758469477623 -> 245,85152033355664;
-        # 251,9975279966961 -> 250,8498930866734; 239,78954243177694 ->
-        # 238,68178089908514. Karar tablosu (once.json Z2a/Z2b/Z2c) sayıları
-        # bu yüzden BAYAT — T-ÇAPA-A RAPOR'da ana modele not.
+        # V307 KATI-DOĞRULAMA faz 3 (B1, 16 Kas 2026): boş yol artık karar tablosundaki
+        # "aday model"in kendisidir. 0,98 yolu DEĞİŞMEDİ
+        # (245,85152033355664: kullanıcı çarpanı modülün yerine geçer).
+        # Boş yol 250,8498930866734 -> 238,65299346641592 s. Aday yolu
+        # 238,68178089908514 -> 238,67803101839135 s: aday çarpanı boş yolun
+        # yayımladığı kayıptan türetilir ve hedefli boyutlandırma artık kaybı
+        # gördüğü için o kayıp %0,002 kaydı. İki yol %0,011 içinde aynı Isp'yi
+        # verir (çarpanın 6 haneye yuvarlanması + boyutlandırmanın kabul
+        # ettiği iterasyon). Eski tarihçe: 246,9758 / 251,9975 / 239,7895
+        # (N-CEA-2 öncesi).
         assert kul['isp_sea_level'] == pytest.approx(245.85152033355664,
                                                      rel=1e-9)
-        assert bos['isp_sea_level'] == pytest.approx(250.8498930866734,
+        assert bos['isp_sea_level'] == pytest.approx(238.65299346641592,
                                                      rel=1e-9)
-        assert aday['isp_sea_level'] == pytest.approx(238.68178089908514,
+        assert aday['isp_sea_level'] == pytest.approx(238.67803101839135,
                                                       rel=1e-9)
-        # Aday model, boş yola göre yakıt kütlesini ARTIRIR (muhafazakâr).
+        assert bos['isp_sea_level'] == pytest.approx(aday['isp_sea_level'],
+                                                     rel=2e-4)
+        # Aday yol (sabit kullanıcı çarpanı) hedef itkiye daha yakın oturur
+        # ve yakıt kütlesi boş yoldan büyüktür: hedefli boyutlandırma %10
+        # toleransla İLK kabul edilen iterasyonda durur (boş yol 4796,8 N,
+        # aday 4938,3 N; hedef 5000 N).
         assert aday['propellant_mass'] > bos['propellant_mass']
 
 

@@ -295,7 +295,10 @@ class TestP11B512SurtunmeKunyesi:
     @node_gerekli
     def test_olculmus_ile_sabit_ayni_kart_degil(self, tmp_path):
         src = oku('hrma/static/js/panels/flow_panel.js')
-        betik = (kes_fonksiyon(src, 'frictionKind')
+        # V307/DİL-SON kalem 4: künye okunur cümle (T() ile); yalıtılan
+        # gövde için T yedek metni döndürür.
+        betik = ('function T(k, f) { return f; }\n'
+                 + kes_fonksiyon(src, 'frictionKind')
                  + kes_fonksiyon(src, 'frictionOriginText')
                  + '\nconsole.log(JSON.stringify({\n'
                    '  olculmus: frictionKind('
@@ -304,6 +307,13 @@ class TestP11B512SurtunmeKunyesi:
                    '{friction_loss_fraction_source:"legacy_constant"}),\n'
                    '  beyansiz: frictionKind({}),\n'
                    '  metin: frictionOriginText({}),\n'
+                   '  olculmus_metin: frictionOriginText('
+                   '{friction_loss_fraction_source:"integral_bl_measured",'
+                   ' friction_loss_fraction_basis:"MEASURED: hrma.flow.x"}),\n'
+                   '  sabit_metin: frictionOriginText('
+                   '{friction_loss_fraction_source:"legacy_constant"}),\n'
+                   '  bilinmeyen: frictionOriginText('
+                   '{friction_loss_fraction_source:"yeni_sinif"}),\n'
                    '}));\n')
         out = node_kos(tmp_path, betik)
         assert out['olculmus'] != out['sabit'], (
@@ -312,6 +322,15 @@ class TestP11B512SurtunmeKunyesi:
         assert out['olculmus'] == 'ok' and out['sabit'] == 'warn'
         assert out['beyansiz'] == 'dim'
         assert 'not declared' in out['metin']
+        # V307/DİL-SON kalem 4: makine adı (alan adı, sınıf kodu, sunucunun
+        # modül yollu gerekçesi) künyede yok; sınıf okunur cümleyle ayrışıyor.
+        for k in ('metin', 'olculmus_metin', 'sabit_metin'):
+            assert not re.search(r'\b[a-z]+(?:_[a-z0-9]+)+\b|hrma\.', out[k]), (
+                k, out[k])
+        assert 'measured' in out['olculmus_metin']
+        assert 'estimate' in out['sabit_metin']
+        assert out['olculmus_metin'] != out['sabit_metin']
+        assert out['bilinmeyen'] == 'yeni_sinif'  # tanınmayan sınıf AYNEN
 
 
 class TestP11B513ItkiTanimiVeCFCeliskisi:
@@ -319,14 +338,23 @@ class TestP11B513ItkiTanimiVeCFCeliskisi:
     @node_gerekli
     def test_thrust_karti_hangi_itki_oldugunu_soyler(self, tmp_path):
         src = oku('hrma/static/js/panels/flow_panel.js')
-        betik = ('const U = { fmt: (v, d) => Number(v).toFixed(d) };\n'
+        betik = ('const U = { fmt: (v, d) => Number(v).toFixed(d),\n'
+                 '  tf: (k, p, f) => f.replace(/\\{(\\w+)\\}/g,'
+                 ' (m, x) => p[x]) };\n'
+                 'function T(k, f) { return f; }\n'
                  + kes_fonksiyon(src, 'thrustDefinitionText')
                  + '\nconsole.log(JSON.stringify({metin:'
                    ' thrustDefinitionText({thrust_N: 1000,'
                    ' thrust_full_flow_N: 4430}, {thrust_effective_N: 950})}));\n')
         out = node_kos(tmp_path, betik)
-        assert 'performance.thrust_N' in out['metin'], (
+        # V307/DİL-SON kalem 4: tanım alan yoluyla değil okunur adla
+        # ('performance.thrust_N' -> 'Thrust of the solved flow').
+        assert 'Thrust of the solved flow' in out['metin'], (
             'THRUST kartı hangi itki tanımını gösterdiğini söylemiyor')
+        assert not re.search(r'\b[a-z]+(?:_[a-z0-9]+)+\b|\w\.\w+_N\b',
+                             out['metin']), out['metin']
+        assert 'Full-flow thrust' in out['metin']
+        assert 'Effective thrust' in out['metin']
         assert '4.430' in out['metin'], 'kardeş tanımın oranı yazılmıyor'
         assert '0.950' in out['metin']
 

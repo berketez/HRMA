@@ -1,0 +1,58 @@
+{
+  "schema_version": "1.0",
+  "test_id": "sol-aedc1974-fw4s-ra307",
+  "record_type": "static_fire",
+  "motor_type": "solid",
+  "source": {
+    "citation": "H. L. Merryman ve diğ., 'Performance of a UTC FW-4S Solid Propellant Rocket Motor under the Combined Effects of Simulated Altitude and Rotational Spin', AEDC-TR-74-83 (AD-A002149), Arnold Engineering Development Center, Aralık 1974; NTRS 19750011284 — metin s. 9-10, Tablo 4",
+    "doi": null,
+    "url": "https://ntrs.nasa.gov/citations/19750011284",
+    "access": "public_domain",
+    "confidence": "medium",
+    "date_checked": "2026-11-16",
+    "data_extraction": "table",
+    "extraction_note": "Taranmış belge (OCR bozuk); sayılar metin (s. 9-10) ve özet tablonun tutarlı olduğu yerlerden. Tane geometrisi ve yanma hızı yasası raporda YOK."
+  },
+  "propellants": {
+    "propellant": "UTP-3096A (kompozit; bileşim raporda yok)",
+    "hrma_propellant_key": null
+  },
+  "geometry": {
+    "grain_geometry": "kasa bağlı, enine yarıklı tüp (transversely slotted tube); ölçüler raporda YOK",
+    "throat_area_nominal_in2": 4.3,
+    "expansion_ratio": 50.0,
+    "nozzle_half_angle_deg": 20.0
+  },
+  "inputs": {
+    "spin_rate_rpm": 180,
+    "simulated_altitude_at_ignition_ft": 121000,
+    "motor_case_temperature_f": 77,
+    "propellant_mass_stated_lbm": 605.0
+  },
+  "measured": {
+    "action_time_s": 31.12,
+    "web_burnout_time_s": 29.3,
+    "total_burn_time_s": 126.0,
+    "ignition_delay_s": 0.12,
+    "total_impulse_vac_tbd_lbfs": 170935.0,
+    "total_impulse_vac_ts_lbfs": 172024.0,
+    "isp_vac_s": 284.34,
+    "chamber_pressure_integral_tbd_psias": 20692.0,
+    "thrust_coefficient_vac_avg": 1.831
+  },
+  "units_original": "lbf, lbm, psia, s, ft, °F, in² (rapor aynen)",
+  "digitized": false,
+  "synthetic": false,
+  "tags": [
+    "static_fire",
+    "altitude_test",
+    "spin",
+    "composite",
+    "nasa_aedc_report",
+    "kismi_girdi",
+    "sure_tanimlari_kaynagi",
+    "kismi_kayit_kosmaz",
+    "published_literature"
+  ],
+  "notes": "KISMİ KAYIT (V307 karar 3): tam motor koşusu YAPILMAZ; yalnız tanım/kaynak kaydıdır. Kaynak sınıfı: NASA/AEDC raporu. Girdi tamlığı DÜŞÜK: tane geometrisi, yanma hızı yasası, itici bileşimi yok; HRMA ile tam motor koşusu YAPILAMAZ. Değeri: (1) süre tanımlarının resmî metni — etki süresi = maksimum oda basıncının %10'u ile %10'u arası; web tükenme süresi = basınç eğrisinin son düz kısmı ile düşen kısmının teğetleri arasındaki açının açıortayının eğriyi kestiği an; (2) aynı ateşlemede ikisinin oranı: 31,12 / 29,30 = 1,062."
+}

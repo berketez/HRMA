@@ -341,7 +341,13 @@ JS_CONSTS = ['LIQUID_SIGFIG_DENSITY', 'LIQUID_SIGFIG_TRANSPORT',
              # 'liquidDeepWarnings is not defined' ile düşüyordu — yani T44
              # bekçileri ÜRÜNÜ değil, eksik koşumu ölçüyordu. Kanal koşuma
              # alındı; T44'ün iddiaları aynen duruyor.
-             'LIQUID_DEEP_WARNING_PATHS']
+             'LIQUID_DEEP_WARNING_PATHS',
+             # V307/KIRMIZI-A (16 Kas): S2-KALINTI (bd7ec07f9, NK3-S-6)
+             # künyenin toplam impuls satırını sayfanın anlamlı basamak
+             # kuralıyla basıyor (liqAnlamliTxt → liqAnlamliOndalik); kural
+             # bu iki sabiti okur. Koşum almazsa node 'liqAnlamliTxt is not
+             # defined' ile düşer (koşum eksiği; T45/T62 iddiaları aynen).
+             'LIQ_ANLAMLI_BASAMAK', 'LIQ_ANLAMLI_AZAMI_ONDALIK']
 
 JS_FUNCS = ['liquidSigFig', 'hrmaFmt', 'liquidWarnText',
             # V306/SIVI-CEKET-A (K5_KARAR EK7): Excel teslimatı ve alt
@@ -376,7 +382,12 @@ JS_FUNCS = ['liquidSigFig', 'hrmaFmt', 'liquidWarnText',
             # sözlük metnini ortakMetin ile, sunucu cümlesini
             # escapeNoticeText ile basıyor; listede yoksa node 'ortakMetin is
             # not defined' ile düşer (koşum eksiği, T45 iddiaları aynen).
-            'ortakMetin', 'escapeNoticeText']
+            'ortakMetin', 'escapeNoticeText',
+            # V307/KIRMIZI-A (16 Kas): künye toplam impuls satırı (S2-KALINTI
+            # bd7ec07f9) bu iki yardımcıyla basılıyor; tarayıcıda ikisi de
+            # sayfanın üst düzey işlevi (ölçüm: docs/scofield/raw/OH/V307/
+            # kirmizi-a/once_gimbal_kunye.json). KOPYA YAZILMAZ: şablondan.
+            'liqAnlamliOndalik', 'liqAnlamliTxt']
 
 
 def _common_dictionary():

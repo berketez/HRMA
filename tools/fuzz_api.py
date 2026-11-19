@@ -92,8 +92,24 @@ LONG_STRING_CHARS = 200_000
 OVER_GATE_PAD_FACTOR = 1.25
 KEY_EXPLOSION_KEYS = 20_000
 #: Kip başına toplam duvar saati bütçesi (s): CI hızlı kipi 60 s, elle tam
-#: kip 40 dk (SG-1 brifi).
-MODE_WALL_BUDGET_S = {'hizli': 60.0, 'tam': 2400.0}
+#: kip 40 dk (SG-1 brifi). 3.0.7 SÜREÇ kalem 9: duvar saati makinenin
+#: YÜKÜNÜ ölçer, kodun maliyetini değil — 16 Kas'ta aynı kod yüklü yerel
+#: makinede 88,8 / 100,5 / 116 s sürdü (yük 15-50), 3.0.6 süpürmesinde sakin
+#: makinede geçmişti. Bu yüzden duvar saati bütçesi YALNIZ adanmış koşucuda
+#: (CI, ``CI=true``) sert sınırdır; her yerde sınanan maliyet süreç CPU
+#: süresidir (``MODE_CPU_BUDGET_S``). Bütçe koşuyu KESMEZ: plan (her kural ×
+#: metod) ve vaka sayısı bütçeden bağımsız tamamlanır; kesme yalnız elle
+#: ``--sure-butcesi`` verilince olur (o zaman ``butce`` bulgusu yazılır).
+#: 3.0.7 (19 Kas, ana model): hızlı kip CI duvar sınırı 60 → 90 s. Ölçüm: erken
+#: aday rc.2 CI'ı (koşu 44488954906, dilim 6) duvar 61,8 s; aynı koşuda CPU
+#: bütçesi (60 s) TUTTU. GitHub'ın paylaşımlı koşucusunda duvar saati CPU'dan
+#: büyük; duvar sınırı CI'da takılma bekçisidir, işin maliyeti CPU bütçesinde
+#: (değişmedi). Pay: ölçülen 61,8 s'nin ~1,45 katı.
+MODE_WALL_BUDGET_S = {'hizli': 90.0, 'tam': 2400.0}
+#: Kip başına süreç CPU süresi bütçesi (s; ``time.process_time``) — aynı iş
+#: yükünün makine yükünden bağımsız maliyeti. Değer duvar saati bütçesiyle
+#: hızlı kipte 60 s'dir (maliyet); CI duvar sınırı 3.0.7'de 90 s'ye çıktı (yukarı).
+MODE_CPU_BUDGET_S = {'hizli': 60.0, 'tam': 2400.0}
 #: Kalkan öz sınamasının bağlandığı belgeleme adresi (RFC 5737 TEST-NET-3;
 #: yönlendirilmez, kalkan bağlantıdan ÖNCE keser).
 SELF_TEST_REMOTE_ADDRESS = ('203.0.113.1', 9)
@@ -1185,6 +1201,8 @@ def run(args):
     client = app.test_client()
     plan = build_plan(app, args.uc)
     t_start = time.perf_counter()
+    cpu_start = time.process_time()
+    truncated = False
     rss_start = max_rss_bytes()
     findings = []
     endpoints = []
@@ -1254,13 +1272,21 @@ def run(args):
                        ag_engellenen=net_count, surec_engellenen=proc_count,
                        en_buyuk_rss_artisi_bayt=rss_peak)
         endpoints.append(summary)
+        # Kesme YALNIZ elle istenince (``--sure-butcesi``): varsayılan koşu
+        # planın tamamını, uç başına sabit vaka sayısıyla koşar.
         if args.sure_butcesi and (time.perf_counter() - t_start
                                   > args.sure_butcesi):
             findings.append({'tur': 'butce', 'ayrinti':
                              'duvar saati bütçesi aşıldı; koşu kesildi',
                              'uc': entry['rule'], 'metod': entry['method']})
+            truncated = True
             break
     duration = time.perf_counter() - t_start
+    cpu_duration = time.process_time() - cpu_start
+    executed = {(e['rule'], e['method']): e.get('vaka', 0) for e in endpoints}
+    plan_complete = all(
+        e['kip'] == 'dislandi' or executed.get((e['rule'], e['method']), 0) >= n_cases
+        for e in plan)
     after = tree_fingerprint(watched)
     diff = fingerprint_diff(before, after)
     if diff['degisen_ya_da_yeni'] or diff['silinen']:
@@ -1273,6 +1299,11 @@ def run(args):
             'python': sys.version.split()[0], 'kok': str(ROOT),
             'gecici_kok': str(temp_root), 'hrma_ithal_s': round(import_s, 2),
             'sure_s': round(duration, 1),
+            'cpu_s': round(cpu_duration, 1),
+            'duvar_butcesi_s': MODE_WALL_BUDGET_S[mode],
+            'cpu_butcesi_s': MODE_CPU_BUDGET_S[mode],
+            'kesildi': truncated,
+            'plan_tamam': plan_complete,
             'zaman': time.strftime('%Y-%m-%dT%H:%M:%S%z'),
             'rss_bas_bayt': rss_start, 'rss_son_bayt': max_rss_bytes(),
             'uc_kural_metod_sayisi': len(plan),
@@ -1302,6 +1333,9 @@ def run(args):
             'depo_agaci_fark': diff,
             'dizinler': {k: str(v) for k, v in dirs.items()},
         },
+        # Planın TAMAMI (koşulsun koşulmasın): kapsam bekçisi bunu okur.
+        'plan': [{'rule': e['rule'], 'method': e['method'], 'kip': e['kip']}
+                 for e in plan],
         'uclar': endpoints,
         'bulgular': findings,
     }
@@ -1368,15 +1402,15 @@ def main(argv=None):
     parser.add_argument('--cikti', required=True)
     parser.add_argument('--gecici-kok', default=None)
     parser.add_argument('--sure-butcesi', type=float, default=None,
-                        help='duvar saati üst sınırı (s); verilmezse kipin '
-                             'bütçesi (MODE_WALL_BUDGET_S)')
+                        help='duvar saati üst sınırı (s); aşılırsa koşu '
+                             'KESİLİR ve "butce" bulgusu yazılır. Verilmezse '
+                             'koşu kesilmez; bütçeler (MODE_WALL_BUDGET_S, '
+                             'MODE_CPU_BUDGET_S) sonuçta ölçülür')
     parser.add_argument('--kalkan-oz-sinama', action='store_true',
                         help='yalnız kalkanı sına, sonucu --cikti\'ya yaz')
     args = parser.parse_args(argv)
     if args.kip not in FUZZ_MODES:
         parser.error(f'kip {FUZZ_MODES} dışında')
-    if args.sure_butcesi is None:
-        args.sure_butcesi = MODE_WALL_BUDGET_S[args.kip]
     out = pathlib.Path(args.cikti)
     if args.kalkan_oz_sinama:
         root = tempfile.mkdtemp(prefix='hrma_kalkan_',
@@ -1395,6 +1429,7 @@ def main(argv=None):
     print(f"fuzz: {meta['kip']} tohum={meta['tohum']} "
           f"uç={meta['uc_kural_metod_sayisi']} vaka={meta['vaka_sayisi']} "
           f"bulgu={len(result['bulgular'])} süre={meta['sure_s']} s "
+          f"cpu={meta['cpu_s']} s "
           f"ağ_engellenen={meta['kalkan']['ag_engellenen']}")
     return 1 if result['bulgular'] else 0
 

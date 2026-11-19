@@ -125,6 +125,9 @@ def _flatten_cell(cell: Dict[str, Any], layer: str) -> Dict[str, Any]:
         worst = cell["min"]
     duz = {
         "motor_type": cell["motor_type"],
+        # V307/KATI-DOGRULAMA karar 3: katı hücresi itici ailesine göre
+        # ayrıdır; aile adı hücrenin kimliğinin parçasıdır (katı dışı: None).
+        "propellant_family": cell.get("propellant_family"),
         "quantity": cell["quantity"],
         "layer": layer,
         "n": cell["n"],
@@ -169,9 +172,11 @@ def correlation_cells(statistics: Dict[str, Any]) -> List[Dict[str, Any]]:
                             ("out_of_scope", "out_of_scope_entries")):
         for entry in statistics.get(anahtar, []):
             grouped.setdefault(
-                (katman, entry["motor_type"], entry["quantity"]), []
+                (katman, entry["motor_type"],
+                 entry.get("propellant_family") or "", entry["quantity"]), []
             ).append(entry)
-    for (katman_adi, motor_type, quantity), entries in sorted(grouped.items()):
+    for (katman_adi, motor_type, aile, quantity), entries in sorted(
+            grouped.items()):
         errors = [e["error_pct"] for e in entries]
         apes = [abs(e) for e in errors]
         worst = max(entries, key=lambda e: abs(e["error_pct"]))
@@ -195,6 +200,7 @@ def correlation_cells(statistics: Dict[str, Any]) -> List[Dict[str, Any]]:
         }
         hucre = {
             "motor_type": motor_type,
+            "propellant_family": aile or None,
             "quantity": quantity,
             "layer": katman_adi,
             "bias_percent": float(_stats.fmean(errors)),
@@ -251,6 +257,14 @@ def _records_with_scored_quantity(result: Dict[str, Any]) -> int:
                for s in (rr.get("scores") or {}).values()):
             n += 1
     return n
+
+
+def motor_label(cell: Dict[str, Any]) -> str:
+    """Tablo satırının motor etiketi: katı hücrede itici ailesiyle birlikte
+    ("solid [sugar]"). Aynı (motor, büyüklük) çifti birden çok ailede
+    yayımlanabildiği için aile etiketsiz satır belirsiz kalırdı."""
+    aile = cell.get("propellant_family")
+    return f"{cell['motor_type']} [{aile}]" if aile else str(cell["motor_type"])
 
 
 def _row_numbers(cell: Dict[str, Any]) -> Dict[str, str]:
@@ -325,7 +339,7 @@ def generate_status_section(result: Dict[str, Any],
     for cell in cells:
         sayilar = _row_numbers(cell)
         lines.append(
-            f"| {cell['motor_type']} | {sayilar['quantity']} "
+            f"| {motor_label(cell)} | {sayilar['quantity']} "
             f"| {cell['layer']} "
             f"| {cell['n']} | {cell['bias_percent']:+.1f} "
             f"| {sayilar['median_ape']} "
@@ -339,7 +353,7 @@ def generate_status_section(result: Dict[str, Any],
     withheld = result["statistics"].get("non_converged_withheld_cells") or []
     for cell in withheld:
         lines.append(
-            f"- Withheld (no converged run): {cell['motor_type']} "
+            f"- Withheld (no converged run): {motor_label(cell)} "
             f"{cell['quantity']} ({cell['confidence_band']}, n={cell['n']})")
     non_conv = result["statistics"].get("non_converged_entries") or []
     if non_conv:

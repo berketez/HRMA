@@ -328,7 +328,8 @@ class TestK2TauSecimi:
         assert '67,688 – 145,956 Hz' in o['html'], o['html'][:900]
         assert 'mixing_residence_time → selected' in o['html']
         # null bayrak "ölçülmedi"dir, "hayır"a terfi etmez
-        assert 'NOT MEASURED (null)' in o['html']
+        # V307/DİL-EKRAN (DİL-HİBRİT O5): '(null)' makine yazımı ekrandan düştü.
+        assert 'NOT MEASURED' in o['html'] and '(null)' not in o['html']
         assert 'sign change' in o['html']
         # Denetçi 4. tur Ş2(a) (kör noktalar W1, W2): dört hücre ALAN
         # ADIYLA okunur ve kendi beklenen değerine BİREBİR eşitlenir.
@@ -343,7 +344,7 @@ class TestK2TauSecimi:
             'frequency_hz_span': ('67,688 – 145,956 Hz '
                                   '(mixing_residence_time → selected), '
                                   'ratio 2,1563'),
-            'growth_is_tau_sensitive': 'NOT MEASURED (null)',
+            'growth_is_tau_sensitive': 'NOT MEASURED',
             # V301/PANEL-SAYI (28 Eki, FİZİK-2 DEVİR 5): TR ekranda
             # ÇEVRİLEMEYEN sunucu gerekçesi hücreye İngilizce basılmaz;
             # hücrede sözlük cümlesi (bu koşum sözlüksüz: yedek metin),
@@ -549,7 +550,7 @@ class TestK2TauSecimi:
         # Denetçi 2. tur Ş2 (kör nokta D4): hibrit örneğin GERÇEK yolu bu.
         # Ölçülmemiş duyarlılık "ÖLÇÜLMEDİ (null)" basar, "HAYIR"a terfi
         # etmez; gerekçe hükmün hemen ardından gelir.
-        assert 'NOT MEASURED (null) — hybrid loop has a single candidate' \
+        assert 'NOT MEASURED — hybrid loop has a single candidate' \
             in o['html'], o['html']
         assert not re.search(r'\bNO\b', o['html']), (
             'ölçülmemiş τ duyarlılığı "NO" (tauNo) diye basılıyor:\n'

@@ -382,14 +382,20 @@ def test_sv12_delikli_yuzde_plaka_boyutlandirilir(ist, tip):
     st, y, _ = _cagir(ist, **ez)
     assert st == 200, y
     b = y['injector_plate_structural']
-    assert b['status'] == 'sized' and b['material_key'] == 'ss_316'
+    # V307/PLAKA-MARŞ: plaka artık iki yük durumunun büyük gereksinimiyle
+    # standart levhaya boyutlanıp o kalınlıkta DOĞRULANIR ('sized' →
+    # 'analyzed'); üst düzey ΔP yöneten durumun yüküdür, devrenin ΔP'si
+    # çalışma durumunun yüküdür. Aşağıdaki kâhin üst düzey satırla tutarlı.
+    assert b['status'] == 'analyzed' and b['material_key'] == 'ss_316'
     det = y['injection_system']['injector_design_detail']
     oxc, fc = det['ox_circuit'], det['fuel_circuit']
     assert b['n_holes'] == oxc['n_orifices'] + fc['n_orifices']
     assert b['hole_diameter_mm'] == pytest.approx(
         max(oxc['orifice_d_mm'], fc['orifice_d_mm']), abs=1e-4)
-    assert b['delta_P_bar'] == pytest.approx(
+    assert b['load_cases']['operating']['delta_P_bar'] == pytest.approx(
         max(oxc['delta_p_bar'], fc['delta_p_bar']), rel=1e-4)
+    assert b['delta_P_bar'] == b['load_cases'][b['governing_load_case']][
+        'delta_P_bar']
     assert b['plate_diameter_mm'] == pytest.approx(
         y['chamber_diameter_mm'], rel=1e-4)
     # Kâhin: Roark 11.2 / 10b, t = sqrt(0,75 q a² SF / (σ_y η)).

@@ -1,0 +1,103 @@
+/* HRMA — Fırlatma Sahası görev izleme ekranı (V307/FS-İZLEME, 9 Kas 2026)
+ * launch_site_tracking.js ile birlikte yüklenir (launch_site.html FS-İZLEME bloğu).
+ *
+ * YERLEŞİM KURALI: izleme açıkken sayfanın sol ve sağ paneli
+ * visibility:hidden olur (display:none DEĞİL). Böylece iki panelin kutusu
+ * yerinde kalır ve etiket katmanı (launch_site_labels.js) onları engel
+ * saymayı sürdürür; izleme panelleri TAM o iki kutunun içine oturur
+ * (aynı üst/yan boşluk, aynı genişlik, aynı alt pay). Şehir ve ülke
+ * etiketleri izleme panellerinin altına girmez, alttaki ölçek çubuğu ve
+ * dürüstlük notları yerinde kalır.
+ */
+#ls-stage.ls-trk-on #ls-left,
+#ls-stage.ls-trk-on #ls-right { visibility: hidden; }
+
+.ls-trk { position: absolute; inset: 0; z-index: 21; pointer-events: none; }
+.ls-trk[hidden] { display: none !important; }
+.ls-trk .ls-trk-panel { pointer-events: auto; overflow-y: auto; }
+#ls-trk-sol { top: 14px; left: 14px; width: 288px;
+    max-height: calc(100% - 28px - var(--ls-reserve-left, 80px)); }
+#ls-trk-sag { top: 14px; right: 14px; width: 300px;
+    max-height: calc(100% - 28px - var(--ls-reserve-right, 152px)); }
+
+/* Üst şeritteki aç/kapa düğmesi */
+.ls-trk-ac {
+    font: inherit; font-size: 12px; padding: 6px 12px; border-radius: 8px;
+    cursor: pointer; background: transparent; white-space: nowrap;
+    color: var(--hd-ink-dim, #7d97a5);
+    border: 1px solid var(--hd-line, rgba(0,229,255,0.14));
+}
+.ls-trk-ac.hazir {
+    color: var(--hd-ink-strong, #eaf7fb);
+    border-color: rgba(255,140,51,0.6);
+    background: linear-gradient(180deg, rgba(255,140,51,0.28), rgba(255,140,51,0.08));
+}
+.ls-trk-ac.hazir:hover { background: linear-gradient(180deg, rgba(255,140,51,0.42), rgba(255,140,51,0.14)); }
+.ls-trk-ac[aria-pressed="true"] { border-color: var(--hd-cyan, #00e5ff); }
+.ls-trk-ac:disabled { opacity: 0.45; cursor: not-allowed; }
+
+/* Telemetri */
+.ls-trk-saat { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; margin-bottom: 2px; }
+.ls-trk-saat .k { font-size: 10px; text-transform: uppercase; letter-spacing: 0.6px; color: var(--hd-ink-dim, #7d97a5); }
+.ls-trk-saat .v {
+    font-family: var(--hd-mono, monospace); font-size: 22px; white-space: nowrap;
+    color: var(--hd-ink-strong, #eaf7fb); font-variant-numeric: tabular-nums;
+}
+.ls-trk-ornek { font-size: 10.5px; color: var(--hd-ink-faint, #6a8491); margin-bottom: 6px; overflow-wrap: anywhere; }
+.ls-trk-satirlar .ls-kv { padding: 5px 0; font-size: 12.5px; border-bottom: 1px solid rgba(0,229,255,0.07); }
+.ls-trk-satirlar .ls-kv .k { overflow-wrap: anywhere; }
+.ls-trk-satirlar .ls-kv .v { font-size: 14px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+
+/* Kamera kipleri */
+.ls-trk-kipler { display: flex; gap: 6px; flex-wrap: wrap; }
+.ls-trk-kip {
+    flex: 1 1 auto; padding: 7px 8px; font-size: 11.5px; border-radius: 8px; cursor: pointer;
+    background: var(--hd-inset, rgba(6,14,26,0.85));
+    border: 1px solid var(--hd-line, rgba(0,229,255,0.14));
+    color: var(--hd-ink, #cfe8f2);
+}
+.ls-trk-kip:hover { border-color: var(--hd-line-strong, rgba(0,229,255,0.42)); }
+.ls-trk-kip.on { border-color: var(--hd-cyan, #00e5ff); color: var(--hd-ink-strong, #eaf7fb); background: rgba(0,229,255,0.14); }
+.ls-trk-kip:disabled { opacity: 0.4; cursor: not-allowed; }
+
+/* Oynatma */
+.ls-trk-oynatici { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+.ls-trk-oynatici .ls-trk-genis { flex: 1; width: auto; padding: 0 10px; font-size: 12px; }
+.ls-trk-hiz-satir { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+.ls-trk-hiz-et { font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--hd-ink-dim, #7d97a5); white-space: nowrap; }
+.ls-trk-hiz {
+    flex: 1; min-width: 0; padding: 6px 8px; font-size: 12px; border-radius: 8px;
+    font-family: var(--hd-mono, monospace);
+    background: var(--hd-inset, rgba(6,14,26,0.85));
+    border: 1px solid var(--hd-line, rgba(0,229,255,0.14));
+    color: var(--hd-ink-strong, #eaf7fb);
+}
+.ls-trk-hiz:disabled { opacity: 0.4; cursor: not-allowed; }
+.ls-trk-serit { position: relative; padding-bottom: 8px; }
+.ls-trk-serit input[type="range"] { width: 100%; display: block; accent-color: var(--hd-orange, #ff8c33); }
+.ls-trk-serit input[type="range"]:disabled { opacity: 0.45; }
+.ls-trk-imler { position: absolute; left: 8px; right: 8px; bottom: 0; height: 6px; pointer-events: none; }
+.ls-trk-im { position: absolute; top: 0; width: 3px; height: 6px; margin-left: -1.5px; border-radius: 1px; }
+.ls-trk-uclar {
+    display: flex; justify-content: space-between; gap: 8px;
+    font-family: var(--hd-mono, monospace); font-size: 10.5px; color: var(--hd-ink-dim, #7d97a5);
+}
+#ls-trk-durum { margin-top: 6px; }
+
+/* Olay zaman çizelgesi */
+.ls-trk-olaylar { display: flex; flex-direction: column; gap: 3px; }
+.ls-ev.ls-trk-olay {
+    display: grid; grid-template-columns: 9px 1fr auto; column-gap: 7px; row-gap: 1px;
+    align-items: center; padding: 3px 0; opacity: 0.78;
+}
+.ls-ev.ls-trk-olay .ad { overflow-wrap: anywhere; }
+.ls-ev.ls-trk-olay .t { margin-left: 0; white-space: nowrap; }
+/* V307/KÜÇÜKLER (kalem 1): geçerlilik dışı olayın neden metni sarılır (EN 1280'de taşıyordu). */
+.ls-ev.ls-trk-olay[data-gecersiz="1"] .t { white-space: normal; overflow-wrap: anywhere; }
+.ls-ev.ls-trk-olay .durum {
+    grid-column: 2 / 4; font-family: var(--hd-mono, monospace); font-size: 10.5px;
+    color: var(--hd-ink-faint, #6a8491); overflow-wrap: anywhere;
+}
+.ls-ev.ls-trk-olay.gecti { opacity: 1; }
+.ls-ev.ls-trk-olay.gecti .ad { color: var(--hd-ink-strong, #eaf7fb); }
+.ls-ev.ls-trk-olay.gecti .durum { color: var(--hd-green, #2dd4a8); }

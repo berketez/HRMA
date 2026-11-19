@@ -423,14 +423,17 @@
                         laterBtn.style.display = 'none';
                         skipBtn.style.display = 'none';
                         manualRow.style.display = 'none';
-                        // Kopyalama birkaç dakika sürüyor ve bu sırada ekranda
-                        // hiçbir şey olmuyor; süreyi ve "elle açma" uyarısını
-                        // açıkça yaz (2026-07-24 saha hatası: kullanıcı
-                        // güncellemenin çöktüğünü sanıp eski sürümü açtı).
+                        // Kopyalama birkaç dakika sürüyor (2026-07-24 saha
+                        // hatası: kullanıcı güncellemenin çöktüğünü sanıp eski
+                        // sürümü açtı). V307/GÜNCELLEME-EKRAN: uygulama
+                        // kapanınca yardımcı betik "HRMA güncelleniyor"
+                        // penceresini açar (hrma/utils/update_window.py);
+                        // ileti bunu ve süreyi önceden söyler.
                         progressText.innerHTML = T('update.autoClose',
-                            'HRMA will close now and reopen automatically when the '
-                            + 'update is complete. This usually takes 2-4 minutes — '
-                            + 'please do not open HRMA yourself meanwhile.');
+                            'HRMA will close now. A small “Updating HRMA” window '
+                            + 'then shows the installation steps and the elapsed '
+                            + 'time; HRMA reopens by itself when the update is '
+                            + 'complete (usually 2-4 minutes).');
                     } else if (res.started) {
                         progressText.innerHTML = T('update.done',
                             'Downloaded — the installer has been opened. '

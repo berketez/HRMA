@@ -123,6 +123,9 @@ UNIT_TO_SI: Dict[str, float] = {
     "cm2": 1e-4,
     "mm2": 1e-6,
     "in2": 0.00064516,
+    # N/cm2: NASA-CR-158815 tablolarinin birincil basinc birimi
+    # (V307/KATI-DOGRULAMA kalem 3).
+    "npcm2": 1e4,
 }
 
 # En uzun sonek once denenir ("_mps" "_s"den once yakalansin diye).
@@ -877,17 +880,70 @@ def _solid_grain_type(record: Dict[str, Any], result: Dict[str, Any]) -> str:
     return "bates"
 
 
+#: Kati kaydin KENDI itici ozellikleri (V307/KATI-DOGRULAMA kalem 3):
+#: HRMA katalogunda olmayan iticili statik ateslemeler (NASA-CR-158815 AN
+#: agirlikli BATES kosulari) bu alanlarla kosar. Hepsi ``propellants``
+#: blogunda, kaynagin verdigi ya da kayitta 'turetildi' diye isaretlenen
+#: degerlerdir; adaptor HICBIRINI varsaymaz (biri eksikse kayit kosmaz).
+_SOLID_OWN_PROPELLANT_KEYS = (
+    "propellant_density_kgpm3",
+    "burn_rate_ref_cmps",
+    "burn_rate_ref_pressure_psia",
+    "burn_rate_exponent",
+    "c_star_theoretical_mps",
+    "flame_temperature_k",
+    "gamma_equivalent",
+    "molecular_weight_equivalent_gpmol",
+)
+
+#: Olculen "etki suresi" tabanlari. HRMA etki suresi URETMEZ; bunlar yalniz
+#: adiyla ayri bir capraz-tanim kiyasina girer (bkz. _run_solid).
+_SOLID_ACTION_TIME_BASES = ("action_time", "action_time_5pct")
+
+#: Capraz-tanim kiyasinin adi: tahmin = HRMA web tukenme suresi, olcum =
+#: kaydin etki suresi. Iki buyukluk FARKLI tanimlidir; sapma model hatasi
+#: olarak okunmaz ('definition_mismatch' bayragi hucreye tasinir).
+SOLID_CROSS_DEFINITION_TIME = "web_burn_time_vs_action_time"
+
+
+def _solid_own_propellant(prop: Dict[str, Any]) -> Tuple[Optional[Dict[str, float]], List[str]]:
+    """Kaydin kendi itici ozellikleri: (ozellikler | None, eksik anahtarlar)."""
+    eksik = [k for k in _SOLID_OWN_PROPELLANT_KEYS
+             if not isinstance(prop.get(k), (int, float))
+             or isinstance(prop.get(k), bool)]
+    if eksik:
+        return None, eksik
+    return {k: float(prop[k]) for k in _SOLID_OWN_PROPELLANT_KEYS}, []
+
+
 def _run_solid(record: Dict[str, Any]) -> Dict[str, Any]:
     """Kati static-fire kaydini SolidRocketEngine ile kosar.
 
-    Motor (grain geometrisi, yakit, tasarim Pc, a-n) alir; bogaz tasarim
-    noktasinda boyutlandirilir ve Kn dengesiyle itki/basinc egrisi cozulur.
-    Tahminler: yanma suresi, ortalama/tepe itki, toplam impuls, Isp, tepe
-    basinc. Tasarim Pc'si kayit inputs'unda yoksa measured'dan TUKETILIR
-    (skor disi), o da yoksa 40 bar varsayilir (assumed_defaults).
+    V307/KATI-DOGRULAMA kalem 2 — KIYAS DONANIMLA YAPILIR. Motor kaydin
+    GERCEK donanimini alir; yayimlanmis olanlar tasarim akisinin kendi
+    boyutlandirmasinin yerine gecer:
+      * bogaz: ``geometry.throat_diameter`` (yoksa ``throat_diameter_initial``)
+        -> ``pin_throat_area``; verilmediyse motor bogazi tasarim Pc'sinden
+        boyutlandirir (eski yol) ve bu assumed_defaults'ta beyan edilir.
+      * genlesme orani: ``geometry.expansion_ratio`` -> ``pin_expansion_ratio``.
+      * yogunluk: ``propellants`` blogundaki yogunluk; yoksa BATES kaydinda
+        olculen itici kutlesi / tane hacmi (o zaman ``propellant_mass``
+        TUKETILIR, skor disi). Ikisi de yoksa katalog (ideal) yogunlugu.
+      * itici: ``hrma_propellant_key`` (katalog) ya da kaydin kendi
+        ozellikleri (``_SOLID_OWN_PROPELLANT_KEYS``; 'custom' yolu).
+    Olcum (16 Kasim 2026, faz 1 D1/D2): bu uc girdi verilmeden KSB-002'de
+    itici kutlesi +%9,6, toplam impuls +%30,4 sapiyordu; verilince 0 / +%18,6.
 
-    a-n katsayilari: HRMA'da yakit-basina yayimli a-n tablosu yoktur; motor
-    varsayilanlari (a=0.005, n=0.35) kullanilir ve assumed_defaults'a yazilir.
+    SURE: HRMA'nin ``burn_time`` ciktisi WEB TUKENME suresidir (aninda
+    tutusma, es zamanli tukenme). Tahmin ``web_burn_time`` adiyla yayimlanir
+    ve yalniz kaydin ``web_burn_time`` olcumuyle skorlanir. Kayit yalniz
+    etki suresi tasiyorsa kiyas ``web_burn_time_vs_action_time`` adiyla AYRI
+    ve 'definition_mismatch' bayrakli yapilir; etki/web orani icin evrensel
+    bir donusum UYGULANMAZ. Tanimsiz ``burn_time`` olcumu skorlanmaz.
+
+    Tahminler: web tukenme suresi, ortalama/tepe itki, toplam impuls, Isp,
+    tepe ve ortalama basinc. Bogaz sabitken tepe basinc gercek bir tahmindir
+    (tasarim Pc'sinin yankisi degildir).
     """
     from hrma.engines.solid_rocket_engine import SolidRocketEngine
 
@@ -904,6 +960,9 @@ def _run_solid(record: Dict[str, Any]) -> Dict[str, Any]:
     prop_key = (prop.get("hrma_propellant_key") or prop.get("hrma_fuel_key")
                 or prop.get("fuel"))
     prop_key = str(prop_key).lower() if prop_key else None
+    kendi, kendi_eksik = (None, [])
+    if prop_key is None:
+        kendi, kendi_eksik = _solid_own_propellant(prop)
 
     d_chamber = geo["si"].get("chamber_diameter") or geo["si"].get(
         "grain_outer_diameter")
@@ -922,7 +981,7 @@ def _run_solid(record: Dict[str, Any]) -> Dict[str, Any]:
         missing.append("grain_length")
     if d_core is None:
         missing.append("core_diameter")
-    if prop_key is None:
+    if prop_key is None and kendi is None:
         missing.append("hrma_propellant_key")
     if missing:
         # Grain geometrisi olmayan ama basinc + yanma hizi tasiyan kayitlar
@@ -948,6 +1007,17 @@ def _run_solid(record: Dict[str, Any]) -> Dict[str, Any]:
 
     overrides = {}
     rho = prop_si.get("propellant_density") or prop_si.get("fuel_density")
+    if rho is None and grain_type == "bates" and "propellant_mass" in meas["si"]:
+        # Kayit yogunluk vermiyor ama taneyi tartmis: yogunluk olculen
+        # kutle / tane hacmi (ic delikli silindir). Kutle artik GIRDIDIR.
+        hacim = math.pi / 4.0 * (d_chamber ** 2 - d_core ** 2) * grain_length
+        if hacim > 0.0:
+            rho = meas["si"]["propellant_mass"] / hacim
+            result["consumed_measured"].append("propellant_mass")
+            result["adapter_notes"].append(
+                f"Yogunluk olculen itici kutlesi / tane hacminden alindi "
+                f"({rho:.1f} kg/m3); 'propellant_mass' tuketildi (skor disi). "
+                f"Katalog yogunlugu ideal (kuramsal en yuksek) degerdir.")
     if rho is not None:
         overrides["density"] = rho
 
@@ -958,9 +1028,7 @@ def _run_solid(record: Dict[str, Any]) -> Dict[str, Any]:
     # segmentti; fark MADDI olculdu: t_b 1.966 -> 1.714 s (%13), F_tepe
     # 1769 -> 1510 N (%15), Isp 141.8 -> 147.0 s (%3.6). Motor 'n_segments'
     # override'ini zaten destekliyor (_user_segment_count); kayit yalnizca
-    # kablolanir — model degistirilmedi. Bu yol bugune kadar hicbir uretim
-    # kaydinda kosmuyordu (tum mevcut kati static_fire kayitlari
-    # insufficient_inputs; 2026-08-18 taramasi), regresyon alani bos.
+    # kablolanir — model degistirilmedi.
     n_segments = geo["si"].get("n_segments")
     if n_segments is not None:
         overrides["n_segments"] = int(round(n_segments))
@@ -969,35 +1037,89 @@ def _run_solid(record: Dict[str, Any]) -> Dict[str, Any]:
             f"{int(round(n_segments))}); verilmeseydi motor L/D "
             f"konvansiyonuyla kendi sayisini secerdi.")
 
+    ctor_ek = {}
+    if kendi is not None:
+        # Kaydin kendi iticisi: r = r_ref * (P / P_ref)^n -> motor
+        # konvansiyonu a [m/s/bar^n] = r_ref / (P_ref[bar])^n.
+        n_us = kendi["burn_rate_exponent"]
+        p_ref_bar = kendi["burn_rate_ref_pressure_psia"] * UNIT_TO_SI["psia"] / 1e5
+        ctor_ek = {
+            "burn_rate_a": kendi["burn_rate_ref_cmps"] / 100.0 / (p_ref_bar ** n_us),
+            "burn_rate_n": n_us,
+        }
+        overrides.update({
+            "density": kendi["propellant_density_kgpm3"],
+            "char_velocity": kendi["c_star_theoretical_mps"],
+            "flame_temp": kendi["flame_temperature_k"],
+            "gamma": kendi["gamma_equivalent"],
+            "molecular_weight": kendi["molecular_weight_equivalent_gpmol"],
+        })
+        result["adapter_notes"].append(
+            "Itici HRMA katalogunda yok: yogunluk, yanma hizi yasasi ve "
+            "kuramsal termokimya KAYDIN kendi 'propellants' blogundan alindi "
+            "(gamma ve molekul agirligi kayitta 'turetildi' diye isaretli tek "
+            "faz esdegeridir). c* girdidir; skorlanmaz.")
+
     engine = SolidRocketEngine(
         grain_type=grain_type,
-        propellant_type=prop_key,
+        propellant_type=prop_key if kendi is None else "custom",
         chamber_diameter=d_chamber * 1000.0,   # kurucu mm bekler
         grain_length=grain_length * 1000.0,    # mm
         core_diameter=d_core * 1000.0,         # mm
         chamber_pressure=pc / 1e5,             # bar
         overrides=overrides or None,
+        **ctor_ek,
     )
-    # F3 onarimi #2 (2026-08-18, olculdu): eski kod kosulsuz olarak
-    # assumed_defaults'a a=0.005 / n=0.35 yaziyordu ama motor katalog
-    # yakitlarinda (knsb/kndx/knsu/apcp) kendi a-n degerlerini cozuyor
-    # (olculdu: knsb icin engine.a=0.0022334, 0.005 DEGIL). Adaptorun
-    # kullanilmamis bir varsayimi 'varsayilan' diye beyan etmesi durustluk
-    # ihlaliydi; artik motorun GERCEKTE cozdugu katsayilar raporlanir.
+
+    # Donanim sabitlemesi: yayimlanmis bogaz ve genlesme orani.
+    d_bogaz = geo["si"].get("throat_diameter") or geo["si"].get(
+        "throat_diameter_initial")
+    if d_bogaz is not None:
+        engine.pin_throat_area(math.pi / 4.0 * d_bogaz ** 2)
+        result["adapter_notes"].append(
+            f"Bogaz kaydin donanim capina sabitlendi ({d_bogaz * 1e3:.3f} mm); "
+            f"tasarim basinci bogazi boyutlandirmaz, tepe basinc tahmindir.")
+    else:
+        result["assumed_defaults"]["throat_sized_from_design_pressure"] = True
+        result["adapter_notes"].append(
+            "Kayit bogaz capi vermiyor: motor bogazi tasarim basincindan "
+            "boyutlandirdi; tepe basinc tasarim Pc'sinin yankisidir.")
+    # V307 faz 3 (B1): kaydin kendi iticisinde egzozdaki yogun faz kesri
+    # (kaynagin verdigi deger) iki fazli kayip tahminine girer; katalog
+    # iticisinde kesir katalogdan gelir, kayit degeri KULLANILMAZ.
+    x_yogun = prop.get("al2o3_exhaust_mass_fraction")
+    if (kendi is not None and isinstance(x_yogun, (int, float))
+            and not isinstance(x_yogun, bool)):
+        engine.pin_condensed_mass_fraction(
+            float(x_yogun), "propellants.al2o3_exhaust_mass_fraction")
+        result["adapter_notes"].append(
+            f"Iki fazli kayip tahmini kaydin egzoz Al2O3 kesriyle "
+            f"({float(x_yogun):.3f}) degerlendirildi.")
+    eps_kayit = geo["si"].get("expansion_ratio")
+    if eps_kayit is not None:
+        engine.pin_expansion_ratio(eps_kayit)
+    else:
+        result["assumed_defaults"]["expansion_ratio_optimum_at_design"] = True
+
+    # F3 onarimi #2 (2026-08-18, olculdu): adaptor motorun GERCEKTE cozdugu
+    # katsayilari raporlar (katalog yakitlarinda kendi a-n degerleri).
     result["assumed_defaults"]["burn_rate_a"] = float(engine.a)
     result["assumed_defaults"]["burn_rate_n"] = float(engine.n)
-    result["adapter_notes"].append(
-        "Saint-Robert a-n katsayilari kayittan DEGIL, HRMA'nin kendi yakit "
-        "katalogundan/rejim tablosundan gelir (assumed_defaults'ta motorun "
-        "gercekte cozdugu degerler raporlanir); yanma-hizi duyarli tahminler "
-        "bu varsayimla okunmalidir.")
+    if kendi is None:
+        result["adapter_notes"].append(
+            "Saint-Robert a-n katsayilari kayittan DEGIL, HRMA'nin kendi yakit "
+            "katalogundan/rejim tablosundan gelir (assumed_defaults'ta motorun "
+            "gercekte cozdugu degerler raporlanir); yanma-hizi duyarli tahminler "
+            "bu varsayimla okunmalidir.")
     res = engine.calculate_performance()
     if "error" in res:
         raise RuntimeError(f"SolidRocketEngine: {res['error']}")
 
-    curve_pressure = (res.get("thrust_curve") or {}).get("pressure") or []
+    egri = res.get("thrust_curve") or {}
+    curve_pressure = list(egri.get("pressure") or [])
+    curve_time = list(egri.get("time") or [])
     predictions = {
-        "burn_time": float(res["burn_time"]),            # s
+        "web_burn_time": float(res["burn_time"]),        # s (web tukenme)
         "thrust_mean": float(res["average_thrust"]),     # N
         "thrust": float(res["average_thrust"]),          # N (kayit 'thrust'
                                                          # derse ortalama)
@@ -1007,13 +1129,40 @@ def _run_solid(record: Dict[str, Any]) -> Dict[str, Any]:
         "isp_sl": float(res["isp_sea_level"]),           # s
         "isp_vac": float(res["isp_vacuum"]),             # s
         "propellant_mass": float(res["propellant_mass"]),  # kg
-        "c_star": float(res["c_star"]),                  # m/s (tablo referansi)
     }
+    if kendi is None:
+        predictions["c_star"] = float(res["c_star"])     # m/s
+        result["adapter_notes"].append(
+            "c* tahmini motorun kendi kamara basincindaki kuramsal degeridir "
+            "(bilesimi bilinen iticide NASA CEA; yanma verimi varsayilan 1,0 "
+            "— dogrulanmis verim DEGIL).")
     if curve_pressure:
         predictions["chamber_pressure_peak"] = float(max(curve_pressure)) * 1e5
-    result["adapter_notes"].append(
-        "c* tahmini HRMA yakit tablosu referansidir (motor kosusundan "
-        "bagimsiz sabit); c* kiyasi zayif bir tutarlilik denetimidir.")
+        if len(curve_time) == len(curve_pressure) and len(curve_time) >= 2:
+            sure = float(curve_time[-1]) - float(curve_time[0])
+            if sure > 0.0:
+                alan = sum(0.5 * (curve_pressure[i] + curve_pressure[i + 1])
+                           * (curve_time[i + 1] - curve_time[i])
+                           for i in range(len(curve_time) - 1))
+                predictions["chamber_pressure_avg"] = float(alan / sure) * 1e5
+
+    # Sure: yalniz es tanimli kiyas skorlanir; etki suresi AYRI adla.
+    if "web_burn_time" not in meas["si"]:
+        etki = next((b for b in _SOLID_ACTION_TIME_BASES if b in meas["si"]),
+                    None)
+        if etki is not None:
+            result["measured_si"][SOLID_CROSS_DEFINITION_TIME] = float(
+                meas["si"][etki])
+            result["measured_si"] = dict(sorted(result["measured_si"].items()))
+            predictions[SOLID_CROSS_DEFINITION_TIME] = float(res["burn_time"])
+            result.setdefault("quantity_flags", {}).setdefault(
+                SOLID_CROSS_DEFINITION_TIME, []).append("definition_mismatch")
+            result["adapter_notes"].append(
+                f"SURE TANIMI FARKLI: HRMA web tukenme suresi ⟷ kaydin "
+                f"'{etki}' olcumu (tutusma yukselisi ve kuyruk dahil). Kiyas "
+                f"'{SOLID_CROSS_DEFINITION_TIME}' adiyla ayri yayimlanir; "
+                f"sapma model hatasi olarak okunmaz ve donusum katsayisi "
+                f"uygulanmaz.")
     result["predictions"] = predictions
 
     # F022'nin kati karsiligi (_SOLID_ALGEBRAIC_COPY_CHAIN yorumu): kayit

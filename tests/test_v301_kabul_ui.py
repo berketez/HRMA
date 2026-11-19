@@ -426,7 +426,17 @@ ORNEK_TASARIM_FARKI = {
         # contraction_ratio v3.0.0 '<yok>' ⟷ örnek 0 ('not_supplied_
         # solver_derives', alan yokken de uç 0 kullanır: sonuç etkisiz).
         'regression_a', 'regression_n', 'mass_flux_chamber',
-        'hole_diameter_min', 'hole_diameter_max', 'contraction_ratio'}),
+        'hole_diameter_min', 'hole_diameter_max',
+        # 3.0.7 örnekler (b867448f6, 19 Kas): contraction_ratio listeden
+        # çıktı — yeniden üretilen örnek alanı boş bırakır (''), sayfa onu
+        # göndermez; v3.0.0 gövdesiyle fark yok (bekçi 'çürüdü' dedi).
+        # 3.0.7 ORTAM-TEK (fdd85a13d) + örnekler (b867448f6, 19 Kas):
+        # hibrit örnek ISA deniz seviyesinde tasarlanır — ortam 1,013 →
+        # 1,01325 bar (HYBRID_DEFAULT_AMBIENT_BAR). v3.0.0 dosyasının
+        # 1,013'ü olduğu gibi yüklenir (göç değil); fark örneğin bilinçli
+        # tasarım değişikliğidir. Ölçüm (19 Kas, bakim/3.0.7 b867448f6):
+        # bu alan dışında beyansız fark yok.
+        'atmospheric_pressure'}),
 }
 
 

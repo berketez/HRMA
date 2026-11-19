@@ -380,7 +380,10 @@ def test_kunye_dayanagi_ve_idealizasyon_beyani(varsayilan):
     kural = g['grain_sizing_rule']
     assert kural == sonuc['grain_sizing_rule']
     assert kural['name'] == 'final_port_envelope'
-    assert kural['formula'] == 'D_grain_outer = D_port_final + 2*t_residual'
+    # V307/DİL-SUNUCU (DİL-HİBRİT S4): ekrana basılan bağıntı ham değişken
+    # adlarıyla değil, okunur adlarla (aynı bağıntı).
+    assert kural['formula'] == ('grain outer diameter = final port diameter '
+                                '+ 2 × residual web')
     assert '10.2514/1.19226' in kural['basis']
     assert 'p. 745' in kural['basis']
     assert kural['liner_insulation_modelled'] is False

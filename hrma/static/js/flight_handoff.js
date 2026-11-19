@@ -37,7 +37,159 @@
      * uçurmaz ve nedeni yazar. Önceki hesabın aracı da depodan kalkar —
      * Fırlatma Sahası eski motoru "son hesap" diye uçurmaz. */
     var REFUSAL_CODE = 'engine_mass_not_published';
+    /* V307/FS-KÜÇÜK (kalem 4; SIVI-ORTAM DEVİR 3) — vakum/irtifa tasarımlı
+     * sıvı motorun lülesi deniz seviyesinde ayrılıyorsa yerden kalkış itkisi
+     * yayımlanmaz; uç aracı bu kodla ADIYLA reddeder (eskiden genel
+     * 'unflyable_vehicle'). Ret kaydı metnin ihtiyaç duyduğu tasarım ortamı
+     * ve deniz seviyesi alanlarını (uç yanıtından, aynen) taşır. */
+    var REFUSAL_CODE_SEA_LEVEL = 'sea_level_thrust_not_published';
     var lastRefused = { results: null, body: null };
+
+    /* V307/FS-OTURUM (kalem 1) — ÇALKANTI KAYNAĞI KÖPRÜ KAYDINDA.
+     * Fırlatma Sahası 6-DOF'u çalkantıyı motor sayfasıyla AYNI blokla bağlar
+     * ({motor_type, motor_sonucu, arac_duzeni}); kayıtlı proje / dosya
+     * kaynağında motor sonucu köprünün yeniden hesabından gelir. Oturum
+     * aracında (bu kayıt) motor sonucu YOKTU: aynı motor proje kaynağında
+     * ÇKK / geçerlilik dışı hükmü alırken oturumda rijit ve "kararlı"
+     * uçuyordu (iki kaynak, iki hüküm sınıfı; FS-YÜK AÇIK 2).
+     *
+     * Kayıt motor sonucunun TAMAMINI taşımaz (örnek sıvı 476 564 B, hibrit
+     * 3 004 267 B; localStorage ~5 MB): yalnız çalkantı bağlamanın
+     * (hrma.analysis.slosh_motor_baglanti.slosh_tanklari, içinde
+     * flight_vehicle.normalize) motor sonucundan OKUDUĞU yaprakları taşır.
+     * Liste ÖLÇÜLDÜ (okuma kaydeden sözlük; docs/scofield/raw/OH/V307/
+     * fs-oturum/alan_olcumu.py) + aynı işlevlerin örnekte koşmayan dallarının
+     * alanları. Bekçi (tests/test_v307_fs_oturum.py): ölçülen her okuma
+     * listede; izdüşümle çalkantı çıktısı ve 6-DOF hükmü tam sonuçla
+     * bit-aynı. Yol yaprağı ya da sözlük olmayan ara düğüm AYNEN kopyalanır.
+     * Bu blok JSON'dur (test onu JSON olarak okur): satır ekleme/çıkarma
+     * yalnız iki işaret arasında. */
+    // CALKANTI_KAYNAK_YOLLARI_BASI
+    var CALKANTI_KAYNAK_YOLLARI = {
+        "liquid": [
+            "status", "error", "motor_name", "motor.motor_name",
+            "motor_geometry.motor_name", "thrust", "burn_time",
+            "total_mass_flow", "engine_mass_estimate",
+            "exit_diameter_mm", "exit_diameter",
+            "design_ambient.is_sea_level",
+            "nozzle_design.performance.ambient_pressure",
+            "design_summary.performance.thrust_sl_N",
+            "design_summary.masses.propellant_mass_kg",
+            "design_summary.masses.engine_mass_kg",
+            "design_summary.masses.dry_mass_kg",
+            "design_summary.key_dimensions.overall_length_mm",
+            "design_summary.key_dimensions.overall_length_with_closure_mm",
+            "component_sizing.component_dimensions.overall_length",
+            "component_sizing.not_in_engine_dry_mass",
+            "oxidizer_flow", "fuel_flow", "mass_flow_ledger.status",
+            "detailed_feed_system.valve_feedline.oxidizer_line.viscosity_Pa_s",
+            "detailed_feed_system.valve_feedline.oxidizer_line.viscosity_source",
+            "detailed_feed_system.valve_feedline.fuel_line.viscosity_Pa_s",
+            "detailed_feed_system.valve_feedline.fuel_line.viscosity_source",
+            "propellant_tanks.system_summary.ullage_fraction",
+            "propellant_tanks.system_summary.total_tank_mass",
+            "propellant_tanks.system_summary.total_propellant_mass",
+            "propellant_tanks.system_summary.total_propellant_mass_nominal",
+            "propellant_tanks.oxidizer_tank.propellant_type",
+            "propellant_tanks.oxidizer_tank.dimensions.diameter",
+            "propellant_tanks.oxidizer_tank.dimensions.length",
+            "propellant_tanks.oxidizer_tank.dimensions.volume",
+            "propellant_tanks.oxidizer_tank.pressure_vessel.wall_thickness_used_mm",
+            "propellant_tanks.oxidizer_tank.pressure_vessel.head_thickness_available_mm",
+            "propellant_tanks.oxidizer_tank.propellant_data.density",
+            "propellant_tanks.oxidizer_tank.propellant_data.density_source",
+            "propellant_tanks.oxidizer_tank.propellant_data.mass",
+            "propellant_tanks.oxidizer_tank.propellant_data.mass_nominal",
+            "propellant_tanks.oxidizer_tank.structural.tank_mass",
+            "propellant_tanks.oxidizer_tank.slosh.radius",
+            "propellant_tanks.oxidizer_tank.slosh.f1_hz",
+            "propellant_tanks.oxidizer_tank.slosh.baffle.damping_ratio",
+            "propellant_tanks.fuel_tank.propellant_type",
+            "propellant_tanks.fuel_tank.dimensions.diameter",
+            "propellant_tanks.fuel_tank.dimensions.length",
+            "propellant_tanks.fuel_tank.dimensions.volume",
+            "propellant_tanks.fuel_tank.pressure_vessel.wall_thickness_used_mm",
+            "propellant_tanks.fuel_tank.pressure_vessel.head_thickness_available_mm",
+            "propellant_tanks.fuel_tank.propellant_data.density",
+            "propellant_tanks.fuel_tank.propellant_data.density_source",
+            "propellant_tanks.fuel_tank.propellant_data.mass",
+            "propellant_tanks.fuel_tank.propellant_data.mass_nominal",
+            "propellant_tanks.fuel_tank.structural.tank_mass",
+            "propellant_tanks.fuel_tank.slosh.radius",
+            "propellant_tanks.fuel_tank.slosh.f1_hz",
+            "propellant_tanks.fuel_tank.slosh.baffle.damping_ratio"
+        ],
+        "hybrid": [
+            "status", "error", "motor_name", "motor_geometry.motor_name",
+            "motor.motor_name", "motor.thrust", "motor.burn_time",
+            "motor.uq_mode", "motor.exit_area", "motor.total_impulse",
+            "motor.thrust_curve", "motor.mdot_ox",
+            "motor.oxidizer_mass", "motor.fuel_mass", "motor.fuel_mass_loaded",
+            "motor.propellant_mass_total",
+            "motor.altitude_performance.nozzle_loss_model.exit_area_m2",
+            "motor.nozzle_design.performance.ambient_pressure",
+            "motor.oxidizer_inlet_state.oxidizer",
+            "motor.design_summary.key_dimensions.dry_mass_basis",
+            "motor.design_summary.key_dimensions.dry_mass_estimate_kg",
+            "motor.design_summary.key_dimensions.total_motor_length_with_caps_mm",
+            "motor.structural_analysis.chamber_analysis.diameter",
+            "motor.structural_analysis.chamber_analysis.inner_diameter_mm",
+            "motor.structural_analysis.chamber_analysis.wall_thickness_mm",
+            "motor.structural_analysis.chamber_analysis.wall_thickness_used_mm",
+            "motor.oxidizer_tank_pressure_vessel.pressure_vessel.wall_thickness_used_mm",
+            "motor.oxidizer_tank_pressure_vessel.pressure_vessel.head_thickness_available_mm",
+            "motor.oxidizer_tank_slosh.tank_diameter_m",
+            "motor.oxidizer_tank_slosh.tank_length_m",
+            "motor.oxidizer_tank_slosh.tank_volume_m3",
+            "motor.oxidizer_tank_slosh.liquid_density_kg_m3",
+            "motor.oxidizer_tank_slosh.liquid_fill_fraction",
+            "motor.oxidizer_tank_slosh.liquid_mass_kg",
+            "motor.oxidizer_tank_slosh.slosh.f1_hz",
+            "motor.tank_blowdown.status",
+            "motor.tank_blowdown.feed_mode",
+            "motor.tank_blowdown.time_s",
+            "motor.tank_blowdown.thrust_N",
+            "motor.tank_blowdown.total_impulse_Ns",
+            "motor.tank_blowdown.propellant_consumed_kg",
+            "motor.tank_blowdown.oxidizer_inventory.liquid_mass_time_s",
+            "motor.tank_blowdown.oxidizer_inventory.liquid_mass_kg",
+            "motor.tank_blowdown.oxidizer_inventory.liquid_density_kg_m3",
+            "motor.tank_blowdown.oxidizer_inventory.tank_initial_liquid_kg",
+            "motor.tank_blowdown.oxidizer_inventory.tank_initial_vapour_kg",
+            "motor.tank_blowdown.oxidizer_inventory.tank_final_kg"
+        ]
+    };
+    // CALKANTI_KAYNAK_YOLLARI_SONU
+    /* Kayıttaki bloğun biçim sürümü; Fırlatma Sahası başka sürümü OKUMAZ
+     * (rijit uçar, nedeni yazılır). Yol listesi değişirse artırılır. */
+    var CALKANTI_KAYNAK_SURUMU = 1;
+
+    /* Motor sonucunun çalkantı izdüşümü (motor türünün yol listesi). Yol
+     * kaynakta yoksa hedefte de yoktur (uydurma alan yok); yaprak ya da
+     * sözlük olmayan ara düğüm aynen kopyalanır. Sıvı/hibrit değilse null. */
+    function calkantiKaynagi(results, motorType) {
+        var has = Object.prototype.hasOwnProperty;
+        var yollar = has.call(CALKANTI_KAYNAK_YOLLARI, motorType)
+            ? CALKANTI_KAYNAK_YOLLARI[motorType] : null;
+        if (!yollar || !results || typeof results !== 'object' || Array.isArray(results)) return null;
+        var out = {};
+        yollar.forEach(function (yol) {
+            var parca = yol.split('.');
+            var kaynak = results, hedef = out;
+            for (var i = 0; i < parca.length; i++) {
+                var k = parca[i];
+                if (!has.call(kaynak, k)) return;
+                var v = kaynak[k];
+                if (i === parca.length - 1 || v === null || typeof v !== 'object' || Array.isArray(v)) {
+                    hedef[k] = v;
+                    return;
+                }
+                if (!has.call(hedef, k)) hedef[k] = {};
+                kaynak = v; hedef = hedef[k];
+            }
+        });
+        return out;
+    }
 
     /* Motor tipini belirle: açık değer > sayfa yolu (solid/liquid) > hibrit. */
     function detectMotorType(explicit) {
@@ -98,12 +250,15 @@
         }).then(function (r) {
             if (!r.ok) {
                 return r.json().catch(function () { return null; }).then(function (b) {
-                    if (r.status === 422 && b && b.error === REFUSAL_CODE) {
+                    if (r.status === 422 && b && (b.error === REFUSAL_CODE
+                            || b.error === REFUSAL_CODE_SEA_LEVEL)) {
                         lastRefused = { results: results, body: b };
                         lastPublished = { results: null, vehicle: null };
                         try {
                             window.localStorage.setItem(STORAGE_KEY, JSON.stringify({
                                 refused: { code: b.error, cause: b.cause || null,
+                                           design_ambient: b.design_ambient || null,
+                                           sea_level: b.sea_level || null,
                                            motor_name: name || null, motor_type: motorType },
                                 saved_at: new Date().toISOString()
                             }));
@@ -142,9 +297,31 @@
                 motor_type: motorType,
                 saved_at: new Date().toISOString()
             };
+            // V307/FS-YÜK: aynı sayfanın 6-DOF panelindeki faydalı yük
+            // (Fırlatma Sahası alanları bununla dolar; boşsa alan yok).
+            var yuk = panelPayload();
+            if (yuk) record.payload = yuk;
+            // V307/FS-OTURUM (kalem 1): çalkantı kaynağı (yalnız sıvı/hibrit;
+            // yukarıdaki yol listesinin izdüşümü). Depo bloğu almazsa kayıt
+            // bloksuz yazılır ve neden kayıtta adıyla durur (Fırlatma Sahası
+            // rijit uçar, nedeni yazar); araç kaybolmaz.
+            var kaynak = calkantiKaynagi(results, motorType);
+            if (kaynak) {
+                record.calkanti_kaynagi = { surum: CALKANTI_KAYNAK_SURUMU,
+                                            motor_type: motorType, motor_sonucu: kaynak };
+            }
             try {
                 window.localStorage.setItem(STORAGE_KEY, JSON.stringify(record));
-            } catch (e) { /* storage kapalı/dolu olabilir */ }
+                buSayfaninKaydi = record.saved_at;
+            } catch (e) {
+                if (!record.calkanti_kaynagi) { /* storage kapalı/dolu olabilir */ return record; }
+                delete record.calkanti_kaynagi;
+                record.calkanti_kaynagi_yazilamadi = true;
+                try {
+                    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(record));
+                    buSayfaninKaydi = record.saved_at;
+                } catch (e2) { /* storage kapalı/dolu olabilir */ }
+            }
             return record;
         }).catch(function (e) {
             if (window.console && console.debug) {
@@ -195,6 +372,35 @@
         return durum === 'ok' ? kayit : null;
     }
 
+    /* V307/FS-YÜK — FAYDALI YÜK KÖPRÜSÜ. Motor sayfasının 6-DOF panelindeki
+     * faydalı yük alanları (SixDofPanel.payloadForFlight) son hesabın kaydına
+     * `payload` olarak girer; Fırlatma Sahası oturum aracında alanlarını
+     * bundan doldurur (kayıtlı projede uç aynı bloğu belgeden kurar:
+     * flight_vehicle.project_payload). Panel alanı hesaptan SONRA
+     * değişirse syncPayload kaydı günceller — yalnız kayıt BU sayfanın son
+     * yayımıysa (başka motor sayfasının aracına başka panelin yükü yazılmaz).
+     */
+    var buSayfaninKaydi = null;   // bu sayfanın yazdığı kaydın saved_at'i
+    function panelPayload() {
+        try {
+            var p = (window.SixDofPanel && typeof window.SixDofPanel.payloadForFlight === 'function')
+                ? window.SixDofPanel.payloadForFlight() : null;
+            return (p && typeof p === 'object') ? p : null;
+        } catch (e) { return null; }
+    }
+    function syncPayload() {
+        if (!buSayfaninKaydi) return false;
+        try {
+            var raw = window.localStorage.getItem(STORAGE_KEY);
+            var kayit = raw ? JSON.parse(raw) : null;
+            if (!kayit || !kayit.vehicle || kayit.saved_at !== buSayfaninKaydi) return false;
+            var yuk = panelPayload();
+            if (yuk) kayit.payload = yuk; else delete kayit.payload;
+            window.localStorage.setItem(STORAGE_KEY, JSON.stringify(kayit));
+            return true;
+        } catch (e) { return false; }
+    }
+
     /* Köprüyü temizle (yeni saha/araç seçilince entegratör çağırabilir). */
     function clear() {
         try { window.localStorage.removeItem(STORAGE_KEY); } catch (e) { /* geç */ }
@@ -235,8 +441,34 @@
     /* V306/UÇUŞ-3: verilen hesabın aracı adıyla reddedildiyse ekran metni,
      * değilse null. Metin uç yanıtının nedeninden (soğutma devresi çözülmedi
      * ya da motor kütlesi yayımlanmadı) sözlükle kurulur. */
+    /* V307/FS-KÜÇÜK (kalem 4): tasarım ortamının adı (uç yanıtının
+     * design_ambient bloğundan; sayı motorundur). */
+    function tasarimOrtami(da) {
+        da = da || {};
+        if (da.mode === 'vacuum') return tr_('flight.ambientVacuum', 'vacuum');
+        if (da.mode === 'altitude' && typeof da.altitude_m === 'number' && isFinite(da.altitude_m)) {
+            return trf_('flight.ambientAltitude', { alt: sayiYaz(da.altitude_m, 0) }, '{alt} m altitude');
+        }
+        if (da.mode === 'pressure' && typeof da.pressure_bar === 'number' && isFinite(da.pressure_bar)) {
+            return trf_('flight.ambientPressure', { p: sayiYaz(da.pressure_bar, 4) }, 'an ambient pressure of {p} bar');
+        }
+        return tr_('flight.ambientNonSeaLevel', 'a non-sea-level ambient');
+    }
     function refusalText(body) {
         if (!body) return null;
+        // Uç gövdesi `error`, köprü kaydı (readLast().refusal) `code` taşır.
+        if ((body.error || body.code) === REFUSAL_CODE_SEA_LEVEL) {
+            var ds = body.sea_level || {};
+            var sayi = function (v) { return (typeof v === 'number' && isFinite(v)) ? sayiYaz(v, 4) : '—'; };
+            return (body.cause === 'nozzle_flow_separated_at_sea_level')
+                ? trf_('flight.refusedSeaLevelSeparated',
+                    { ambient: tasarimOrtami(body.design_ambient),
+                      pe: sayi(ds.exit_pressure_bar), psep: sayi(ds.separation_pressure_bar) },
+                    'No flight: this engine is designed for {ambient}; at sea level its nozzle flow separates (exit pressure {pe} bar, below the separation pressure {psep} bar), so no lift-off thrust is published, no vehicle is built and nothing is flown from the ground. Flying it as an upper stage ignited at altitude is not part of this flight.')
+                : trf_('flight.refusedSeaLevelNotPublished',
+                    { ambient: tasarimOrtami(body.design_ambient) },
+                    'No flight: this engine is designed for {ambient} and its sea-level (lift-off) thrust is not published for this design, so no vehicle is built and nothing is flown from the ground.');
+        }
         return (body.cause === 'cooling_circuit_not_solved')
             ? tr_('flight.refusedCooling',
                 'No flight: the engine mass is not published for this calculation because the regenerative cooling circuit was not solved, so no vehicle is built and nothing is flown. Fix the cooling design and calculate again.')
@@ -570,6 +802,7 @@
         isUserEdit: isUserEdit,
         vehicleRefusalText: vehicleRefusalText,
         refusalText: refusalText,
+        REFUSAL_CODES: [REFUSAL_CODE, REFUSAL_CODE_SEA_LEVEL],
         seedField: seedField,
         inertLedgerText: inertLedgerText,
         renderInertLedger: renderInertLedger,
@@ -581,6 +814,9 @@
         MASS_FIELD_TOL_KG: MASS_FIELD_TOL_KG,
         changedMotorFields: changedMotorFields,
         readLast: readLast,
+        syncPayload: syncPayload,
+        calkantiKaynagi: calkantiKaynagi,
+        CALKANTI_KAYNAK_SURUMU: CALKANTI_KAYNAK_SURUMU,
         clear: clear,
         detectMotorType: detectMotorType,
         STORAGE_KEY: STORAGE_KEY

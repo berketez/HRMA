@@ -83,6 +83,9 @@ class TestP5B202ToksikEslemeCozunur:
             'chamber_pressure': 70, 'propellant_mass': 120.0,
             'chamber_diameter': 0.12, 'wall_thickness': 0.003,
             'motor_type': 'liquid', 'propellant_type': 'n2o4_mmh',
+            # V307/GÜVERTE-ISIL kalem 4: oda sıcaklığı zorunlu (3000 K
+            # varsayılanı kalktı); eski örtük değer açık, sayılar bit-aynı.
+            'chamber_temperature': 3000.0,
             'material': 'steel_4130'})
         assert r.status_code == 200
         sa = r.get_json()['safety_analysis']
@@ -206,6 +209,9 @@ class TestP5B204YanginSinifi:
             'chamber_pressure': 70, 'propellant_mass': 120.0,
             'chamber_diameter': 0.12, 'wall_thickness': 0.003,
             'motor_type': 'liquid', 'propellant_type': 'lox_rp1',
+            # V307/GÜVERTE-ISIL kalem 4: oda sıcaklığı zorunlu (3000 K
+            # varsayılanı kalktı); eski örtük değer açık, sayılar bit-aynı.
+            'chamber_temperature': 3000.0,
             'material': 'steel_4130'})
         assert r.status_code == 200
         fh = r.get_json()['safety_analysis']['fire_hazards']

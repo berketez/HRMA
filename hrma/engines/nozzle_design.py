@@ -654,12 +654,23 @@ class NozzleDesigner:
         # Hardcoded varsayılanlar yalnızca çağıran gerçek değer geçmediğinde
         # kullanılır (eski davranışı korur). Tipik HRMA gazları için kaba değerler:
         # gamma≈1.25, R≈300 J/kg·K (MW≈27.7 g/mol), T_c≈3000 K.
+        # V307/KÜÇÜKLER-2 (kalem 2) — ÜRÜN YOLU ULAŞMIYOR, ADIYLA BEYANLI.
+        # ÖLÇÜLDÜ (docs/scofield/raw/OH/V307/kucukler-2/olcum/k2_once.json):
+        # ürün içindeki tek çağıran (hybrid_rocket_engine design_nozzle)
+        # gamma / R / T_c'yi her zaman geçirir (T_c None kalmaz: kullanıcı ya
+        # da yakıt kartı); varsayılanlara yalnız doğrudan kütüphane çağrısı
+        # (testler) ulaşır. Kullanıldıklarında yanıt ``legacy_defaults_applied``
+        # ile ADIYLA söyler; ürün yolunda anahtar yoktur (yanıt bit-aynı).
+        _eski_varsayilanlar = []
         if gamma is None:
             gamma = 1.25       # legacy varsayılan (çağıran gerçek γ geçmeli)
+            _eski_varsayilanlar.append('gamma = 1.25')
         if R_specific is None:
             R_specific = 300   # legacy varsayılan (J/kg·K; çağıran R=R_u/MW geçmeli)
+            _eski_varsayilanlar.append('R_specific = 300 J/(kg*K)')
         if T_chamber is None:
             T_chamber = 3000   # legacy varsayılan (K; çağıran alev sıcaklığı geçmeli)
+            _eski_varsayilanlar.append('T_chamber = 3000 K')
 
         expansion_ratio = exit_area / throat_area
 
@@ -923,6 +934,8 @@ class NozzleDesigner:
                                       'ambient_pressure_bar': round(pa, 4)},
                            'severity': 'warning'}]
                          if flow_separated else []),
+            **({'legacy_defaults_applied': _eski_varsayilanlar}
+               if _eski_varsayilanlar else {}),
         }
     
     def _calculate_nozzle_geometry(self, dt: float, de: float,

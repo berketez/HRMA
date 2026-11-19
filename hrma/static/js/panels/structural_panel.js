@@ -204,14 +204,89 @@
             color:var(--hd-ink-dim, #7d97a5);">${name}</span>`;
     }
 
-    // Totoloji imi: sayının YANINDA ucun kendi alan adı. Yeni çeviri
-    // anahtarı açılmaz — makine alan adı veri olarak basılır.
+    // V307/SEKME-GÜVERTE (NK3-K-2) — MAKİNE ALAN ADI GÖRÜNÜR METİNDEN İNDİ.
+    // ÖLÇÜLDÜ (NK3-K, katı L2 TR ekranı): "headline_safety_factor",
+    // "earned_scope_status: UNSAFE · earned_scope_risk_level: HIGH",
+    // "design_target_assessment", "safety_factor_is_tautological",
+    // "wall_thickness_source: user_supplied" kullanıcıya ham basılıyordu
+    // (ORTAK: ham anahtar kullanıcıya gösterilmez). Alanın ADRESİ kaybolmaz:
+    // etiketin ipucunda (title) ve gizli bir teknik çapada
+    // (`data-machine-field`, `hidden`) durur; görünür metin kullanıcı dilidir.
+    function gizliAd(name) {
+        return '<span class="hd-makine-adi" data-machine-field="'
+            + U.esc(String(name)) + '" hidden>' + U.esc(String(name)) + '</span>';
+    }
+
+    // Kullanıcı dilinde etiket + ipucunda ve gizli çapada makine adı.
+    function adliEtiket(metin, name) {
+        return '<span title="' + U.esc(String(name)) + '">' + metin + '</span>'
+            + gizliAd(name);
+    }
+
+    // V307/DİL-EKRAN (KILAVUZ ÜB-3): güverte alanının makine adı → formdaki
+    // etiketin sözlük anahtarı (alanlar dizisiyle aynı anahtarlar). Tanınmayan
+    // ad AYNEN basılır (uydurma ad yok); makine adı ipucunda ve çapada kalır.
+    const ALAN_ETIKETI = {
+        chamber_pressure: ['common.f.chamberPressureBar', 'Chamber Pressure (bar)'],
+        chamber_diameter: ['common.f.chamberDiameterM', 'Chamber Diameter (m)'],
+        chamber_length: ['common.f.chamberLengthM', 'Chamber Length (m)'],
+        throat_diameter: ['common.f.throatDiameterM', 'Throat Diameter (m)'],
+        burn_time: ['common.f.burnTimeS', 'Burn Time (s)'],
+        thrust: ['common.f.thrustN', 'Thrust (N)'],
+        wall_thickness: ['common.f.wallThicknessM', 'Wall Thickness (m)'],
+        material: ['common.f.material', 'Material'],
+    };
+    function alanEtiketi(ad) {
+        const e = ALAN_ETIKETI[ad];
+        return e ? T(e[0], e[1]) : String(ad);
+    }
+
+    // Totoloji imi: sayının YANINDA, kullanıcı dilinde (makine adı çapada).
     function tautMark(isTaut) {
         return isTaut === true
             ? ` <span style="color:var(--hd-ink-dim, #7d97a5);
-                 font-family:var(--hd-mono); font-size:0.7rem;"
-                 >safety_factor_is_tautological</span>`
+                 font-size:0.7rem;" title="safety_factor_is_tautological"
+                 >${T('panel.structural.tautReadback', 'design target read back')}</span>`
+              + gizliAd('safety_factor_is_tautological')
             : '';
+    }
+
+    // Hüküm sözcüğü (SAFE / MARGINAL / UNSAFE / NOT_EVALUATED …) kullanıcı
+    // dilinde; tanınmayan değer AYNEN (uydurma çeviri yok).
+    function hukumSozcugu(v) {
+        const s = String(v == null ? '' : v);
+        const SOZ = {
+            SAFE: ['panel.structural.word.SAFE', 'SAFE'],
+            MARGINAL: ['panel.structural.word.MARGINAL', 'MARGINAL'],
+            UNSAFE: ['panel.structural.word.UNSAFE', 'UNSAFE'],
+            NOT_EVALUATED: ['panel.structural.word.NOT_EVALUATED', 'NOT EVALUATED'],
+            'VERY LOW': ['panel.structural.word.VERY_LOW', 'VERY LOW'],
+            LOW: ['panel.structural.word.LOW', 'LOW'],
+            MEDIUM: ['panel.structural.word.MEDIUM', 'MEDIUM'],
+            HIGH: ['panel.structural.word.HIGH', 'HIGH'],
+            CRITICAL: ['panel.structural.word.CRITICAL', 'CRITICAL'],
+            withheld: ['panel.structural.word.WITHHELD', 'WITHHELD'],
+        }[s];
+        return SOZ ? T(SOZ[0], SOZ[1]) : s.replace(/_/g, ' ');
+    }
+
+    // V307/SEKME-GÜVERTE (NK3-K-2) — YÜK TABANI. Bu sekmenin bütün çember /
+    // cidar sayıları TASARIM basıncındadır (design_parameters.
+    // design_pressure = design_pressure_factor × oda basıncı; katsayının
+    // künyesi structural_analysis.STRUCTURAL_DESIGN_PRESSURE_FACTOR_BASIS:
+    // HRMA seçimi, literatür değeri değil) ve tasarım emniyet katsayısı
+    // hedefi ORADA uygulanır. Katı ve sıvı motor hedefi oda basıncında
+    // (MEOP) uygular; hibrit motor bu sekmeyle aynı tasarım basıncında.
+    // Cümle yalnız iki sayı da yanıtta varsa kurulur (uydurma yok).
+    function yukTabani(dp, hedef) {
+        const pd = dp && dp.design_pressure;
+        const f = dp && dp.design_pressure_factor;
+        if (!isNum(pd) || !isNum(f) || f <= 0) return null;
+        const p = pd / f;
+        return {
+            pd: pd, f: f, p: p, hedef: isNum(hedef) ? hedef : null,
+            etkin: isNum(hedef) ? hedef * f : null,
+        };
     }
 
     function isNum(x) {
@@ -518,18 +593,40 @@
               + 'not carry the motor\'s wall temperature, so it is not a '
               + 'verification of that wall: no acceptance is shown and the '
               + 'numbers below are diagnostic only.')}</p>`;
-        const satir = [['model_validity_limit_exceeded',
-            `<span style="color:${U.kindColor('warn')};
-             font-family:var(--hd-mono); font-size:0.75rem;">true · ${
-                motorValidity.path}</span>`]];
+        // V307/DİL-SON (kalem 3, ÖK-22 sınıfı): satır etiketi, makine yolu
+        // ('true · motor.structural_analysis.<blok>') ve gerekçe kodları
+        // ekranda okunur cümleyle; kodun kendisi makine-okur alanda
+        // (`data-hrma-kod`) kalır. Bilinmeyen blok/gerekçe kodu AYNEN basılır
+        // (fail-closed, `_kodMetni`).
+        const blokAdi = _kodMetni(MOTOR_VALIDITY_BLOCK_TEXT,
+            String(motorValidity.path).split('.').pop());
+        const satir = [[T('panel.structural.mvMotorWhere',
+                          'Motor result outside the model'),
+            `<span data-hrma-kod="${guvenliKunye(motorValidity.path)}"
+             style="color:${U.kindColor('warn')}; font-size:0.78rem;">${
+                blokAdi === String(motorValidity.path).split('.').pop()
+                    ? motorValidity.path : blokAdi}</span>`]];
         if (motorValidity.reasons.length) {
-            satir.push(['model_validity_reasons',
-                `<span style="color:${U.kindColor('warn')};
-                 font-family:var(--hd-mono); font-size:0.75rem;">${
-                    motorValidity.reasons.join(', ')}</span>`]);
+            satir.push([T('panel.structural.modelValidityReasons',
+                          'Why the result is outside the model'),
+                `<span data-hrma-kod="${motorValidity.reasons.join(',')}"
+                 style="color:${U.kindColor('warn')}; font-size:0.78rem;">${
+                    motorValidity.reasons.map(function (k) {
+                        return _kodMetni(MODEL_VALIDITY_REASON_TEXT, k);
+                    }).join(' ')}</span>`]);
         }
         return html + U.kvTable(satir);
     }
+
+    //: Motor künye bloğunun okunur adı (analysis_dock.js
+    //: WALL_PROVENANCE_PATHS'in geçerlilik bayrağı taşıyan üç bloğu).
+    const MOTOR_VALIDITY_BLOCK_TEXT = {
+        case_analysis: ['panel.structural.mvBlockCase', 'Motor case wall'],
+        chamber_analysis: ['panel.structural.mvBlockChamber',
+                           'Combustion chamber wall'],
+        chamber_structure: ['panel.structural.mvBlockChamberStructure',
+                            'Chamber wall'],
+    };
 
     function readMotorSolve(r) {
         const sa = (U.motorDict(r) || {}).structural_analysis;
@@ -599,6 +696,10 @@
                 // P_c · r / t); basınç motorun yayımladığı oda basıncıdır.
                 pressureBar: sayi(m.chamber_pressure),
                 twoLayer: false,
+                // V307/SEKME-GÜVERTE (NK3-K-2): motorun KENDİ tanımıyla
+                // gereken cidar (çember, MEOP'ta hedef EK) ve hedef.
+                requiredMm: sayi(blk.wall_thickness_hoop_required_mm),
+                targetSf: sayi(blk.design_safety_factor),
             };
         }
         if (ad === 'chamber_structure') {
@@ -622,6 +723,12 @@
                 governingLayer: iki ? (blk.wall_stack_governing_layer || null)
                                     : null,
                 wallTempK: sayi(blk.wall_temperature),
+                // V307/SEKME-GÜVERTE (NK3-K-2): tek cidarda motorun çember
+                // gereksinimi (hedef EK oda basıncında, motorun cidar
+                // sıcaklığındaki dayanımla); iki katmanda katman katman
+                // değerlendirildiği için tek sayı basılmaz.
+                requiredMm: iki ? null : sayi(blk.required_wall_thickness_hoop),
+                targetSf: iki ? null : sayi(blk.safety_factor),
             };
         }
         return null;
@@ -699,9 +806,7 @@
         const mep = motorEndpointName();
         const satir = [
             [T('panel.structural.motorWallMotorRow', 'Motor result — hoop SF')
-                + (mep ? ` <span style="color:var(--hd-ink-dim, #7d97a5);
-                     font-family:var(--hd-mono); font-size:0.72rem;"
-                     title="${U.esc(mw.path)}">${mep}</span>` : ''),
+                + (mep ? gizliAd(mep) : ''),
              gerilme(mw.sf, mw.hoopMPa, mw.yieldMPa)],
             [T('panel.structural.motorWallTabRow', 'This tab — hoop SF (pressure only)'),
              gerilme(sfTab, ca.pressure_hoop_stress, ca.yield_strength_used_MPa)],
@@ -778,9 +883,8 @@
         const t = dta && dta.design_safety_factor_target;
         if (motorSfTarget && isNum(t) && Math.abs(motorSfTarget.value - t)
                 <= 1e-9 * Math.max(1, Math.abs(t))) {
-            return U.tf('panel.structural.sfTargetFromMotor',
-                        { path: motorSfTarget.path },
-                        'source: motor design target ({path})');
+            return T('panel.structural.sfTargetFromMotor',
+                     'source: motor design target');
         }
         return T('panel.structural.sfTargetPanel',
                  'source: value entered in this panel');
@@ -904,10 +1008,25 @@
         // 'Minimum SF (all modes)' iken manşetin KENDİ adı ('kazanılmış
         // asgari') ekranda yoktu; iki satır aynı tablodaydı ve hangisinin
         // kullanıcının cidarını sınadığı yalnız makine adından okunuyordu.
-        const earnedLabel = T('panel.structural.sfMinEarned', 'Minimum SF (earned)')
-            + ` <span style="color:var(--hd-ink-dim, #7d97a5);
-                 font-family:var(--hd-mono); font-size:0.72rem;"
-                 >minimum_earned_safety_factor</span>`;
+        const earnedLabel = adliEtiket(
+            T('panel.structural.sfMinEarned', 'Minimum SF (earned)'),
+            'minimum_earned_safety_factor');
+        // V307/SEKME-GÜVERTE (NK3-K-2): bu tablonun yük tabanı (tasarım
+        // basıncı ve hedefin oradaki/oda basıncındaki karşılığı).
+        const dpY = (sa && sa.design_parameters) || {};
+        const dtaY = (sf && sf.design_target_assessment) || {};
+        const hedefY = isNum(dtaY.design_safety_factor_target)
+            ? dtaY.design_safety_factor_target
+            : (isNum(ca && ca.design_safety_factor_target)
+               ? ca.design_safety_factor_target : null);
+        const yt = yukTabani(dpY, hedefY);
+        const tabanEki = yt
+            ? ` <span data-structural-load-basis="design_pressure"
+                 style="color:var(--hd-ink-dim, #7d97a5); font-size:0.72rem;">· ${
+                U.esc(U.tf('panel.structural.atDesignPressure',
+                           { pd: numL(yt.pd, 1), f: numL(yt.f, 2) },
+                           'at the design pressure {pd} bar ({f} × chamber pressure)'))}</span>`
+            : '';
         let earnedCell;
         if (earnedVal !== null) {
             earnedCell = sfCell(earnedVal, required)
@@ -926,11 +1045,15 @@
                 const esCek = esSt !== sf.earned_scope_status;
                 earnedCell += ` <span style="color:${U.kindColor(
                     statusKind(esSt))};
-                     font-family:var(--hd-mono); font-size:0.72rem;"
-                     >earned_scope_status: ${esSt}${
+                     font-size:0.72rem;" title="earned_scope_status"
+                     >${U.esc(U.tf('panel.structural.earnedScopeVerdict',
+                         { st: hukumSozcugu(esSt) },
+                         'measured sections: {st}'))}${
                     (sf.earned_scope_risk_level && !esCek)
-                        ? ' · earned_scope_risk_level: '
-                          + sf.earned_scope_risk_level : ''}</span>`;
+                        ? ' · ' + U.esc(U.tf('panel.structural.riskWord',
+                              { r: hukumSozcugu(sf.earned_scope_risk_level) },
+                              'risk {r}')) : ''}</span>`
+                    + gizliAd('earned_scope_status') + tabanEki;
             }
         } else {
             // Kazanılmış SF YOK: değerlendirilen kesitlerin hepsi HRMA'nın
@@ -938,9 +1061,11 @@
             earnedCell = `<span style="color:${U.kindColor('warn')};
                  font-family:var(--hd-mono);">—</span>
                  <span style="color:var(--hd-ink-dim, #7d97a5); font-size:0.75rem;"
-                 >· ${(sf && sf.minimum_earned_safety_factor === null)
-                      ? 'minimum_earned_safety_factor: null'
-                      : 'minimum_earned_safety_factor'}</span>`;
+                 >· ${T('panel.structural.sfEarnedNone',
+                        'no section was measured on a wall you supplied')}</span>`
+                + gizliAd((sf && sf.minimum_earned_safety_factor === null)
+                    ? 'minimum_earned_safety_factor: null'
+                    : 'minimum_earned_safety_factor');
         }
         // Üçüncü öge kvTable'da `title="…"` ipucudur — o da sunucunun
         // cümlesidir, çeviri kanalından geçer (OH-Z4-04).
@@ -963,24 +1088,65 @@
         // bu satır onların ÜSTÜNE eklenir, yerlerini almaz.
         // ==============================================================
         const rows = [];
+        // V307/SEKME-GÜVERTE (NK3-K-2) — YÜK TABANI SATIRI (tablonun başında).
+        // ÖLÇÜLDÜ (olcum_once_A.json, katı L2, EK 2,5): motor 2,5'i MEOP'ta
+        // uygulayıp 3,31 mm'yi yeterli buluyor; bu sekme 2,5'i 1,5 × MEOP
+        // tasarım basıncında uygulayıp "Gereken asgari 5,22 mm · UNSAFE ·
+        // HIGH" diyordu ve yalnız çember gerilmesi satırı tabanı
+        // söylüyordu. İki tanım ADIYLA yan yana: bu sekmenin tabanı, motorun
+        // tabanı, manşet hükmün hangisi olduğu.
+        if (yt) {
+            let tabanMetni = U.tf('panel.structural.loadBasis', {
+                pd: numL(yt.pd, 1), f: numL(yt.f, 2), p: numL(yt.p, 1),
+                sf: yt.hedef !== null ? numL(yt.hedef, 2) : '—',
+                eff: yt.etkin !== null ? numL(yt.etkin, 2) : '—' },
+                'The safety factors, verdict words and required wall in this '
+                + 'table are taken at the design pressure {pd} bar = {f} × '
+                + 'chamber pressure {p} bar (an HRMA design margin, not a code '
+                + 'factor); the design SF target {sf} is applied there, which '
+                + 'is {eff} on the chamber pressure.');
+            const mw = motorWallCheck;
+            if (mw && !mw.twoLayer && isNum(mw.pressureBar)
+                    && Math.abs(mw.pressureBar - yt.p) <= 1e-6 * Math.max(1, yt.p)) {
+                tabanMetni += ' ' + U.tf('panel.structural.loadBasisMotor',
+                    { sf: yt.hedef !== null ? numL(yt.hedef, 2) : '—',
+                      p: numL(yt.p, 1) },
+                    'The motor result applies the same target {sf} at the '
+                    + 'chamber pressure {p} bar (MEOP), the pressure that '
+                    + 'NASA-STD-5012C Table 1 and AIAA S-080A apply their '
+                    + 'factors to.');
+            }
+            tabanMetni += ' ' + ((sf && sf.verdict_source === 'motor_structural_chain')
+                ? T('panel.structural.loadBasisHeadlineMotor',
+                    'The verdict at the top of this tab is the motor result\'s '
+                    + 'own structural verdict.')
+                : T('panel.structural.loadBasisHeadlineTab',
+                    'The verdict at the top of this tab is this tab\'s, on '
+                    + 'the design-pressure basis.'));
+            rows.push([T('panel.structural.loadBasisLabel', 'Load basis of this table'),
+                '<span data-structural-load-basis="table" style="font-size:0.74rem;'
+                + ' white-space:normal;">' + U.esc(tabanMetni) + '</span>']);
+        }
         if (sf && typeof sf.headline_safety_factor_source === 'string'
                 && sf.headline_safety_factor_source) {
             const headlineVal = isNum(sf.headline_safety_factor)
                 ? sf.headline_safety_factor : null;
-            const headlineLabel = T('panel.structural.sfHeadline',
-                                    'Headline SF (verdict)')
-                + ` <span style="color:var(--hd-ink-dim, #7d97a5);
-                     font-family:var(--hd-mono); font-size:0.72rem;"
-                     >headline_safety_factor</span>`;
+            const headlineLabel = adliEtiket(
+                T('panel.structural.sfHeadline', 'Headline SF (verdict)'),
+                'headline_safety_factor');
             let headlineCell;
             if (headlineVal !== null) {
                 headlineCell = sfCell(headlineVal, required);
             } else {
                 // Hüküm geri çekilmiş: manşete hiçbir sayı terfi ETMEZ.
+                // (NK3-K-2) Eskiden "headline_safety_factor: null" basılıyordu;
+                // makine adı çapada, görünür metin kullanıcı dilinde.
                 headlineCell = `<span style="color:${U.kindColor('warn')};
                      font-family:var(--hd-mono);">—</span>
                      <span style="color:var(--hd-ink-dim, #7d97a5);
-                      font-size:0.75rem;">· headline_safety_factor: null</span>`;
+                      font-size:0.75rem;">· ${T('panel.structural.sfHeadlineWithheld',
+                        'withheld: no verdict safety factor was issued')}</span>`
+                    + gizliAd('headline_safety_factor: null');
             }
             rows.push([headlineLabel, headlineCell,
                        SRV(sf.headline_safety_factor_source)]);
@@ -997,9 +1163,7 @@
                 ? sf.binding_safety_factors : [];
             const mep = motorEndpointName();
             const allLabel = T('panel.structural.sfMinAll', 'Minimum SF (all modes)')
-                + ` <span style="color:var(--hd-ink-dim, #7d97a5);
-                     font-family:var(--hd-mono); font-size:0.72rem;"
-                     >${PANEL_ENDPOINT}</span>`;
+                + gizliAd(PANEL_ENDPOINT);
             // P11B4-04: belirleyici mod totolojikse bu sayı da bir ÖLÇÜM
             // değil, hedefin geri okumasıdır — yeşil hüküm düşer.
             let allCell = sfCell(sf.minimum_safety_factor, required, tautological);
@@ -1024,8 +1188,9 @@
                 && bind.some(function (k) { return readback.indexOf(k) !== -1; }));
             if (bindOkur) {
                 allCell += ` <span style="color:${U.kindColor('warn')};
-                     font-family:var(--hd-mono); font-size:0.72rem;"
-                     >stations_reading_back_target: ${readback.join(', ')}</span>`;
+                     font-size:0.72rem;" title="stations_reading_back_target"
+                     >${U.esc(readback.map(modeLabel).join(', '))}:</span>`
+                    + gizliAd('stations_reading_back_target');
                 // OH-Z4-04: makine adı KALIR (alan adresi), yanına ne demek
                 // olduğu iki dilde yazılır. Bu im olmadan kullanıcı bu
                 // sayıyı kendi cidarının doğrulaması sanıyordu.
@@ -1035,8 +1200,11 @@
                     + 'not measured on a wall you supplied.')}</span>`;
             } else if (!readback && tautological) {
                 allCell += ` <span style="color:${U.kindColor('warn')};
-                     font-family:var(--hd-mono); font-size:0.72rem;"
-                     >binding_safety_factor_is_tautological: true</span>`;
+                     font-size:0.72rem;" title="binding_safety_factor_is_tautological"
+                     >${T('panel.structural.sfTargetReadback',
+                    'This safety factor reads the design target back — it was '
+                    + 'not measured on a wall you supplied.')}</span>`
+                    + gizliAd('binding_safety_factor_is_tautological');
             }
             // Bu SAYININ ne olduğunu ucun kendi cümlesi söylüyorsa ipucu o.
             rows.push([allLabel, allCell,
@@ -1055,35 +1223,46 @@
                                   required, true);
                 const ek = [];
                 if (isNum(dta.design_safety_factor_target)) {
-                    ek.push('design_safety_factor_target: '
-                            + U.fmt(dta.design_safety_factor_target, 1));
+                    ek.push(U.tf('panel.structural.dtaTarget',
+                                 { v: numL(dta.design_safety_factor_target, 1) },
+                                 'design SF target {v}'));
                     // V3 KK: hedefin kaynağı ADIYLA (sessiz düşüş yok).
                     const kaynak = sfTargetSourceText(db, dta);
                     if (kaynak) ek.push(kaynak);
                 }
                 if (Array.isArray(dta.stations) && dta.stations.length) {
-                    ek.push('stations: ' + dta.stations.join(', '));
+                    ek.push(U.tf('panel.structural.dtaStations',
+                                 { s: dta.stations.map(modeLabel).join(', ') },
+                                 'sections: {s}'));
                 }
                 if (ek.length) {
                     cell += ` <span style="color:var(--hd-ink-dim, #7d97a5);
-                         font-size:0.72rem; font-family:var(--hd-mono);"
-                         >· ${ek.join(' · ')}</span>`;
+                         font-size:0.72rem;"
+                         >· ${U.esc(ek.join(' · '))}</span>`;
                 }
                 if (st) {
                     const stG = onayGeriCek(st);
                     cell += ` <span style="color:${U.kindColor(statusKind(stG))};
-                         font-family:var(--hd-mono); font-size:0.72rem;"
-                         >status: ${stG}${(dta.risk_level && stG === st)
-                             ? ' · risk_level: ' + dta.risk_level : ''}</span>`;
+                         font-size:0.72rem;"
+                         >${U.esc(U.tf('panel.structural.dtaStatus',
+                             { st: hukumSozcugu(stG) },
+                             'grade of the target: {st}'))}${(dta.risk_level && stG === st)
+                             ? ' · ' + U.esc(U.tf('panel.structural.riskWord',
+                                   { r: hukumSozcugu(dta.risk_level) }, 'risk {r}')) : ''}</span>`;
                 }
-                rows.push(['design_target_assessment', cell,
+                cell += tabanEki;
+                rows.push([adliEtiket(T('panel.structural.dtaLabel',
+                               'Sections HRMA sized (design target read back)'),
+                               'design_target_assessment'), cell,
                            SRV(dta.basis || '')]);
             }
 
             // Hükmün ÇEKİLDİĞİ sayı (uç ayrı yayımlıyorsa): kaynağıyla.
             if (isNum(sf.verdict_safety_factor)) {
                 rows.push([
-                    'verdict_safety_factor',
+                    adliEtiket(T('panel.structural.sfVerdict',
+                                 'Safety factor behind the verdict'),
+                               'verdict_safety_factor'),
                     sfCell(sf.verdict_safety_factor, required)
                     + (sf.verdict_safety_factor_source
                         ? ` <span style="color:var(--hd-ink-dim, #7d97a5);
@@ -1101,8 +1280,10 @@
                 let cell = sfCell(motorSolve.minimum, required);
                 if (isNum(motorSolve.wallMm)) {
                     cell += ` <span style="color:var(--hd-ink-dim, #7d97a5);
-                         font-size:0.75rem;">· wall_thickness_used_mm
-                         ${U.fmt(motorSolve.wallMm, 2)}</span>`;
+                         font-size:0.75rem;" title="wall_thickness_used_mm">· ${
+                         U.esc(U.tf('panel.structural.wallMm',
+                                    { t: numL(motorSolve.wallMm, 2) },
+                                    'wall {t} mm'))}</span>`;
                 }
                 if (fark && fark.length) {
                     cell += ` <span style="color:${U.kindColor('info')};
@@ -1117,10 +1298,8 @@
                     }
                 }
                 rows.push([
-                    T('panel.structural.sfMinAll', 'Minimum SF (all modes)')
-                    + ` <span style="color:var(--hd-ink-dim, #7d97a5);
-                         font-family:var(--hd-mono); font-size:0.72rem;"
-                         >${mep}</span>`,
+                    T('panel.structural.sfMinAllMotor', 'Minimum SF (all modes) — motor result')
+                    + gizliAd(mep),
                     cell,
                     'motor.structural_analysis.safety_analysis.minimum_safety_factor',
                 ]);
@@ -1151,9 +1330,35 @@
                        sfCell(modes[k], required, taut[k] === true)
                        + tautMark(taut[k] === true)]);
         });
-        if (required != null) {
+        // V307/GÜVERTE-ORTAM (kalem 6): satır MALZEME KAYDININ sayısını basar
+        // (renk eşiği artık tasarım hedefi; `required` o eşiktir).
+        const malzemeEkSatir = (renkEsigi && isNum(renkEsigi.malzeme))
+            ? renkEsigi.malzeme : null;
+        if (malzemeEkSatir != null) {
+            // V307/SEKME-GÜVERTE (NK3-K-2): bu çalışmanın hedefi malzeme
+            // kaydının varsayılanından farklıysa satır ikisini de adıyla
+            // söyler (katı L2: hedef 2,5 ⟷ malzeme kaydı 4,0 "gereken" diye
+            // tek başına basılıyordu).
+            const hedefFarkli = yt && yt.hedef !== null
+                && Math.abs(yt.hedef - malzemeEkSatir)
+                    > 1e-9 * Math.max(1, malzemeEkSatir);
+            // Renklerin hangi sayıya karşı verildiği (kalem 6): hedef
+            // yayımlandıysa ve malzeme kaydından farklıysa adıyla.
+            const renkHedefte = hedefFarkli && renkEsigi
+                && renkEsigi.kaynak === 'design_target';
             rows.push([T('panel.structural.sfRequired', 'Required design SF (material)'),
-                `<span style="font-family:var(--hd-mono);">${U.fmt(required, 1)}</span>`]);
+                `<span style="font-family:var(--hd-mono);">${U.fmt(malzemeEkSatir, 1)}</span>`
+                + (hedefFarkli
+                    ? ` <span data-structural-target-differs="1"
+                         style="color:var(--hd-ink-dim, #7d97a5); font-size:0.72rem;">· ${
+                        U.esc(U.tf('panel.structural.sfRequiredNotTarget',
+                            { t: numL(yt.hedef, 2) },
+                            'from the material record, not this run\'s design target ({t})'))}${
+                        renkHedefte ? ' · ' + U.esc(U.tf('panel.structural.sfColourBasis',
+                            { t: numL(renkEsigi.deger, 2) },
+                            'the colours in this tab compare each safety factor '
+                            + 'with the design target {t}')) : ''}</span>`
+                    : '')]);
         }
         let html = U.kvTable(rows);
         // Sunucunun kendi gerekçe cümlesi HAM basılır (designBasisBlock ve
@@ -1372,7 +1577,9 @@
             const kapsam = [];
             if (db.is_verification_scope) {
                 kapsam.push([U.esc(T('panel.structural.lbl.verificationScope', 'Verification scope')),
-                             U.esc(String(db.is_verification_scope)), 'is_verification_scope']);
+                             U.esc(db.is_verification_scope === 'chamber wall thickness'
+                                 ? T('panel.structural.scopeChamberWall', 'chamber wall thickness')
+                                 : String(db.is_verification_scope)), 'is_verification_scope']);
             }
             if (Array.isArray(db.stations_not_verified)) {
                 kapsam.push([U.esc(T('panel.structural.lbl.stationsNotVerified', 'Stations not verified')),
@@ -1380,7 +1587,7 @@
                         db.stations_not_verified.length ? 'warn' : 'ok')};
                      font-family:var(--hd-mono);">${
                         db.stations_not_verified.length
-                            ? db.stations_not_verified.join(', ') : '—'}</span>`,
+                            ? U.esc(db.stations_not_verified.map(modeLabel).join(', ')) : '—'}</span>`,
                     'stations_not_verified']);
             }
             if (typeof db.verification_scope_complete === 'boolean') {
@@ -1433,10 +1640,16 @@
         // kendi bayrağı TRUE iken de "cidarı doğrular" cümlesi basılmaz.
         if (db.message && (motorGecerlilikDisi()
                 || safety.model_validity_limit_exceeded === true)) {
-            html += U.kvTable([['design_basis.message',
-                `<span style="color:${U.kindColor('warn')};
-                 font-family:var(--hd-mono); font-size:0.75rem;">${
-                    HUKUM_GERI_CEKILDI} · model_validity_limit_exceeded</span>`]]);
+            // V307/DİL-SON kalem 3: satır makine adlarıyla basılıyordu
+            // ('design_basis.message' / 'withheld · model_validity_limit_
+            // exceeded'); okunur cümle, kod makine-okur alanda.
+            html += `<p data-hrma-kod="design_basis.message:${
+                HUKUM_GERI_CEKILDI}:model_validity_limit_exceeded"
+                style="font-size:0.8rem; color:${U.kindColor('warn')};">${
+                U.esc(T('panel.structural.mvMessageWithheld',
+                    'Wall verification statement withheld: the wall is outside '
+                    + 'the validity limit of the structural model, so this run '
+                    + 'does not verify it.'))}</p>`;
         } else if (db.message) {
             html += `<p style="font-size:0.8rem; color:${U.kindColor(
                 withheld ? 'warn' : 'info')};">${SRV(db.message)}</p>`;
@@ -1479,14 +1692,24 @@
        Onarım bir çeviri katmanıdır, bir GİZLEME katmanı değildir:
          * bilinen her kod insan cümlesine çevrilir (i18n anahtarı +
            İngilizce yedek metin);
-         * ham anahtar cümlenin YANINDA parantez içinde KALIR — künye
-           izlenebilirliği daralmaz (ÖK-22);
+         * V307/DİL-EKRAN-2 (ana model kararı, 18 Kas): makine adı
+           kullanıcıya GÖSTERİLMEZ. 3.0.6'ya kadar ham anahtar cümlenin
+           yanında parantez içinde duruyordu ("… totolojidir.
+           (safety_factor_is_tautological)"); ÖK-22'nin anlamı — emniyet
+           katsayısının kendi kendini doğrulayan bir totoloji olduğu
+           uyarısı — okunur cümlenin KENDİSİNDE taşınır, parantezdeki
+           kod yalnız geliştiriciye bir şey söylüyordu;
          * BİLİNMEYEN kod aynen basılır (fail-closed): sözlükte yoksa
            panel bir cümle UYDURMAZ, kodu olduğu gibi gösterir ve
-           kullanıcı en azından bir arama anahtarı görür.
+           kullanıcı en azından bir arama anahtarı görür. Bu yüzden
+           sunucunun bu panele ulaşan her kodu sözlükte olmalı.
 
-       Kod envanteri app.py'den ölçüldü (``verdict_withheld_reasons``
-       append noktaları + ``withheld_reason`` kapıları). */
+       Kod envanteri app.py, structural_analysis.py ve safety_analysis.py
+       (motor_structural_verdict) üzerinden ölçüldü
+       (``verdict_withheld_reasons`` append noktaları + ``withheld_reason``
+       kapıları). Kalıp kodlar (``unrecognised_status:<x>``,
+       ``unrecognised_vessel_status:<x>``) bilerek sözlükte YOK: beklenmeyen
+       bir durumun adıdır, aynen basılır. */
     const WITHHELD_REASON_TEXT = {
         safety_factor_is_tautological: [
             'panel.structural.reasonTautological',
@@ -1516,6 +1739,30 @@
             + 'melting point, or above the strength-derating data), so no '
             + 'acceptance and no numeric design verdict is issued; the '
             + 'numbers are diagnostic only.'],
+        // V307/DİL-EKRAN-2: aşağıdaki dört kod da bu panele ulaşıyordu
+        // ve sözlükte olmadığı için HAM basılıyordu.
+        // structural_analysis.py — hüküm havuzunda ölçülmüş istasyon yok.
+        no_station_verified: [
+            'panel.structural.reasonNoStationVerified',
+            'No station was measured against a wall you supplied: every '
+            + 'station\'s wall was sized by the analysis itself, so there '
+            + 'is no earned safety factor on which to issue an acceptance.'],
+        // structural_analysis.py — onay tam kapsam ister.
+        stations_not_verified: [
+            'panel.structural.reasonStationsNotVerified',
+            'Some stations were not verified: their wall was sized by the '
+            + 'analysis itself, and an acceptance requires every station '
+            + 'to be verified.'],
+        // app.py — modül hükmün sonucunu yayımlamadı.
+        structural_outcome_not_published: [
+            'panel.structural.reasonOutcomeNotPublished',
+            'The structural module published no outcome for this run, so '
+            + 'there is no verdict to carry here.'],
+        // safety_analysis.motor_structural_verdict — sıvı motor dalı.
+        solver_publishes_no_structural_verdict: [
+            'panel.structural.reasonSolverNoVerdict',
+            'The liquid-engine solver publishes no structural verdict for '
+            + 'its chamber, so there is no motor verdict to carry here.'],
     };
 
     /* V3 yapi-sf 2. tur (karar §28-24 (C)) — MODEL GEÇERLİLİK SATIRI.
@@ -1524,6 +1771,19 @@
        kütle TANI amaçlıdır: rozet + açıklama + kodlar (makine adı) basılır.
        Bayrak yoksa/FALSE ise hiçbir şey basılmaz (olumlu bir "geçerli"
        damgası UYDURULMAZ). Kodlar çevrilmez (makine adı), cümle i18n. */
+    // V307/DİL-EKRAN-2: geçerlilik gerekçe kodları (structural_analysis.py
+    // MODEL_VALIDITY_REASON_MELTING / _DERATING) → okunur cümle.
+    const MODEL_VALIDITY_REASON_TEXT = {
+        wall_temperature_at_or_above_melting_point: [
+            'panel.structural.mvReasonMelting',
+            'The wall temperature is at or above the melting point of its '
+            + 'material.'],
+        wall_temperature_above_derating_curve_data: [
+            'panel.structural.mvReasonDerating',
+            'The wall temperature is above the end of the strength-derating '
+            + 'data of its material.'],
+    };
+
     function modelValidityBlock(ca) {
         if (!ca || ca.model_validity_limit_exceeded !== true) return '';
         let html = `<div style="display:flex; flex-wrap:wrap; gap:8px; margin:6px 0;">`
@@ -1541,12 +1801,20 @@
               + 'limit of the current model (bare-wall thermal model without '
               + 'grain, liner or insulation protection), not a statement '
               + 'that a real motor of this design is impossible.')}</p>`;
+        // V307/DİL-EKRAN-2 (ÖK-22 kararının aynı sınıfı): satır etiketi ve
+        // gerekçe kodları makine adıyla basılıyordu ('model_validity_reasons',
+        // 'wall_temperature_at_or_above_melting_point'); artık okunur cümle.
+        // Kod kümesi structural_analysis.py MODEL_VALIDITY_REASON_* (iki
+        // dal); bilinmeyen kod aynen (fail-closed, `_kodMetni`).
         if (Array.isArray(ca.model_validity_reasons)
                 && ca.model_validity_reasons.length) {
-            html += U.kvTable([['model_validity_reasons',
+            html += U.kvTable([[T('panel.structural.modelValidityReasons',
+                                  'Why the result is outside the model'),
                 `<span style="color:${U.kindColor('warn')};
-                 font-family:var(--hd-mono); font-size:0.75rem;">${
-                    ca.model_validity_reasons.join(', ')}</span>`]]);
+                 font-size:0.78rem;">${
+                    ca.model_validity_reasons.map(function (k) {
+                        return _kodMetni(MODEL_VALIDITY_REASON_TEXT, k);
+                    }).join(' ')}</span>`]]);
         }
         return html;
     }
@@ -1565,7 +1833,8 @@
         const ad = String(kod);
         const rec = sozluk[ad];
         if (!rec) return ad;            // bilinmeyen kod GİZLENMEZ
-        return T(rec[0], rec[1]) + ' (' + ad + ')';
+        // V307/DİL-EKRAN-2: yalnız okunur cümle; makine adı basılmaz.
+        return T(rec[0], rec[1]);
     }
 
     function hukumKoduMetni(kod) {
@@ -1574,6 +1843,23 @@
 
     function degerlendirilmeyenMetni(ad) {
         return _kodMetni(NOT_EVALUATED_TEXT, ad);
+    }
+
+    // V307/DİL-EKRAN-2: kapak tipi kodu ('dished' / 'flat';
+    // structural_analysis.py recommended_type kapalı kümesi) → okunur ad,
+    // ilk harf büyük ("Bombeli", "Düz"; EN "Dished", "Flat"). Panel
+    // 'DISHED' gibi ham kodu büyük harfle basıyordu. Bilinmeyen kod aynen.
+    function kapakTipiAdi(kod) {
+        if (kod == null || kod === '') return '—';
+        const ad = String(kod);
+        const ADLAR = {
+            dished: T('solidgeo.head_type_dished', 'dished'),
+            flat: T('solidgeo.head_type_flat', 'flat'),
+        };
+        const metin = ADLAR[ad.toLowerCase()];
+        if (!metin) return ad;
+        const dil = (window.I18N && window.I18N.lang) || 'en';
+        return metin.charAt(0).toLocaleUpperCase(dil) + metin.slice(1);
     }
 
     // ------------------------------------------------------------------
@@ -1683,6 +1969,11 @@
     //: çözülmüş cidar çifti olmadığı için BİLEREK doldurmadıysa true.
     let motorGasTempWithheld = false;
 
+    //: V307/GÜVERTE-ORTAM (kalem 6): son render'ın emniyet katsayısı renk
+    //: eşiği {deger, kaynak: 'design_target' | 'material_record' | null,
+    //: malzeme} — render başında kurulur, tablo satırları okur.
+    let renkEsigi = null;
+
     function render(data, root) {
         const sa = data.structural_analysis || {};
         const ca = sa.chamber_analysis || {};
@@ -1694,7 +1985,30 @@
         const mp = sa.material_properties || {};
         const dp = sa.design_parameters || {};
         const wt = sa.weight_analysis || {};
-        const required = (typeof mp.safety_factor === 'number') ? mp.safety_factor : null;
+        // V307/GÜVERTE-ORTAM (kalem 6, SEKME-GÜVERTE DEVİR 2) — RENK EŞİĞİ
+        // BU KOŞUMUN TASARIM HEDEFİ.
+        // ÖLÇÜLDÜ (docs/scofield/raw/OH/V307/guverte-ortam/olcum/
+        // renk_once.json): her emniyet katsayısı hücresinin rengi
+        // `material_properties.safety_factor`a (malzeme kaydının künyesiz ön
+        // ayarı: 6061 4,0, cucrzr 3,0) karşı veriliyordu; hesabın hükmü ise
+        // bu koşumun tasarım hedefine (formun EK'sı, 2,5) karşı. Örnek sıvı
+        // ve katı L2'de kapak EK'sı 2,50 TURUNCU ("hedefin altında") basılıyor,
+        // aynı istasyonun hükmü PASS, yanındaki cıvata satırı (kendi hedefi
+        // 2,5) YEŞİL; panel aynı tabloda "malzeme kaydından; bu hesabın tasarım
+        // hedefi değil (2,50)" diyordu. Tersi de olabilir: hedef ön ayarın
+        // üstündeyse hedefin altındaki bir katsayı yeşil boyanır. Eşik artık
+        // ucun yayımladığı tasarım hedefidir (design_target_assessment, yoksa
+        // oda bloğunun hedefi); hedef yayımlanmamışsa eski eşik (malzeme
+        // kaydı) aynen. Sayılar DEĞİŞMEZ, yalnız renk ve satır künyesi.
+        const malzemeEk = (typeof mp.safety_factor === 'number') ? mp.safety_factor : null;
+        const dtaR = (sf && sf.design_target_assessment) || {};
+        const hedefEk = isNum(dtaR.design_safety_factor_target)
+            ? dtaR.design_safety_factor_target
+            : (isNum(ca.design_safety_factor_target) ? ca.design_safety_factor_target : null);
+        const required = (hedefEk !== null) ? hedefEk : malzemeEk;
+        renkEsigi = { deger: required, kaynak: (hedefEk !== null) ? 'design_target'
+                      : (malzemeEk !== null ? 'material_record' : null),
+                      malzeme: malzemeEk };
 
         // ---- Rozetler ----
         let badges = '';
@@ -1717,16 +2031,17 @@
             String(buck.buckling_status || 'UNKNOWN').toUpperCase());
         const bSf = buck.axial_buckling_safety_factor;
         const bKazanildi = isNum(bSf);
-        badges += U.badge(T('panel.structural.badgeBuckling', 'BUCKLING') + ': ' + bstat,
+        badges += U.badge(T('panel.structural.badgeBuckling', 'BUCKLING') + ': ' + hukumSozcugu(bstat),
                           bKazanildi ? statusKind(bstat) : 'info',
                           SRV(buck.source || ''));
         if (!bKazanildi) {
-            badges += U.badge('axial_buckling_safety_factor: null', 'info',
+            badges += U.badge(T('panel.structural.badgeBucklingSfNone',
+                                'BUCKLING SF: not published') + gizliAd('axial_buckling_safety_factor: null'), 'info',
                 SRV(buck.applied_axial_stress_pressurized_basis || ''));
         }
         if (sf.status) {
             badges += U.badge(T('panel.structural.badgeStructure', 'STRUCTURE') + ': '
-                + onayGeriCek(sf.status),
+                + hukumSozcugu(onayGeriCek(sf.status)),
                 statusKind(onayGeriCek(sf.status)),
                 U.tf('panel.structural.verdictTip', { sf: U.fmt(sf.minimum_safety_factor) },
                      'Overall structural verdict (min SF = {sf})'));
@@ -1739,12 +2054,12 @@
             }
             // P11B4-07: renk TEK kapıdan (riskKind) — durum rozetiyle
             // aynı olgu aynı rengi alır.
-            badges += U.badge(T('common.risk', 'RISK') + ': ' + rk,
+            badges += U.badge(T('common.risk', 'RISK') + ': ' + hukumSozcugu(rk),
                 riskKind(rk));
         }
         if (fat.fatigue_status) {
             badges += U.badge(T('panel.structural.badgeFatigue', 'FATIGUE') + ': '
-                              + onayGeriCek(fat.fatigue_status),
+                              + hukumSozcugu(onayGeriCek(fat.fatigue_status)),
                               statusKind(onayGeriCek(fat.fatigue_status)));
         }
         if (dp.material) {
@@ -1791,7 +2106,7 @@
                 const ham = notConsumed[k] || {};
                 // Gerekçe SRV'den geçer; kaçış aşağıda aynen (SG-05 deseni).
                 const rec = { reason: SRV(ham.reason || '') };
-                return [U.esc(k),
+                return [adliEtiket(U.esc(alanEtiketi(k)), k),
                     `<span style="color:${U.kindColor('warn')};
                      font-family:var(--hd-mono); font-size:0.75rem;"
                      >${U.esc(T('panel.structural.notConsumed',
@@ -1817,7 +2132,7 @@
             html += U.kvTable(Object.keys(defaulted).sort().map(function (k) {
                 const rec = defaulted[k] || {};
                 const birim = rec.unit ? ' ' + String(rec.unit) : '';
-                return [U.esc(k),
+                return [adliEtiket(U.esc(alanEtiketi(k)), k),
                     `<span style="color:${U.kindColor('warn')};
                      font-family:var(--hd-mono); font-size:0.75rem;"
                      >${U.esc(rec.value)}${U.esc(birim)} · ${U.esc(T(
@@ -1854,22 +2169,23 @@
         const defApplied = data.defaults_applied;
         if (Array.isArray(defApplied) && defApplied.length) {
             html += U.kvTable(defApplied.slice().sort().map(function (ad) {
-                return [String(ad),
+                return [adliEtiket(U.esc(alanEtiketi(ad)), ad),
                     `<span style="color:${U.kindColor('warn')};
                      font-family:var(--hd-mono); font-size:0.75rem;"
-                     >default applied (you did not supply this field)</span>`];
+                     >${U.esc(T('panel.structural.defaultAppliedRow',
+                         'default applied (you did not supply this field)'))}</span>`];
             }));
             html += `<p style="font-size:0.72rem;
               color:var(--hd-ink-dim, #7d97a5);">${
                 T('panel.structural.defaultsApplied',
-                  'The endpoint published these fields as defaulted: the '
+                  'The calculation published these fields as defaulted: the '
                   + 'number used is the module\'s own documented default, '
                   + 'not a value you supplied.')}</p>`;
         } else if (Array.isArray(defApplied)) {
             html += `<p style="font-size:0.72rem;
               color:var(--hd-ink-dim, #7d97a5);">${
                 T('panel.structural.defaultsAppliedNone',
-                  'defaults_applied: none — every field this analysis '
+                  'No defaults applied — every field this analysis '
                   + 'consumed came from your input.')}</p>`;
         }
 
@@ -1881,13 +2197,30 @@
         html += U.sectionTitle(T('panel.structural.secStresses', 'Wall Stresses'));
         html += stressTable(ca, required);
         if (ca.governing_thermal_scenario) {
+            // V307/SEKME-GÜVERTE (NK3-K-2): senaryo ve çember modeli makine
+            // adıyla ("hot_soak", "thin_wall") basılıyordu; okunur ad +
+            // ipucunda makine değeri. Tanınmayan değer AYNEN (alt çizgisiz).
+            const SENARYO = {
+                hot_soak: ['panel.structural.scenarioHotSoak',
+                    'hot soak (wall near its hot-face temperature, small gradient)'],
+                cooled_gradient: ['panel.structural.scenarioCooledGradient',
+                    'cooled gradient (full through-wall temperature difference)'],
+            }[String(ca.governing_thermal_scenario)];
+            const CEMBER = {
+                thin_wall: ['panel.structural.hoopThinWall', 'thin-wall membrane'],
+                lame_thick_wall: ['panel.structural.hoopLame', 'Lamé thick-wall'],
+            }[String(ca.pressure_hoop_model || '')];
             html += `<p style="font-size:0.75rem; color:var(--hd-ink-dim, #7d97a5);">
                 ${T('panel.structural.governingScenario', 'Governing thermal scenario')}:
-                <strong>${ca.governing_thermal_scenario}</strong>
+                <strong title="${U.esc(String(ca.governing_thermal_scenario))}">${
+                    U.esc(SENARYO ? T(SENARYO[0], SENARYO[1])
+                        : String(ca.governing_thermal_scenario).replace(/_/g, ' '))}</strong>
                 · ${T('panel.structural.yieldUsed', 'yield strength used')}:
-                ${U.fmt(ca.yield_strength_used_MPa, 0)} MPa
+                ${numL(ca.yield_strength_used_MPa, 0)} MPa
                 · ${T('panel.structural.hoopModel', 'hoop model')}:
-                ${ca.pressure_hoop_model || '—'}</p>`;
+                <span title="${U.esc(String(ca.pressure_hoop_model || ''))}">${
+                    U.esc(CEMBER ? T(CEMBER[0], CEMBER[1])
+                        : (ca.pressure_hoop_model ? String(ca.pressure_hoop_model).replace(/_/g, ' ') : '—'))}</span></p>`;
         }
 
         // ---- Emniyet katsayıları ----
@@ -1923,24 +2256,118 @@
                 || usedWallMm !== null) {
             html += U.sectionTitle(T('panel.structural.secThickness', 'Wall Thickness'));
             const thRows = [];
+            // V307/SEKME-GÜVERTE (NK3-K-2): cidarın kaynağı kullanıcı
+            // dilinde ve ucun DÜZELTİLMİŞ künyesinden (design_basis; motorun
+            // boyutlandırdığı cidar artık "user_supplied" basılmıyor —
+            // ÖLÇÜLDÜ katı L2: aynı ekranda "CİDAR: HRMA BOYUTLANDIRDI" ⟷
+            // "wall_thickness_source: user_supplied").
+            const cidarKaynagi = (data.design_basis
+                    && data.design_basis.wall_thickness_source)
+                || ca.wall_thickness_source;
+            const KAYNAK_METNI = {
+                sized_by_hrma: ['panel.structural.wallSrcSized',
+                    'HRMA sized it in the motor result'],
+                user_supplied: ['panel.structural.wallSrcUser',
+                    'the wall you supplied'],
+                user_value_not_applied: ['panel.structural.wallSrcNotApplied',
+                    'your value was not applied'],
+            }[String(cidarKaynagi || '')];
             if (usedWallMm !== null) {
-                thRows.push(['<span style="font-family:var(--hd-mono);'
-                    + ' font-size:0.72rem;">wall_thickness_used_mm</span>',
-                    '<strong>' + U.fmt(usedWallMm, 2) + ' mm</strong>'
-                    + (ca.wall_thickness_source
-                        ? ' <span style="font-family:var(--hd-mono);'
-                          + ' font-size:0.68rem; color:var(--hd-ink-dim, #7d97a5);">'
-                          + 'wall_thickness_source: '
-                          + String(ca.wall_thickness_source) + '</span>'
+                thRows.push([adliEtiket(T('panel.structural.wallEvaluated',
+                                          'Evaluated wall'), 'wall_thickness_used_mm'),
+                    '<strong>' + numL(usedWallMm, 2) + ' mm</strong>'
+                    + (KAYNAK_METNI
+                        ? ' <span data-structural-wall-source="'
+                          + U.esc(String(cidarKaynagi)) + '"'
+                          + ' title="wall_thickness_source"'
+                          + ' style="font-size:0.72rem; color:var(--hd-ink-dim, #7d97a5);">· '
+                          + U.esc(T(KAYNAK_METNI[0], KAYNAK_METNI[1])) + '</span>'
+                          + gizliAd('wall_thickness_source')
                         : '')]);
             }
+            // Gereken / önerilen cidar bu sekmenin TASARIM basıncındaki
+            // hedefidir; motorun kendi tanımıyla gereken cidar (yayımlıyorsa)
+            // yanında, adıyla.
+            const ytK = yukTabani(dp, isNum(ca.design_safety_factor_target)
+                ? ca.design_safety_factor_target : null);
+            const tabanK = ytK
+                ? ` <span data-structural-load-basis="thickness"
+                     style="color:var(--hd-ink-dim, #7d97a5); font-size:0.72rem;">· ${
+                    U.esc(U.tf('panel.structural.thicknessBasis',
+                        { pd: numL(ytK.pd, 1), f: numL(ytK.f, 2),
+                          sf: ytK.hedef !== null ? numL(ytK.hedef, 2) : '—',
+                          eff: ytK.etkin !== null ? numL(ytK.etkin, 2) : '—' },
+                        'design SF {sf} at the design pressure {pd} bar ({f} × '
+                        + 'chamber pressure), i.e. {eff} on the chamber pressure'))}</span>`
+                : '';
             if (ca.minimum_thickness != null) {
                 thRows.push([T('panel.structural.minRequired', 'Minimum required'),
-                    U.fmt(ca.minimum_thickness) + ' mm']);
+                    numL(ca.minimum_thickness, 2) + ' mm' + tabanK]);
             }
             if (ca.recommended_thickness != null) {
                 thRows.push([T('panel.structural.recommendedMargin', 'Recommended (with margin)'),
-                    U.fmt(ca.recommended_thickness) + ' mm']);
+                    numL(ca.recommended_thickness, 2) + ' mm' + tabanK]);
+            }
+            const mwK = motorWallCheck;
+            if (mwK && isNum(mwK.requiredMm)) {
+                thRows.push([T('panel.structural.motorRequiredWall',
+                               'Required wall — motor result'),
+                    '<span data-structural-motor-required="1">'
+                    + numL(mwK.requiredMm, 2) + ' mm</span>'
+                    + ` <span style="color:var(--hd-ink-dim, #7d97a5); font-size:0.72rem;">· ${
+                        U.esc(U.tf('panel.structural.motorRequiredBasis',
+                            { sf: isNum(mwK.targetSf) ? numL(mwK.targetSf, 2) : '—',
+                              p: numL(mwK.pressureBar, 1),
+                              y: numL(mwK.yieldMPa, 1) },
+                            'design SF {sf} at the chamber pressure {p} bar '
+                            + '(MEOP), yield strength {y} MPa'))}</span>`]);
+                // V307/GÜVERTE-ORTAM (kalem 5, SEKME-GÜVERTE AÇIK 1) — İKİ
+                // TANIMIN FARKI ADIYLA. ÖLÇÜLDÜ (olcum/yapisal_once.json,
+                // katı L2): iki sayı ve tabanları yan yana basılıyordu
+                // ("Gereken asgari 5,22 mm · tasarım basıncında 105,0 bar" ⟷
+                // "Gereken cidar — motor sonucu 3,31 mm · oda basıncında
+                // 70,0 bar"), ama bu bölümde iki sayının NEDEN farklı olduğu
+                // yazmıyordu (neden yalnız güvenlik katsayısı tablosunun yük
+                // tabanı satırındaydı). Satır yalnız iki koşum aynı oda
+                // basıncını anlatıyorsa ve sekmenin katsayısı 1'den farklıysa
+                // basılır; sayı DEĞİŞMEZ, yeni sayı türetilmez.
+                // "Aynı EK" iddiası yalnız iki hedef gerçekten aynıysa yazılır.
+                if (ytK && isNum(mwK.pressureBar) && ytK.f !== 1
+                        && Math.abs(mwK.pressureBar - ytK.p)
+                            <= 1e-6 * Math.max(1, ytK.p)
+                        && ytK.hedef !== null && isNum(mwK.targetSf)
+                        && Math.abs(mwK.targetSf - ytK.hedef)
+                            <= 1e-9 * Math.max(1, ytK.hedef)) {
+                    thRows.push([T('panel.structural.wallDefinitionsLabel',
+                                   'Why the two required walls differ'),
+                        '<span data-structural-wall-definitions="1"'
+                        + ' style="font-size:0.74rem; white-space:normal;">'
+                        + U.esc(U.tf('panel.structural.wallDefinitionsDiffer', {
+                            sf: ytK.hedef !== null ? numL(ytK.hedef, 2) : '—',
+                            pd: numL(ytK.pd, 1), f: numL(ytK.f, 2),
+                            p: numL(ytK.p, 1) },
+                            'Two definitions, side by side. This tab sizes '
+                            + 'the wall for the design SF {sf} at the design '
+                            + 'pressure {pd} bar ({f} × chamber pressure; an '
+                            + 'HRMA design margin, not a code factor). The '
+                            + 'motor result sizes its wall for the same SF at '
+                            + 'the chamber pressure {p} bar (MEOP), the '
+                            + 'pressure NASA-STD-5012C Table 1 and AIAA S-080A '
+                            + 'apply their factors to. The motor\'s structural '
+                            + 'verdict uses the motor result\'s wall.'))
+                        // V307/KÜÇÜKLER (kalem 3): ikinci neden, gerilme
+                        // modeli — yalnız uç bu sekmenin gerekenini Lamé'yle
+                        // boyutladığını yayımladıysa (`sizing_stress_model`).
+                        + (ca.sizing_stress_model === 'lame_thick_wall'
+                            ? ' ' + U.esc(T('panel.structural.wallDefinitionsLame',
+                                'Second reason, the stress model: this tab\'s required '
+                                + 'wall is thick, so it is sized with the Lamé thick-wall '
+                                + 'peak hoop stress at the bore, which is larger than the '
+                                + 'thin-wall membrane stress P·r/t at the same pressure and '
+                                + 'wall.'))
+                            : '')
+                        + '</span>']);
+                }
             }
             html += U.kvTable(thRows);
         }
@@ -1964,11 +2391,37 @@
             [T('panel.structural.criticalExternal', 'Critical external pressure'),
              U.fmt(buck.critical_external_pressure_bar, 1) + ' bar'],
         ];
+        // V307/SEKME-GÜVERTE (NK3-K-2): etiketler kullanıcı dilinde; makine
+        // alan adı ipucunda ve gizli çapada (adliEtiket). Metin değerli iki
+        // alanın değerleri de okunur ada çevrilir; tanınmayan değer AYNEN.
+        const BURKULMA_ETIKET = {
+            governing_load_case: ['panel.structural.buck.governingLoadCase', 'Governing load case'],
+            axial_compression_force_N: ['panel.structural.buck.axialForce', 'Axial compression force'],
+            pressure_stabilizing_stress_MPa: ['panel.structural.buck.stabilizingStress', 'Pressure stabilizing stress'],
+            stabilizing_pressure_bar: ['panel.structural.buck.stabilizingPressure', 'Stabilizing pressure'],
+            applied_axial_stress_unpressurized_MPa: ['panel.structural.buck.axialUnpressurized', 'Applied axial stress — unpressurized'],
+            applied_axial_stress_pressurized_MPa: ['panel.structural.buck.axialPressurized', 'Applied axial stress — pressurized'],
+            length_over_radius: ['panel.structural.buck.lengthOverRadius', 'Length / radius'],
+            classical_axial_buckling_stress_MPa: ['panel.structural.buck.classicalStress', 'Classical axial buckling stress'],
+            external_pressure_model: ['panel.structural.buck.externalModel', 'External pressure model'],
+        };
+        const BURKULMA_DEGER = {
+            unpressurized: ['panel.structural.buck.caseUnpressurized', 'unpressurized'],
+            pressurized: ['panel.structural.buck.casePressurized', 'pressurized'],
+        };
         function buckRow(alan, deger, birim) {
             if (deger == null) return;
-            buckRows.push([machineLabel(alan),
-                isNum(deger) ? (U.fmt(deger, 2) + (birim ? ' ' + birim : ''))
-                             : String(deger)]);
+            const et = BURKULMA_ETIKET[alan];
+            let metin;
+            if (isNum(deger)) {
+                metin = numL(deger, 2) + (birim ? ' ' + birim : '');
+            } else {
+                const dv = BURKULMA_DEGER[String(deger)];
+                metin = '<span title="' + U.esc(String(deger)) + '">'
+                    + U.esc(dv ? T(dv[0], dv[1]) : SRV(String(deger))) + '</span>';
+            }
+            buckRows.push([et ? adliEtiket(T(et[0], et[1]), alan) : machineLabel(alan),
+                metin]);
         }
         buckRow('governing_load_case', buck.governing_load_case);
         buckRow('axial_compression_force_N', buck.axial_compression_force_N, 'N');
@@ -1987,10 +2440,18 @@
         // Ucun kendi 300+ karakterlik gerekçesi: "0 tam olarak sıfırdır,
         // eksik model değil" cümlesi ekrana hiç çıkmıyordu.
         if (buck.applied_axial_stress_pressurized_basis) {
-            html += `<p style="font-size:0.72rem; color:var(--hd-ink-dim, #7d97a5);">
-                <span style="font-family:var(--hd-mono);"
-                    >applied_axial_stress_pressurized_basis</span>:
-                ${SRV(buck.applied_axial_stress_pressurized_basis)}</p>`;
+            // V307/SEKME-GÜVERTE (NK3-K-2): makine adı + İngilizce paragraf
+            // görünür metinden indi: kullanıcı dilinde başlık, ucun cümlesi
+            // kapalı "Teknik ayrıntı" kutusunda AYNEN (V3.0.5 SIVI-CIDAR
+            // deseni).
+            html += `<details class="hd-teknik-ayrinti" style="margin:4px 0;">
+                <summary style="cursor:pointer; font-size:0.72rem;
+                    color:var(--hd-ink-dim, #7d97a5);">${U.esc(T(
+                    'panel.structural.buck.pressurizedBasis',
+                    'Why the pressurized axial stress can be exactly zero'))}</summary>
+                <p style="font-size:0.72rem; color:var(--hd-ink-dim, #7d97a5);">${
+                    gizliAd('applied_axial_stress_pressurized_basis')}${
+                    SRV(buck.applied_axial_stress_pressurized_basis)}</p></details>`;
         }
         if (buck.source) {
             html += `<p style="font-size:0.72rem; color:var(--hd-ink-dim, #7d97a5);">
@@ -2031,7 +2492,7 @@
                   '{each} kN (total {total} kN)')],
             [T('panel.structural.boltSpacing', 'Bolt spacing'), U.fmt(fast.bolt_spacing, 1) + ' mm'],
             [T('panel.structural.endCapType', 'End cap type'),
-             String(cap.recommended_type || '—').toUpperCase()],
+             kapakTipiAdi(cap.recommended_type)],
             [T('panel.structural.headThickness', 'Head thickness (dished / flat)'),
              U.fmt(cap.dished_head_thickness) + ' / ' + U.fmt(cap.flat_head_thickness) + ' mm'],
             [T('panel.structural.headSf', 'Head safety factor'), sfCell(cap.head_safety_factor, required)],
@@ -2049,14 +2510,20 @@
         const stressTip = cap.head_stress_by_type_MPa;
         if (sfTip && typeof sfTip === 'object') {
             const onerilen = String(cap.recommended_type || '').toLowerCase();
+            // V307/DİL-EKRAN-2: tip adı, "önerilen" işareti ve gerilme
+            // etiketi okunur metin (makine adları `recommended_type`,
+            // `head_stress_by_type_MPa`, `head_safety_factor_by_type`
+            // ekranda basılıyordu); sayılar aynı alanlardan.
             const tipSatirlari = Object.keys(sfTip).map(function (tip) {
-                const etiket = tip.toUpperCase()
+                const etiket = kapakTipiAdi(tip)
                     + (tip.toLowerCase() === onerilen
-                        ? ' · recommended_type' : '');
+                        ? ' · ' + T('panel.structural.capTypeRecommended',
+                                    'recommended') : '');
                 const gerilme = (stressTip && isNum(stressTip[tip]))
                     ? ` <span style="color:var(--hd-ink-dim, #7d97a5);
                          font-family:var(--hd-mono); font-size:0.72rem;"
-                         >head_stress_by_type_MPa: ${U.fmt(stressTip[tip])} MPa</span>`
+                         >${T('panel.structural.capTypeHeadStress',
+                              'head stress')}: ${U.fmt(stressTip[tip])} MPa</span>`
                     : '';
                 return [etiket,
                         (isNum(sfTip[tip]) ? sfCell(sfTip[tip], required) : '—')
@@ -2067,9 +2534,7 @@
                 html += `<p style="font-size:0.78rem;
                      color:var(--hd-ink-dim, #7d97a5); margin:6px 0 2px;">
                      ${T('panel.structural.headSfByType',
-                         'Head safety factor by cap type')}
-                     <span style="font-family:var(--hd-mono);"
-                      >head_safety_factor_by_type</span></p>`;
+                         'Head safety factor by cap type')}</p>`;
                 html += U.kvTable(tipSatirlari);
             }
         }
@@ -2132,10 +2597,15 @@
         endpoint: '/analyze_structural_safety',
         motorTypes: ['hybrid', 'liquid', 'solid'],
         fields: [
-            ['chamber_pressure', 'Chamber Pressure (bar)', 40, 1, 'common.f.chamberPressureBar', 'panel.structural.help.chamber_pressure'],
-            ['chamber_diameter', 'Chamber Diameter (m)', 0.1, 0.005, 'common.f.chamberDiameterM', 'panel.structural.help.chamber_diameter'],
-            ['chamber_length', 'Chamber Length (m)', 0.5, 0.01, 'common.f.chamberLengthM', 'panel.structural.help.chamber_length'],
-            ['throat_diameter', 'Throat Diameter (m)', 0.02, 0.001, 'common.f.throatDiameterM', 'panel.structural.help.throat_diameter'],
+            // V307/SEKME-GÜVERTE (NK3-H-7 ailesi): motordan gelen dört
+            // büyüklüğün tanım değeri BOŞ (eskiden 40 bar / 0,1 m / 0,5 m /
+            // 0,02 m — son hesap başarısızken sekme o gizli kamarayı
+            // değerlendiriyordu). Boşsa istek gönderilmez, alan adıyla
+            // söylenir (`required`); kullanıcı kendisi girerse koşar.
+            ['chamber_pressure', 'Chamber Pressure (bar)', '', 1, 'common.f.chamberPressureBar', 'panel.structural.help.chamber_pressure'],
+            ['chamber_diameter', 'Chamber Diameter (m)', '', 0.005, 'common.f.chamberDiameterM', 'panel.structural.help.chamber_diameter'],
+            ['chamber_length', 'Chamber Length (m)', '', 0.01, 'common.f.chamberLengthM', 'panel.structural.help.chamber_length'],
+            ['throat_diameter', 'Throat Diameter (m)', '', 0.001, 'common.f.throatDiameterM', 'panel.structural.help.throat_diameter'],
             ['burn_time', 'Burn Time (s)', '', 0.5, 'common.f.burnTimeS', 'panel.structural.help.burn_time'], // OH-D37-S6: süre uydurulmaz — boşsa gövdeye girmez (safety_panel.js deseni)
             // GAZ SICAKLIĞI (ÖH D15 birleştirme ölçümü, 1 Eyl 2026): bu alanın
             // varsayılanı 0 İDİ ve etiketi "0 = skip thermal" diyordu. Yapısal
@@ -2227,6 +2697,8 @@
              + 'database default)', '', 0.1, 'common.f.designSafetyFactorTarget', 'panel.structural.help.safety_factor'],
             ['material', 'Material', 'steel_4130', MATERIALS, 'common.f.material', 'panel.structural.help.material'],
         ],
+        required: ['chamber_pressure', 'chamber_diameter', 'chamber_length',
+                   'throat_diameter'],
         fromResults: function (r) {
             const m = U.motorDict(r);
             // P17B3-06: motor hesabının KENDİ asgari emniyet katsayısı
@@ -2389,5 +2861,7 @@
         _riskKind: riskKind,
         _statusKind: statusKind,
         _SF_RENK_BAGIL_TOLERANS: SF_RENK_BAGIL_TOLERANS,
+        // V307/GÜVERTE-ORTAM (kalem 6): son render'ın renk eşiği.
+        get colourThreshold() { return renkEsigi; },
     };
 })();

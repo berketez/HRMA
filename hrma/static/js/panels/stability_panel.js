@@ -507,9 +507,9 @@
     function missingError(fields) {
         return new Error(TF('panel.stab.missingInputs',
             { fields: fields.map(fieldLabel).join(', ') },
-            'These inputs have no value and the endpoint has no default for '
-            + 'any of them: {fields}. The request was NOT sent — this panel '
-            + 'does not invent a number in their place.'));
+            'These inputs have no value and none of them has a default: '
+            + '{fields}. The request was NOT sent — the calculation needs a '
+            + 'value for each of them.'));
     }
 
     function buildDampingBody(formValues, results) {
@@ -583,8 +583,8 @@
             // İki yol birden verilmiş: sessizce birini seçmek, ekranda
             // görünen değer ile gönderilen değeri ayrıştırır. Gönderilmez.
             throw new Error(T('panel.stab.feedConflict',
-                'Both a direct tau_f and feed-line group fields were '
-                + 'entered. The endpoint takes ONE of the two routes; the '
+                'Both a direct τ_f and feed-line group fields were '
+                + 'entered. The calculation takes ONE of the two routes; the '
                 + 'request was NOT sent so that no entered value is silently '
                 + 'dropped. Clear one of them.'));
         }
@@ -1705,7 +1705,7 @@
 
         // 3) Ucun kendi sönüm sözlükleri — AYNEN.
         html += sectionTitle('panel.stab.secNozzle',
-            'Nozzle damping declared by the endpoint (quasi-steady short '
+            'Nozzle damping declared by the calculation (quasi-steady short '
             + 'nozzle)');
         html += '<div data-stab-block="nozzle">' + kvTable([
             [T('panel.stab.rowAlpha', 'alpha_N [1/s]'), sig(noz.damping_1_s)],
@@ -1721,7 +1721,7 @@
                           'NOZZLE DAMPING BASIS', noz.basis);
 
         html += sectionTitle('panel.stab.secBudget',
-            'Damping budget declared by the endpoint');
+            'Damping budget declared by the calculation');
         const termRows = Object.keys(bud.terms || {}).map(function (name) {
             return [name, sig(bud.terms[name]) + ' 1/s'];
         });
@@ -1830,7 +1830,7 @@
     function tauTri(v) {
         if (v === true) return T('panel.stab.tauYes', 'YES');
         if (v === false) return T('panel.stab.tauNo', 'NO');
-        return T('panel.stab.tauNull', 'NOT MEASURED (null)');
+        return T('panel.stab.tauNull', 'NOT MEASURED');
     }
 
     function tauRatioText(r) {
@@ -2094,7 +2094,7 @@
         if (skipped.length) {
             html += '<div data-stab-block="skipped">'
                 + note(TF('panel.stab.skippedPoints', { n: skipped.length },
-                    '{n} locus sample point(s) were skipped by the endpoint '
+                    '{n} locus sample point(s) were skipped '
                     + '(the core refused them); they are listed below, not '
                     + 'silently dropped.'), 'dim')
                 + listBlock(skipped.map(function (e) {
@@ -2208,7 +2208,7 @@
             return k !== '_basis';
         });
         html += fold('inputs',
-            foldTitle('panel.stab.declInputs', 'INPUTS ECHOED BY THE ENDPOINT'),
+            foldTitle('panel.stab.declInputs', 'INPUTS ECHOED BY THE CALCULATION'),
             TF('panel.stab.foldFields', { n: inpKeys.length },
                '{n} field(s) echoed'),
             '<div data-stab-block="inputs">'

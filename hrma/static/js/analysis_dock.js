@@ -155,9 +155,15 @@
     }
 
     // Sayısal kart (thermal panel "numeric cards" vb.)
+    // V307/ŞERİT-GÜRÜLTÜ (DİL-SON DEVİR 2, güvenlik): `title` özniteliği
+    // kaçışsızdı; sunucu metni geçen çağıranlar var (flow_panel `losses.note`,
+    // joint_panel `pre.basis`, feed_panel `model_note`, vessel_panel
+    // `actual_burst_pressure_basis`, thermal_panel `bare_wall_basis`). Metindeki
+    // bir `"` öznitelikten çıkıp yeni öznitelik açabilirdi. Panelin kaçış
+    // yardımcısı (escAttr = AnalysisDock.ui.esc) ile kaçırılır.
     function statCard(label, value, unit, kind, title) {
         const c = kind ? kindColor(kind) : 'var(--hd-ink-strong, #eaf7fb)';
-        return `<div title="${title || ''}" style="border:1px solid var(--hd-line, rgba(0,229,255,0.14));
+        return `<div title="${escAttr(title || '')}" style="border:1px solid var(--hd-line, rgba(0,229,255,0.14));
                 border-radius:var(--hd-radius-sm, 8px); padding:10px 14px; min-width:150px; flex:1;
                 background:var(--hd-inset, rgba(6,14,26,0.85));">
             <div style="font-size:0.68rem; color:var(--hd-ink-dim, #7d97a5);
@@ -265,6 +271,7 @@
         outside_anchor_envelope_unverified: 'common.code.outside_anchor_envelope_unverified',
         OUT_OF_PUBLISHED_RANGE: 'common.code.OUT_OF_PUBLISHED_RANGE',
         not_applied_unverified: 'common.code.not_applied_unverified',
+        module_estimate_applied: 'common.code.module_estimate_applied',
         user_supplied_unvalidated: 'common.code.user_supplied_unvalidated',
         not_evaluated_no_condensed_fraction: 'common.code.not_evaluated_no_condensed_fraction'
     };
@@ -286,6 +293,20 @@
                   'turbopump-fed': 'common.code.turbopump_fed' },
         edge: { floor: 'common.code.edge_floor',
                 ceiling: 'common.code.edge_ceiling' },
+        // V307/DİL-EKRAN-2 (KILAVUZ §2 "fuel besleme hattı"): `{line}`
+        // kapalı kümesi liquid_rocket_engine.py'den ölçüldü — hız uyarısı
+        // `prop_kind` ('fuel' / 'oxidizer'), su koçu uyarısı `_line_block`
+        // etiketi ('fuel_line' / 'oxidizer_line'). EN kalıp "The {line} feed
+        // line" / "on the {line}:", TR kalıp "{line} besleme hattı" /
+        // "{line} hattında": EN değeri kalıba göre, TR değeri yalnız ad.
+        line: { fuel: 'common.code.line_fuel',
+                oxidizer: 'common.code.line_oxidizer',
+                fuel_line: 'common.code.line_fuel_line',
+                oxidizer_line: 'common.code.line_oxidizer_line' },
+        // V307/DİL-EKRAN-2 (akşam tarayıcı ölçümü, YAPISAL TR): cıvata
+        // uyarısının `{module}` değeri structural_analysis.py'de tek
+        // ('bolted_joint'); ekranda makine adı basılıyordu.
+        module: { bolted_joint: 'common.code.module_bolted_joint' },
     };
 
     function warnParamText(k, v) {
@@ -491,7 +512,9 @@
             // satır, tek satırlık metin duvarıysa karakter (bulgunun ölçtüğü
             // büyüklük: "8.725 karakter beyan bir tıklama arkasında").
             const n = info.items > 0 ? String(info.items)
-                : (info.lines > 1 ? String(info.lines) : String(info.chars) + 'c');
+                : (info.lines > 1 ? String(info.lines)
+                    // V307/DİL-EKRAN (DİL-HİBRİT O16): 'c' kısaltması çevrilmiyordu.
+                    : TF('dock.foldChars', { n: String(info.chars) }, '{n} chars'));
             const text = (info.declaration ? '▲ ' : '▸ ') + n;
             // DEĞİŞMEDİYSE YAZMA: rozetin kendisi bir DOM değişikliğidir;
             // aynı metni yeniden yazmak aşağıdaki gözlemciyi sonsuz
@@ -1024,7 +1047,6 @@
     const DIFF_MAX_DEPTH = 8;       // döngüsel/derin veri koruması
     const DIFF_SERIES_LIMIT = 8;    // bundan uzun sayı dizileri seri sayılır
     const DIFF_MAX_ENTRIES = 2000;  // rapor boyu tavanı (truncated ile beyanlı)
-    const DIFF_TOP_N = 8;           // şeritte gösterilen en büyük değişim sayısı
 
     function isPlainObject(v) {
         return v !== null && typeof v === 'object' && !Array.isArray(v);
@@ -1144,12 +1166,20 @@
     // ▲/▼ simgesiyle bildirilir.
     function diffBadge(change) {
         if (!change) return '';
-        const oldTxt = (change.old == null) ? '—' : String(dockSigFig(change.old, 5));
-        const newTxt = (change['new'] == null) ? '—' : String(dockSigFig(change['new'], 5));
+        // V307/DİL-EKRAN (NK3-S-1): ondalık ayracı dile göre (TR virgül),
+        // yüzde biçimi sözlükten (TR "%12,3"); eski değer 0 iken bağıl
+        // değişim tanımsızdır — "%100" yerine "önceki 0" yazılır.
+        const sayiYaz = function (v) {
+            return (window.I18N && typeof window.I18N.number === 'function')
+                ? window.I18N.number(v) : String(v);
+        };
+        const oldTxt = (change.old == null) ? '—' : sayiYaz(dockSigFig(change.old, 5));
+        const newTxt = (change['new'] == null) ? '—' : sayiYaz(dockSigFig(change['new'], 5));
         const arrow = change.dir === 'up' ? '▲'
             : (change.dir === 'down' ? '▼' : '•');
         const pct = (change.rel == null) ? T('common.unknown', 'unknown')
-            : (dockSigFig(change.rel * 100, 3) + ' %');
+            : (change.old === 0 ? T('dock.diff.fromZero', 'previous value 0')
+                : TF('dock.diff.pct', { v: sayiYaz(dockSigFig(change.rel * 100, 3)) }, '{v} %'));
         const tip = TF('dock.diff.badgeTip', { pct: pct },
             'Changed vs the previous result — relative change {pct}.');
         return `<span class="ad-diff-badge" data-diff-badge="${escAttr(change.path || '')}"
@@ -1185,7 +1215,218 @@
         return marked;
     }
 
-    // "Ne değişti" şeridi — eşik AÇIKÇA yazılır, gizli kural bırakılmaz.
+    // ==================================================================
+    // V307/ŞERİT-GÜRÜLTÜ — "Ne değişti" şeridi YALNIZ yayımlanan manşet
+    // büyüklüklerini kıyaslar (DİL-SON KARAR 1, seçenek a; ana model).
+    // ------------------------------------------------------------------
+    // ÖLÇÜLEN KUSUR (docs/scofield/raw/OH/V307/dil-son/k5_serit_olcum.json):
+    // şerit bütün yanıt ağacını bağıl farka göre sıralıyordu; üst 8 satır
+    // çözücü artıklarıydı (hibrit `…mass_flow_cross_check.residual`
+    // 2,36e-16 → −2,36e-16 "▼ %200"), itki/Isp/süre görünmüyordu.
+    //
+    // NE KIYASLANIR: her motor türünde sayfanın SONUÇ KARTLARI — aynı yanıt
+    // alanı, aynı sözlük anahtarı (kartın adı), aynı birim, aynı ondalık,
+    // aynı görünme koşulu. Kaynaklar: hibrit `app.js`
+    // displayPerformanceMetrics, katı `solid.html` displayResults, sıvı
+    // `liquid.html` displayResults. Eşitliği bekçi ölçer
+    // (tests/test_v307_serit_gurultu.py). Tanı alanları (artık, bağıl fark,
+    // çözücü sayaçları) şeride girmez.
+    //
+    // GÜRÜLTÜ ÖLÇÜTÜ (yeni sayı yok): bir büyüklük, KARTININ GÖSTERDİĞİ
+    // basamakta metni değiştiyse "değişti" sayılır; aynı metin = değişmedi.
+    // Eksi sıfır ("-0,00") sıfır sayılır. Önceki değer kartta 0 görünüyorsa
+    // yüzde BASILMAZ (taban sıfırken bağıl değişim tanımsız).
+    // Yüzde = (yeni − eski) / |eski| (yön ▲/▼ ile).
+    function dockTasarimOrtami(r) {
+        const da = r && r.design_ambient;
+        return (da && typeof da === 'object') ? da : null;
+    }
+    function dockDenizDisi(r) {
+        const da = dockTasarimOrtami(r);
+        return !!(da && da.is_sea_level === false);
+    }
+    function dockDenizAyrildi(r) {
+        const da = dockTasarimOrtami(r);
+        return !!(da && da.sea_level_flow_separated === true);
+    }
+    function dockSiviDsYapisik(r) {
+        const da = dockTasarimOrtami(r);
+        return dockDenizDisi(r) && !!(da.sea_level && da.sea_level.status === 'attached'
+            && typeof da.sea_level.isp_s === 'number');
+    }
+    function dockSiviDefterKapali(r) {
+        const d = r && r.mass_flow_ledger;
+        return !!(d && d.status === 'open_cycle_closed');
+    }
+    // Satır: yol (yanıt alanı, parça dizisi), ad ([anahtar, İngilizce] ya da sonuca göre
+    // seçen işlev — kartın kendi koşullu adı), birim, ondalik (kartın
+    // basamağı; 'anlamli' = sıvı sayfasının liqAnlamliOndalik kuralı),
+    // bolen (kart `/ 1000` ile kN basıyorsa), kosul (kart yalnız bu koşulda
+    // basılıyorsa).
+    const DIFF_MANSET = {
+        hybrid: [
+            { yol: ['motor', 'isp'], ad: ['app.metric.ispDesign', 'Isp (design point, at design-altitude ambient)'], birim: 's', ondalik: 1 },
+            { yol: ['motor', 'thrust'], ad: ['app.metric.thrust', 'Thrust'], birim: 'N', ondalik: 0 },
+            { yol: ['motor', 'chamber_pressure'], ad: ['app.metric.pc', 'Chamber Pressure'], birim: 'bar', ondalik: 1 },
+            { yol: ['motor', 'mdot_total'], ad: ['app.metric.mdot', 'Mass Flow Rate'], birim: 'kg/s', ondalik: 3 },
+            { yol: ['motor', 'structural_analysis', 'safety_analysis', 'minimum_safety_factor'], ad: ['app.metric.minSf', 'Structural Min SF'], birim: '', ondalik: 2 },
+        ],
+        solid: [
+            { yol: ['isp_sea_level'], ad: function (r) {
+                return (dockDenizDisi(r) && dockDenizAyrildi(r))
+                    ? ['solid.msg.sea_level_isp_separated', 'Sea Level Isp (flow separated)']
+                    : ['solid.msg.sea_level_isp', 'Sea Level Isp']; }, birim: 's', ondalik: 1 },
+            { yol: ['isp_design_ambient'], kosul: dockDenizDisi, ad: ['solid.msg.isp_test_ambient', 'Isp at test ambient'], birim: 's', ondalik: 1 },
+            { yol: ['isp_vacuum'], ad: ['solid.msg.vacuum_isp', 'Vacuum Isp'], birim: 's', ondalik: 1 },
+            { yol: ['average_thrust'], ad: function (r) {
+                return dockDenizDisi(r)
+                    ? ['solid.msg.average_thrust_test_ambient', 'Average Thrust at test ambient']
+                    : ['solid.msg.average_thrust', 'Average Thrust']; }, birim: 'N', ondalik: 0 },
+            { yol: ['max_thrust'], ad: function (r) {
+                return dockDenizDisi(r)
+                    ? ['solid.msg.peak_thrust_test_ambient', 'Peak Thrust at test ambient']
+                    : ['solid.msg.peak_thrust', 'Peak Thrust']; }, birim: 'N', ondalik: 0 },
+            { yol: ['throat_sizing', 'peak_chamber_pressure_bar'], ad: ['solid.msg.peak_chamber_pressure', 'Peak Chamber Pressure'], birim: 'bar', ondalik: 1 },
+            { yol: ['burn_time'], ad: ['solid.msg.burn_time_web', 'Burn Time (web burnout)'], birim: 's', ondalik: 2 },
+            { yol: ['total_impulse'], ad: function (r) {
+                return dockDenizDisi(r)
+                    ? ['solid.msg.total_impulse_test_ambient', 'Total Impulse at test ambient']
+                    : ['solid.msg.total_impulse', 'Total Impulse']; }, birim: 'N·s', ondalik: 0 },
+            { yol: ['design_ambient', 'total_impulse_sea_level_ns'], kosul: dockDenizDisi, ad: function (r) {
+                return dockDenizAyrildi(r)
+                    ? ['solid.msg.total_impulse_sea_level_separated', 'Total Impulse at sea level (flow separated)']
+                    : ['solid.msg.total_impulse_sea_level', 'Total Impulse at sea level']; }, birim: 'N·s', ondalik: 0 },
+            { yol: ['detailed_analysis', 'performance_metrics', 'c_star_efficiency_percent'], ad: ['solid.msg.c_efficiency', 'C* Efficiency'], birim: '%', ondalik: 1 },
+            { yol: ['detailed_analysis', 'performance_metrics', 'average_thrust_coefficient'], ad: function (r) {
+                return dockDenizDisi(r)
+                    ? ['solid.msg.thrust_coefficient_test_ambient', 'Thrust Coefficient at test ambient']
+                    : ['solid.msg.thrust_coefficient', 'Thrust Coefficient']; }, birim: '', ondalik: 2 },
+            { yol: ['propellant_mass'], ad: ['solid.ui.propellant_mass', 'Propellant Mass'], birim: 'kg', ondalik: 2 },
+        ],
+        liquid: [
+            { yol: ['isp_design_ambient'], kosul: dockDenizDisi, ad: ['liq.msg.engine_isp_design_ambient', 'Engine Isp — per total propellant consumption (design ambient)'], birim: 's', ondalik: 1 },
+            { yol: ['isp_sea_level'], kosul: function (r) { return !dockDenizDisi(r); }, ad: ['liq.msg.engine_isp_sl', 'Engine Isp — per total propellant consumption (sea level)'], birim: 's', ondalik: 1 },
+            { yol: ['design_ambient', 'sea_level', 'isp_s'], kosul: dockSiviDsYapisik, ad: ['liq.msg.engine_isp_sl', 'Engine Isp — per total propellant consumption (sea level)'], birim: 's', ondalik: 1 },
+            { yol: ['isp_vacuum'], ad: ['liq.msg.engine_isp_vac', 'Engine Isp — per total propellant consumption (vacuum)'], birim: 's', ondalik: 1 },
+            { yol: ['mass_flow_ledger', 'main_chamber_isp_design_ambient_s'], kosul: function (r) { return dockDenizDisi(r) && dockSiviDefterKapali(r); }, ad: ['liq.msg.tca_isp_design_ambient', 'Main thrust chamber + nozzle Isp — per main-chamber flow (design ambient)'], birim: 's', ondalik: 1 },
+            { yol: ['mass_flow_ledger', 'main_chamber_isp_sea_level_s'], kosul: function (r) { return !dockDenizDisi(r) && dockSiviDefterKapali(r); }, ad: ['liq.msg.tca_isp_sl', 'Main thrust chamber + nozzle Isp — per main-chamber flow (sea level)'], birim: 's', ondalik: 1 },
+            { yol: ['mass_flow_ledger', 'main_chamber_isp_vacuum_s'], kosul: dockSiviDefterKapali, ad: ['liq.msg.tca_isp_vac', 'Main thrust chamber + nozzle Isp — per main-chamber flow (vacuum)'], birim: 's', ondalik: 1 },
+            { yol: ['isp_vacuum_optimized'], ad: ['liq.msg.space_optimized_isp', 'Space Optimized Isp'], birim: 's', ondalik: 1 },
+            { yol: ['thrust'], kosul: dockDenizDisi, bolen: 1000, ad: ['liq.msg.design_ambient_thrust', 'Thrust at the design ambient'], birim: 'kN', ondalik: 'anlamli' },
+            { yol: ['thrust_vacuum'], bolen: 1000, ad: ['liq.msg.vacuum_thrust', 'Vacuum Thrust'], birim: 'kN', ondalik: 'anlamli' },
+        ],
+    };
+
+    // Yol parça dizisidir (noktalı dize değil: sözlük bekçisi tırnaklı
+    // noktalı dizeyi i18n anahtarı sayar — test_i18n_common).
+    function dockYolOku(obj, parcalar) {
+        let v = obj;
+        for (let i = 0; i < parcalar.length; i++) {
+            if (!isPlainObject(v)) return undefined;
+            v = v[parcalar[i]];
+        }
+        return v;
+    }
+
+    // Kartın gösterdiği basamak. 'anlamli': sıvı sayfasının kendi kuralı
+    // (liquid.html liqAnlamliOndalik, taban 1 — kartla aynı çağrı). Kural
+    // bu sayfada yoksa (yalnız sıvı sayfası tanımlar) null: satır
+    // güvertenin genel gösterim kuralıyla (DOCK_SIGFIG anlamlı basamak)
+    // basılır — beyanlı, sayı üretmez.
+    function dockMansetOndalik(satir, deger) {
+        if (typeof satir.ondalik === 'number') return satir.ondalik;
+        const f = (typeof window !== 'undefined') ? window.liqAnlamliOndalik : null;
+        return (typeof f === 'function') ? f(deger, 1) : null;
+    }
+
+    // Kartın gösterdiği metin (ayraç dile göre; eşitlik dil bağımsız).
+    // Eksi sıfır ('-0', '-0,00') sıfırın kendisidir: gösterilen sayı 0.
+    function dockMansetMetni(deger, d) {
+        const s = (d == null) ? String(dockSigFig(deger, DOCK_SIGFIG)) : fmt(deger, d);
+        return /^-0([.,]0+)?$/.test(s) ? s.slice(1) : s;
+    }
+
+    // Bir sonuçta kartın değeri: { deger, ondalik, metin } ya da null
+    // (kart bu sonuçta basılmıyor ya da sayı yok).
+    function dockMansetDegeri(sonuc, satir) {
+        if (!isPlainObject(sonuc)) return null;
+        if (typeof satir.kosul === 'function' && !satir.kosul(sonuc)) return null;
+        const ham = dockYolOku(sonuc, satir.yol);
+        if (typeof ham !== 'number' || !Number.isFinite(ham)) return null;
+        const deger = satir.bolen ? ham / satir.bolen : ham;
+        const d = dockMansetOndalik(satir, deger);
+        return { deger: deger, ondalik: d, metin: dockMansetMetni(deger, d) };
+    }
+
+    function dockSifirGorunur(m) {
+        return !!m && /^0([.,]0+)?$/.test(m.metin);
+    }
+
+    // Manşet farkı: şeridin TEK girdisi.
+    function headlineDiff(prev, next, motorType) {
+        const out = { headline: true, changes: [], compared: 0, hasBaseline: true,
+                      motorType: motorType || null };
+        if (!isPlainObject(prev) || !isPlainObject(next)) {
+            out.hasBaseline = false;
+            return out;
+        }
+        const satirlar = DIFF_MANSET[motorType] || [];
+        satirlar.forEach(function (satir) {
+            const a = dockMansetDegeri(prev, satir);
+            const b = dockMansetDegeri(next, satir);
+            if (!a && !b) return;
+            out.compared += 1;
+            if (a && b && a.metin === b.metin) return;
+            const adKaynak = (typeof satir.ad === 'function') ? satir.ad(b ? next : prev) : satir.ad;
+            const sifirdan = !!(a && b && dockSifirGorunur(a));
+            out.changes.push({
+                path: satir.yol.join('.'), adKey: adKaynak[0], adEn: adKaynak[1], unit: satir.birim,
+                old: a ? a.deger : null, 'new': b ? b.deger : null,
+                oldDec: a ? a.ondalik : null, newDec: b ? b.ondalik : null,
+                dir: (a && b) ? (b.deger > a.deger ? 'up' : 'down') : null,
+                pct: (a && b && !sifirdan) ? (b.deger - a.deger) / Math.abs(a.deger) * 100 : null,
+                fromZero: sifirdan,
+            });
+        });
+        return out;
+    }
+
+    // Manşet satırının bir ucu (gösterilen metin, birimle; yoksa '—').
+    function dockMansetUcu(v, d, birim) {
+        if (v == null) return '—';
+        const s = dockMansetMetni(v, d);
+        if (birim === '%') {
+            const tr = !!(typeof window !== 'undefined' && window.I18N && window.I18N.lang === 'tr');
+            return tr ? ('%' + s) : (s + '%');
+        }
+        return birim ? (s + ' ' + birim) : s;
+    }
+
+    function dockMansetSatiri(c) {
+        const sayiYaz = function (v) {
+            return (window.I18N && typeof window.I18N.number === 'function')
+                ? window.I18N.number(v) : String(v);
+        };
+        const arrow = c.dir === 'up' ? '▲' : (c.dir === 'down' ? '▼' : '');
+        let pct = '';
+        if (c.pct != null) {
+            pct = TF('dock.diff.pct', { v: sayiYaz(dockSigFig(Math.abs(c.pct), 3)) }, '{v} %');
+        } else if (c.fromZero) {
+            pct = T('dock.diff.fromZero', 'previous value 0');
+        }
+        const kuyruk = [arrow, pct].filter(Boolean).join(' ');
+        return `<div style="margin:3px 0;" data-hrma-kod="${escAttr(c.path)}"><span
+            style="color:var(--hd-ink, #cfe8f2);">${escAttr(T(c.adKey, c.adEn))}</span> <span
+            class="ad-diff-badge" style="border:1px solid var(--hd-line-strong, rgba(0,229,255,0.42));
+            color:var(--hd-ink, #cfe8f2); border-radius:6px; padding:1px 7px;
+            margin-left:6px; font-family:var(--hd-mono, monospace); font-size:0.66rem;
+            white-space:nowrap; display:inline-block;"><span
+            style="color:var(--hd-ink-dim, #7d97a5);">${escAttr(dockMansetUcu(c.old, c.oldDec, c.unit))}</span>
+            → ${escAttr(dockMansetUcu(c['new'], c.newDec, c.unit))}${kuyruk ? ` <span
+            style="color:var(--hd-ink-dim, #7d97a5);">${escAttr(kuyruk)}</span>` : ''}</span></div>`;
+    }
+
+    // "Ne değişti" şeridi — ölçüt AÇIKÇA yazılır, gizli kural bırakılmaz.
     function diffStripHtml(result) {
         const head = `<strong data-i18n="dock.diff.title">${
             T('dock.diff.title', 'What changed')}</strong>`;
@@ -1194,54 +1435,24 @@
                 data-i18n="dock.diff.first">${T('dock.diff.first',
                 'First result stored as the reference — nothing to compare yet.')}</span>`;
         }
-        const epsPct = dockSigFig(result.threshold * 100, 3);
-        const basis = `<div style="color:var(--hd-ink-faint, #6a8491); margin-top:4px;">${
-            TF('dock.diff.basis', { pct: epsPct },
-               'Only relative changes above {pct} % are marked; smaller '
-               + 'differences are within the 6-significant-digit pre-fill noise '
-               + 'of the input fields.')}</div>`;
-        if (!result.changes.length && !result.series.length
-            && !result.added.length && !result.removed.length) {
+        const basis = `<div style="color:var(--hd-ink-faint, #6a8491); margin-top:4px;"
+            data-i18n="dock.diff.basisHeadline">${T('dock.diff.basisHeadline',
+            'Compared: the headline result cards of this page, at the digits each card '
+            + 'shows. A value counts as changed only when its shown digits change; no '
+            + 'percentage is given when the previous value shows as 0.')}</div>`;
+        // Yalnız manşet satırları (headlineDiff çıktısı) basılır; ham yanıt
+        // yolu taşıyan genel fark satırı şeride girmez.
+        const satirlar = (result.changes || []).filter(function (c) { return c && c.adKey; });
+        if (!satirlar.length) {
             return head + ` <span style="color:var(--hd-ink-dim, #7d97a5);"
-                data-i18n="dock.diff.none">${T('dock.diff.none',
-                'No numeric change above the threshold.')}</span>` + basis;
+                data-i18n="dock.diff.noneHeadline">${T('dock.diff.noneHeadline',
+                'No headline result changed at the digits shown.')}</span>` + basis;
         }
-        const rows = result.changes.slice(0, DIFF_TOP_N).map(function (c) {
-            return `<div style="margin:3px 0;"><span
-                style="font-family:var(--hd-mono, monospace);
-                color:var(--hd-ink, #cfe8f2);">${escAttr(c.path)}</span>${diffBadge(c)}</div>`;
-        }).join('');
-        const seriesRows = result.series.slice(0, DIFF_TOP_N).map(function (s) {
-            return `<div style="margin:3px 0; font-family:var(--hd-mono, monospace);
-                color:var(--hd-ink-dim, #7d97a5);">${TF('dock.diff.series',
-                { path: escAttr(s.path), changed: s.changed, points: s.points },
-                '{path}: {changed} of {points} series points changed')}</div>`;
-        }).join('');
-        const extra = [];
-        if (result.changes.length > DIFF_TOP_N) {
-            extra.push(TF('dock.diff.more', { count: result.changes.length - DIFF_TOP_N },
-                          '+{count} more changed values'));
-        }
-        if (result.added.length) {
-            extra.push(TF('dock.diff.added', { count: result.added.length },
-                          '{count} new numeric fields appeared'));
-        }
-        if (result.removed.length) {
-            extra.push(TF('dock.diff.removed', { count: result.removed.length },
-                          '{count} numeric fields disappeared'));
-        }
-        if (result.truncated) {
-            extra.push(T('dock.diff.truncated',
-                'The change list was truncated at the reporting cap.'));
-        }
-        const extraHtml = extra.length
-            ? `<div style="color:var(--hd-ink-dim, #7d97a5); margin-top:4px;">${
-                extra.join(' · ')}</div>` : '';
         return head + `<span style="color:var(--hd-ink-dim, #7d97a5);"> ${
-            TF('dock.diff.count', { count: result.changes.length },
+            TF('dock.diff.count', { count: satirlar.length },
                '{count} values changed')}</span>`
-            + `<div style="margin-top:6px;">${rows}${seriesRows}</div>`
-            + extraHtml + basis;
+            + `<div style="margin-top:6px;">${satirlar.map(dockMansetSatiri).join('')}</div>`
+            + basis;
     }
 
     // Derin kopya: sonuç sözlüğü sonradan yerinde değiştirilse bile
@@ -1277,9 +1488,11 @@
 
     // Yeni sonuç geldiğinde çağrılır (refreshSuggestions üzerinden — entegrasyon
     // katmanı zaten her hesap sonrası onu çağırıyor, yeni kapı açmaya gerek yok).
+    // V307/ŞERİT-GÜRÜLTÜ: şerit yalnız manşet kartlarını kıyaslar
+    // (headlineDiff); genel diffCompute API'de kalır, şeride girmez.
     function noteResults(results) {
         if (!isPlainObject(results)) return null;
-        lastDiff = diffCompute(prevSnapshot, results);
+        lastDiff = headlineDiff(prevSnapshot, results, cfg.motorType);
         prevSnapshot = snapshotClone(results, 0);
         renderDiffBand();
         return lastDiff;
@@ -2376,7 +2589,14 @@
                     // çeviri anahtarı değil, makine-yolu dizesidir (Z4
                     // kaçışı): iki anahtar da ham geçer, çevrilmez.
                     const gonderilen = (el.value == null) ? '' : String(el.value);
-                    withheld[k] = 'solver_value_not_in_option_list: solver="'
+                    // V307/DİL-EKRAN (NK3-K-4, NK3-H-8): görünen satır kullanıcı
+                    // dilinde ve malzeme ADLARIYLA; makine künyesi (\u001e
+                    // sonrası) ipucunda kalır (V301/DİL-2 kök 7 biçimi).
+                    withheld[k] = TF('dock.optionNotInList',
+                        { solver: warnParamText(k, want), sent: warnParamText(k, gonderilen) },
+                        'The solver value ({solver}) is not in this list; the form '
+                        + 'would send {sent}, so the run is blocked.')
+                        + '\u001e' + 'solver_value_not_in_option_list: solver="'
                         + want + '" sent="' + gonderilen + '"';
                     // ÖH D24 / P17B2-08 — BEYAN ÇÖZÜM DEĞİLDİR.
                     // D21 gerekçeyi konsoldan ekrana taşıdı; ekranda
@@ -2470,7 +2690,7 @@
     // geri çekme). Çipin rengi/etiketi aynı ('missing'); değişen not.
     const FIELD_SRC_BLANK_OPTIONAL_KEY = 'dock.src.fieldBlankOptional';
     const FIELD_SRC_BLANK_OPTIONAL_FALLBACK = 'The field is empty — this field '
-        + 'is not sent; the endpoint applies its own rule.';
+        + 'is not sent; the calculation applies its own rule.';
     // OH-D37-S4: önceki koşunun önerisi bu koşuda gelmediği için temizlendi.
     const FIELD_SRC_CLEARED_KEY = 'dock.src.fieldCleared';
     const FIELD_SRC_CLEARED_FALLBACK = 'The previous run\'s value was cleared '
@@ -2731,6 +2951,10 @@
     const HATA_ANAHTARI = {
         incomplete_flow_input: 'dock.err.incompleteFlowInput',
         invalid_flow_input: 'dock.err.invalidFlowInput',
+        // V307/KÜÇÜKLER-2 (kalem 1): /api/regen-cooling fizik dışı oda sıcaklığı.
+        invalid_regen_input: 'dock.err.invalidRegenInput',
+        // V307/ORTAM-TEK (kalem 2): aynı ucun eksik zorunlu alan reddi.
+        incomplete_regen_input: 'dock.err.incompleteRegenInput',
         incomplete_thermal_input: 'dock.err.incompleteThermalInput',
         invalid_thermal_input: 'dock.err.invalidThermalInput',
         incomplete_structural_input: 'dock.err.incompleteStructuralInput',
@@ -2741,12 +2965,18 @@
     //: Aynı kodların İngilizce yedek cümleleri (sözlük yüklenmezse basılır).
     const HATA_YEDEGI = {
         incomplete_flow_input:
-            'The nozzle flow solution was not run: this endpoint publishes '
+            'The nozzle flow solution was not run: this analysis publishes '
             + 'the regime, CF and thrust of YOUR motor, and the inputs '
             + 'below were not supplied, so nothing was assumed for you.',
         invalid_flow_input:
             'The nozzle flow solution was not run: the inputs below are '
             + 'outside the range this solver can work in.',
+        invalid_regen_input:
+            'The regenerative cooling march was not run: the inputs below '
+            + 'are outside the range this solver can work in.',
+        incomplete_regen_input:
+            'The regenerative cooling march was not run: the inputs below '
+            + 'were not supplied, and no value was assumed for them.',
         incomplete_thermal_input:
             'The thermal analysis was not run: the inputs below were not '
             + 'supplied and cannot be derived from the rest of the form.',
@@ -2858,9 +3088,14 @@
             });
             status.textContent = TF('dock.materialNotInList',
                 { fields: engelliAlanlar.map(function (k) {
+                    // V307/DİL-EKRAN (NK3-K-4): alan ve malzemeler okunur adla.
+                    const _f = (Array.isArray(spec.fields) ? spec.fields : []).filter(function (x) {
+                        return Array.isArray(x) && x[0] === k; })[0];
+                    const _alan = _f ? (_f[4] ? T(_f[4], _f[1]) : _f[1]) : k;
                     return TF('dock.materialNotInListField',
-                        { field: k, solver: engel[k].solver, sent: engel[k].sent },
-                        '{field} (solver="{solver}", the form would send "{sent}")');
+                        { field: _alan, solver: warnParamText(k, engel[k].solver),
+                          sent: warnParamText(k, engel[k].sent) },
+                        '{field} (solver value: {solver}; the form would send {sent})');
                 }).join('; ') },
                 'The solver value for {fields} is not in this deck\'s option '
                 + 'list and could not be matched through the materials '
@@ -2876,6 +3111,35 @@
         }
 
         // ------------------------------------------------------------------
+        // V307/GÜVERTE-ISIL (kalem 2) — YEREL SONUÇ
+        // ------------------------------------------------------------------
+        // Panel, kurulan gövdeye bakıp ucun MODELLEMEDİĞİ bir durumu uca
+        // gitmeden kendi çizebilir: `spec.localResult(payload)` bir nesne
+        // dönerse istek GÖNDERİLMEZ ve nesne panelin `render`ına verilir
+        // (dil değişiminde yeniden çizilmek üzere saklanır). null / undefined
+        // dönerse akış aynen sürer. Bugün tek kullanıcısı termal sekme: film /
+        // ışınım / dump soğutmalı motorda sekme hesap yapmaz, motor sonucunun
+        // soğutma bloğunu gösterir (eskiden doğal taşınıma düşüp başka bir
+        // soğutmanın hükmünü basıyordu).
+        if (typeof spec.localResult === 'function') {
+            let yerel = null;
+            try { yerel = spec.localResult(built.payload); } catch (e) { yerel = null; }
+            if (yerel && typeof yerel === 'object') {
+                purgePlots(root);
+                root.innerHTML = '';
+                lastData[spec.id] = yerel;
+                lastPayload[spec.id] = JSON.stringify(built.payload);
+                status.removeAttribute('data-onceki-tasarim');
+                spec.render(yerel, root);
+                if (window.I18N && window.I18N.applyTo) window.I18N.applyTo(root);
+                root.style.display = 'block';
+                status.textContent = T('dock.localResult',
+                    'No request was sent: this tab does not model this case. '
+                    + 'See the note below.');
+                return;
+            }
+        }
+
         // ÖH D24 / P11B2-11 — BOŞ GÖVDE POSTALAMA
         // ------------------------------------------------------------------
         // ÖLÇÜLDÜ (a3/once.json + P11 B2-repro-09): `fields: []` ile
@@ -2888,11 +3152,18 @@
         // yanında duran, HİÇ çalışmayan ikinci bir kontroldü.
         // Boş gövdenin MEŞRU olduğu tek uç (`/api/correlation-report`,
         // ölçüldü: 200 + 54.805 B) bunu `allowsEmptyPayload` ile BEYAN eder.
-        if (!Object.keys(built.payload).length && spec.allowsEmptyPayload !== true) {
+        // V307/SEKME-GÜVERTE (NK3-H-7): alan tanımlayan panelde gövde ZORUNLU
+        // alanlar boş olduğu için boşsa (son hesap başarısız, tohum yok)
+        // doğru ileti "boş zorunlu alanlar"dır, aşağıda adlarıyla basılır;
+        // bu dal yalnız alanı HİÇ olmayan paneller içindir. ÖLÇÜLDÜ
+        // (tests/test_v307_sekme_guverte.py, performans paneli bayat):
+        // "This panel declares no deck fields …" basılıyordu.
+        if (!Object.keys(built.payload).length && !built.missing.length
+                && spec.allowsEmptyPayload !== true) {
             root.style.display = 'none';
             status.textContent = T('dock.emptyPayload',
                 'This panel declares no deck fields, so this button would '
-                + 'post an empty body — the endpoint rejects that. Nothing '
+                + 'send an empty request, which is refused. Nothing '
                 + 'was sent. Use the panel\'s own controls below, which build '
                 + 'the request they need.');
             return;
@@ -3072,6 +3343,8 @@
     // AnalysisDock.ui.diff/ui.source aynı nesneyi gösterir (kopya değil).
     const DIFF_API = {
         compute: diffCompute,
+        headline: headlineDiff,
+        HEADLINES: DIFF_MANSET,
         badge: diffBadge,
         annotate: diffAnnotate,
         strip: diffStripHtml,

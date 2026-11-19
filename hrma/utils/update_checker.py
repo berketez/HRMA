@@ -131,8 +131,11 @@ _cache_lock = threading.Lock()
 _cache = {"checked_at": 0.0, "result": None}
 
 # İndirme durumu (tek seferde tek indirme; UI /api/update/status ile izler)
+# "version": indirilen yayının sürümü (etiketin sürüm çekirdeği); kurulum
+# sırasında güncelleme penceresi "3.0.x → 3.0.y" satırını bundan yazar
+# (V307/GÜNCELLEME-EKRAN). Bilinmiyorsa boş: pencere satırı gizler.
 _download_lock = threading.Lock()
-_download = {"state": "idle", "pct": 0, "path": "", "error": ""}
+_download = {"state": "idle", "pct": 0, "path": "", "error": "", "version": ""}
 
 
 #: Etiketin SÜRÜM ÇEKİRDEĞİ: noktayla ayrılmış ilk sayı dizisi.
@@ -572,7 +575,9 @@ def start_install():
     plan = self_install.plan_install(
         st["path"], installer_size=os.path.getsize(st["path"]))
     if plan["mode"] == "auto":
-        launched = self_install.launch_helper(plan, st["path"])
+        # Güncelleme penceresi için sürümler: kurulu (bu süreç) → indirilen.
+        launched = self_install.launch_helper(
+            plan, st["path"], versions=(__version__, st.get("version") or ""))
         if launched.get("launched"):
             self_install.schedule_app_exit()
             return {"started": True, "mode": "auto", "log": launched.get("log")}
@@ -612,10 +617,12 @@ def start_download():
                           % (type(exc).__name__, exc),
                 "page_url": info.get("page_url")}
 
+    surum = ".".join(str(n) for n in parse_version(info.get("latest") or ""))
     with _download_lock:
         if _download["state"] == "downloading":
             return {"started": True, "already": True}
-        _download.update(state="downloading", pct=0, path="", error="")
+        _download.update(state="downloading", pct=0, path="", error="",
+                         version=surum if info.get("latest") else "")
 
     threading.Thread(
         target=_run_download,

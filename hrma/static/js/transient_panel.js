@@ -36,6 +36,17 @@
     }
     // ÖH D37 A1b panel-js · OH-D33-09 — EKRAN ondalığı tek kanaldan
     // (`I18N.number`: TR virgül, EN nokta); i18n.js yoksa nokta.
+    // V307/DİL-EKRAN (NK3-H-8): durum satırı canlı dil geçişinde de çevrilsin
+    // diye sabit anahtarlı metin `data-i18n` ile yazılır; parametreli ya da
+    // boş metinde nitelik kaldırılır (eski anahtar yeni metnin üstüne
+    // yazılmasın).
+    function durumYaz(el, key, metin) {
+        if (!el) return;
+        el.textContent = key ? T(key, metin) : (metin || '');
+        if (key) el.setAttribute('data-i18n', key);
+        else el.removeAttribute('data-i18n');
+    }
+
     function ekranSayisi(v, basamak) {
         return (window.I18N && typeof window.I18N.number === 'function')
             ? window.I18N.number(v, basamak) : v.toFixed(basamak);
@@ -395,11 +406,10 @@
         if (expBtn) expBtn.disabled = true;
         const status = document.getElementById('tp_status');
         if (status) {
-            status.textContent = (anahtar === 'during')
-                ? T('transient.staleDuringRun',
-                    'The engine was recalculated while this run was solving; its result belongs to the earlier design and was not shown. Run it again.')
-                : T('transient.staleRun',
-                    'The engine was recalculated; the previous time-resolved result belonged to the earlier design and was cleared. Run it again.');
+            durumYaz(status, (anahtar === 'during') ? 'transient.staleDuringRun' : 'transient.staleRun',
+                (anahtar === 'during')
+                ? 'The engine was recalculated while this run was solving; its result belongs to the earlier design and was not shown. Run it again.'
+                : 'The engine was recalculated; the previous time-resolved result belonged to the earlier design and was cleared. Run it again.');
         }
     }
 
@@ -429,7 +439,7 @@
         const status = document.getElementById('tp_status');
         if (!sel) return false;
         if (!st || typeof st !== 'object') {
-            if (status) status.textContent = T('transient.projectNoSetup',
+            if (status) durumYaz(status, 'transient.projectNoSetup',
                 'This project file does not store the time-resolved settings (saved before 3.0.6): the feed mode follows the engine design and the tank temperature is filled from the engine oxidizer temperature after a calculation.');
             return false;
         }
@@ -453,7 +463,7 @@
                     else delete el.dataset.userOverride;
                 }
             });
-        if (status) status.textContent = '';
+        if (status) durumYaz(status, null, '');
         tankSicakligiNotunuYaz();
         return true;
     }
@@ -649,7 +659,7 @@
         const badges = document.getElementById('tp_badges');
         const runBtn = document.getElementById('tp_run');
         runBtn.disabled = true;
-        status.textContent = T('transient.solving', 'SOLVING TRANSIENT BALLISTICS…');
+        durumYaz(status, 'transient.solving', 'SOLVING TRANSIENT BALLISTICS…');
         badges.innerHTML = '';
 
         beslemeKipiniEsle();
@@ -695,11 +705,11 @@
             if (window.MotorViz3D && MotorViz3D.get && MotorViz3D.get()) {
                 try { MotorViz3D.setTransient(data.transient); } catch (e) { /* eski sürüm */ }
             }
-            status.textContent = '';
+            durumYaz(status, null, '');
             tankSicakligiNotunuYaz();
         } catch (err) {
-            status.textContent = TF('common.errorPrefix', { message: err.message },
-                                    'ERROR: {message}');
+            durumYaz(status, null, TF('common.errorPrefix', { message: err.message },
+                                      'ERROR: {message}'));
         } finally {
             runBtn.disabled = false;
         }
@@ -776,11 +786,11 @@
         const ls = (cfc && cfc.loss_set) || null;
         if (cfc && isFinite(cfc.divergence_efficiency) && ls) {
             html += badge(TF('transient.badgeCfContract', {
-                lam: Number(cfc.divergence_efficiency).toFixed(4),
+                lam: ekranSayisi(Number(cfc.divergence_efficiency), 4),
                 lamSrc: kodEtiketi(KAYNAK_ADI, cfc.divergence_efficiency_source),
-                loss: Number(ls.loss_product).toFixed(4),
+                loss: ekranSayisi(Number(ls.loss_product), 4),
                 lossSrc: kodEtiketi(KAYNAK_ADI, ls.source),
-            }, 'C_F CONTRACT lambda={lam} ({lamSrc}) - losses x{loss} ({lossSrc})'),
+            }, 'C_F CONTRACT λ = {lam} ({lamSrc}) · losses × {loss} ({lossSrc})'),
                 'info', [cfc.basis, ls.scope].filter(Boolean).join(' | '));
         } else {
             // FAIL-CLOSED: sözleşme yayımlanmadıysa uydurma çarpan basılmaz,
@@ -823,7 +833,7 @@
                         .map(function (f) {
                             return kodEtiketi(TANK_FAZI, f) + ' ' + fazSayim[f];
                         }).join(' / '),
-                }, 'TANK PHASE (solver steps): {list}'), 'info')
+                }, 'TANK PHASE (solver steps per phase): {list}'), 'info')
                 + '</span>';
         }
         // ÖH D37 A1b panel-js · OH-D33-09 — KESMENİN BOYU VE HÜKMÜ.

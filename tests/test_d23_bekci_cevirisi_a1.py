@@ -90,6 +90,15 @@ B_TAVANI = 66
 #: cfd/izgara_gerdirme ×1). Sökülen iki çapa (solid_safety_real a = 0,005
 #: kolu, KT-23 ters kapıya döndü) ve belirsizler dokunulmadan kaldı.
 #: Ölçülen 13; tavan ölçülen sayıya ÇEKİLDİ (gevşetme değil, sıkılaştırma).
+#:
+#: V307 (16 Kas 2026, ana model, bakim/3.0.7 3372543bd): ölçüm 15'e çıktı —
+#: yeni 2'nin ikisi de KATI-DOĞRULAMA faz 3'ün (B1: alüminyumlu kompozitte
+#: iki fazlı kayıp itki katsayısına uygulandı) bilinçli beklenti güncellemesi
+#: (test_solid_design_point tepe itki 4392,38 -> 4251,86; test_solid_safety_real
+#: ortalama itki 3606,57 -> 3538,07; eski/yeni/neden tablosu
+#: docs/scofield/raw/OH/V307/kati-dogrulama/olcum/b1_sayi_tablosu.md). Aynı
+#: betikle (p13_capa_tazele.py --yaz) yalnız bu iki kayıt TEK adaylı olarak
+#: bağlandı; öteki 13 dokunulmadı. Ölçülen yine 13; tavan değişmedi.
 TASINMIS_TAVANI = 13
 
 #: D22 dersi: tavanla ölçülen sayı arasındaki yastık 11 birime çıkmıştı ve

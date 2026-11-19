@@ -91,10 +91,54 @@
     // sayı VERMEDİĞİNDE devreye girer (bit-aynı çapa koşumu raporda).
     // ==================================================================
 
-    //: Ablatif akı alanının panel varsayılanı — TEK tanım noktası. Hem
-    //: `fields` girdisi hem "hüküm kazanılmış mı" ölçütü buradan okur;
-    //: iki yerde ayrı yazmak ölçütü sessizce kaydırırdı.
-    var DEFAULT_Q_NET_W_M2 = 2000000;
+    // ==================================================================
+    // V307/GÜVERTE-ISIL (kalem 3) — GİZLİ TANIM DEĞERİ YOK
+    // ------------------------------------------------------------------
+    // ÖLÇÜLDÜ (docs/scofield/raw/OH/V307/guverte-isil/olcum_once.json,
+    // motor sonucu olmayan üç tür): form q = 2 000 000 W/m², h_gas = 3000
+    // W/m²K, T_r = 3200 K, süre 10 s, cidar 5 mm ile DOLU geliyordu;
+    // kullanıcı hiçbir şey girmeden ısı kuyusu kipi "iç cidar 2618 K ·
+    // SERVİS SINIRI AŞILDI", ışınım kipi "denge cidarı 2576 K" basıyordu —
+    // hiç var olmayan bir motorun hükmü. Bu beş alanın tanım değeri artık
+    // BOŞ: motor sonucundan gelen değer dolar (alanın kaynak çipi söyler),
+    // gelmeyen alan boş kalır ve etkin kipin zorunlu kümesindeyse istek
+    // gönderilmez, alan adıyla söylenir.
+    //
+    // KİP BAŞINA ZORUNLU KÜME bu dosyada YAZILMAZ: ucun kendi kapısından
+    // gelir (app.py `thermal_protection_form_contract`), şablon
+    // `<meta name="hrma-tp-mode-required">` olarak basar. Okunamazsa küme
+    // boştur: ön denetim yapılmaz, eksik alanı uç adıyla reddeder (422 +
+    // missing_fields) — ikinci bir liste uydurulmaz.
+    // ==================================================================
+    var MODE_REQUIRED_META = 'meta[name="hrma-tp-mode-required"]';
+
+    function readModeRequired() {
+        try {
+            var meta = document.querySelector(MODE_REQUIRED_META);
+            var raw = (meta && typeof meta.getAttribute === 'function')
+                ? meta.getAttribute('content') : null;
+            if (!raw) return null;
+            var o = JSON.parse(raw);
+            return (o && typeof o === 'object' && !Array.isArray(o)) ? o : null;
+        } catch (e) {
+            return null;
+        }
+    }
+
+    var MODE_REQUIRED = readModeRequired();
+
+    //: Formda O AN seçili kip; form çizilmediyse ilk kip (alanın tanım değeri).
+    function activeMode() {
+        var el = document.getElementById('ad_f_protection_mode');
+        return (el && el.tagName === 'SELECT' && typeof el.value === 'string'
+                && el.value) ? el.value : MODES[0][0];
+    }
+
+    //: Etkin kipin zorunlu alanları (sunucunun kümesi; okunamadıysa boş).
+    function activeRequired() {
+        var liste = MODE_REQUIRED ? MODE_REQUIRED[activeMode()] : null;
+        return Array.isArray(liste) ? liste.slice() : [];
+    }
 
     //: Son önerinin künyesi: hangi motor tipinde, hangi makine yolundan,
     //: hangi sayı okundu. `render` bunu ucun yankıladığı `q_caller_W_m2`
@@ -175,9 +219,92 @@
         };
     }
 
+    // ==================================================================
+    // V307/GÜVERTE-ISIL (kalem 1) — MOTORUN KENDİ ASTAR İSTASYONU
+    // ------------------------------------------------------------------
+    // ÖLÇÜLDÜ (olcum_once.json): ablatif kip motorun boğaz / lüle girişi
+    // astarıyla AYNI çekirdeği (`ablative_thickness`) çağırıyor ama aynı
+    // girdiyle değil — sekme kenar gazı c_p'sini ve istasyon yarıçapını
+    // GÖNDERMİYORDU (üfleme blokajı çözülmüyor, geometri kapısı koşmuyordu):
+    //   sıvı L1 boğazı  : motor 0,653 mm/s ⟷ sekme 0,698 mm/s
+    //   örnek sıvı 50 bar: motor 1,425 mm/s (+ geometri reddi) ⟷ 1,521
+    //   örnek hibrit    : motor 1,133 mm/s ⟷ sekme 1,200 mm/s (ayrıca
+    //                     katsayı: motor astarı q_boğaz/(T_aw − T_ref) =
+    //                     11 879, sekme Bartz 11 798 W/m²K)
+    // Motor astar istasyonunu yayımlıyorsa sürücü çift, c_p ve yarıçap O
+    // bloktan okunur: aynı işlev + aynı girdi = aynı gerileme hızı, aynı
+    // zarf hükmü. Blok yoksa eski okuma (ölçülmüş çift) aynen kalır ve c_p /
+    // yarıçap boş kalır (uç blokajın çözülmediğini yanıtında beyan eder).
+    // ==================================================================
+    var LINER_STATION_PATHS = {
+        liquid: { block: 'thermal_protection.passive_thermal_protection.nozzle_entry_liner' },
+        solid: { block: 'cad_design.insulation_system.aft_insulation' },
+        // Hibrit astar bloğu c_p'yi yayımlamıyor; motor aynı ısı analizinin
+        // gaz özelliğini geçiriyor (hybrid_rocket_engine `cp_gaz`).
+        hybrid: { block: 'thermal_protection.nozzle_entry_liner',
+                  cp: 'heat_transfer_analysis.heat_transfer_coefficients.gas_cp' },
+    };
+
+    function readLinerStation(m, motorType) {
+        var spec = LINER_STATION_PATHS[motorType];
+        if (!spec) return null;
+        var b = pathGet(m, spec.block);
+        if (!b || typeof b !== 'object') return null;
+        var h = numOrNull(b.h_gas_W_m2K);
+        var t = numOrNull(b.T_recovery_K);
+        if (h === null || t === null) return null;
+        var cp = numOrNull(b.gas_cp_J_kgK);
+        if (cp === null && spec.cp) cp = numOrNull(pathGet(m, spec.cp));
+        return {
+            motorType: motorType,
+            path: spec.block,
+            h_gas_W_m2K: h,
+            T_recovery_K: t,
+            gas_cp_J_kgK: cp,
+            station_radius_m: numOrNull(b.station_radius_m),
+            // Motorun AYNI istasyon için hükmü (yan yana basılır).
+            thickness_mm: numOrNull(b.thickness),
+            recession_rate_mm_s: numOrNull(b.recession_rate_mm_s),
+            conduction_allowance_mm: numOrNull(b.conduction_allowance_mm),
+        };
+    }
+
+    //: Son okunan motor astar istasyonu (yoksa null).
+    var lastStationRead = null;
+    //: V307/HİBRİT-ORTAM kalem 3 — motorun Bartz TAŞINIM katsayısı (boğaz;
+    //: heat_transfer_analysis.gas_side_analysis.gas_side_coefficient).
+    //: Hibritte sürücü h_gas astar istasyonundan gelir ve O sayı farklı bir
+    //: büyüklüktür: yayımlanan boğaz akısı / (T_aw − T_ref), gaz ışınımı
+    //: dahil ETKİN katsayı (ölçüldü, 300 N / 1,0 bar: 11 124 ⟷ 11 170
+    //: W/m²K). İkisi yan yana, adlarıyla basılır.
+    var lastBartzConvective = null;
+
+    // Sürücü h_gas satırları: hibrit astar istasyonundan geldiyse adı
+    // "etkin" ve yanında motorun Bartz taşınım katsayısı; diğer yollarda
+    // satır eskisi gibi tek.
+    function hGasRows(d) {
+        var used = numOrNull(d && d.h_gas_W_m2K);
+        var etkin = !!(lastStationRead && lastStationRead.motorType === 'hybrid'
+            && used !== null && sameNumber(lastStationRead.h_gas_W_m2K, used));
+        if (!etkin) {
+            return [[T('panel.protection.hGas', 'h_gas (input, Bartz)'),
+                     U.fmt(used, 0) + ' W/m²·K']];
+        }
+        var satirlar = [[T('panel.protection.hGasEffective',
+            'h_gas (input, effective: the motor\'s throat heat flux / (T_aw − T_ref), gas radiation included)'),
+            U.fmt(used, 0) + ' W/m²·K']];
+        if (lastBartzConvective !== null) {
+            satirlar.push([T('panel.protection.hGasBartzConvective',
+                'Bartz convective coefficient of the motor (throat, radiation excluded)'),
+                U.fmt(lastBartzConvective, 0) + ' W/m²·K']);
+        }
+        return satirlar;
+    }
+
     //: Hükmün künyesi için satır etiketi (makine yolu — bu tur i18n
     //: anahtarı açılmaz; süpürme dalgası anahtarı bu ada takacak).
-    var FLUX_BASIS_LABEL = 'q_net_W_m2 (used value provenance)';
+    //: V307/DİL-EKRAN (kalem 18): etiket artık sözlükten (panel.protection.lblFluxUsed);
+    //: makine adı (q_net_W_m2) satırın ipucunda.
 
     //: ÖH P11B5-02 — radyasyon hükmünün künye satırları. Aynı makine-yolu
     //: deseni (yukarıdaki FLUX_BASIS_LABEL emsali): bu tur i18n anahtarı
@@ -186,18 +313,18 @@
     //: (tests/test_i18n_common.py::test_every_used_key_exists_in_dictionary)
     //: yeni anahtarı KIRMIZI yapar. Süpürme dalgası anahtarı bu adlara
     //: takacak; alanların ekrana İNMESİ bugünden kazanılır.
-    var VERDICT_BASIS_LABEL = 'unconservative (verdict provenance)';
-    var VIEW_FACTOR_LABEL = 'view_factor (surface to space)';
-    var GAS_RAD_LABEL = 'q_gas_radiation_W_m2 (incident, input)';
+    //: V307/DİL-EKRAN (kalem 18): üç etiket sözlükte (panel.protection.lblVerdictBasis,
+    //: lblViewFactor, lblGasRad, badgeUnconservative); makine adları ipucunda.
     var VERDICT_EARNED_TEXT =
-        'view_factor and q_gas_radiation_W_m2 were both supplied: no known '
-        + 'omission pushes this equilibrium wall temperature down.';
+        'The view factor and the incident gas radiation flux were both supplied: '
+        + 'no known omission pushes this equilibrium wall temperature down.';
 
     // Ucun yankıladığı akı ile panelin motordan okuduğu akıyı karşılaştırır.
-    //   'measured' : sayı motorun ÖLÇÜLMÜŞ akısı (yolu beyan edilir)
-    //   'user'     : ne ölçüm ne panel varsayılanı — elle girilmiş
-    //   'default'  : ölçüm YOK ve sayı panelin kendi varsayılanı; hüküm
-    //                KAZANILMAMIŞtır (P17B3-02'nin ta kendisi)
+    //   'computed' : sayı motorun ÖLÇÜLMÜŞ akısı (yolu beyan edilir)
+    //   'user'     : forma elle girilmiş
+    // V307/GÜVERTE-ISIL (kalem 3): 'assumed' (panelin kendi 2 MW/m²
+    // varsayılanı) türü KALKTI — panelin akı varsayılanı yok; alan ya
+    // motordan dolar ya da kullanıcı girer.
     function fluxProvenance(qUsed) {
         var read = lastFluxRead;
         if (numOrNull(qUsed) === null) {
@@ -209,20 +336,15 @@
                            // ÖH D31 · OH-D30-06: biçim tek kaynaktan (I18N.number) — TR kipinde virgül.
                            + ' = ' + U.num(read.q_W_m2 / 1e6, 3) + ' MW/m2' };
         }
-        if (Math.abs(qUsed - DEFAULT_Q_NET_W_M2) < 1e-9) {
-            return { kind: 'assumed',
-                     text: 'panel default ' + DEFAULT_Q_NET_W_M2
-                           + ' W/m2 — no measured motor flux was read for '
-                           + 'this run' };
-        }
-        return { kind: 'user', text: 'entered in the form (not this run\'s '
-                                     + 'measured flux)' };
+        return { kind: 'user', text: T('panel.protection.provUserFlux',
+                                       'entered in the form (not this run\'s '
+                                       + 'measured flux)') };
     }
 
     //: Formda GÖRÜNEN akı satırının etiketi. `FLUX_BASIS_LABEL` "kullanılan
     //: sayının künyesi"ni taşır; bu satır kullanıcının YAZDIĞI sayıyı ve o
     //: sayının koşuma girip girmediğini ayrı ayrı söyler.
-    var CALLER_FLUX_LABEL = 'q_caller_W_m2 ([A] Net Heat Flux, as entered)';
+    //: V307/DİL-EKRAN (kalem 18): panel.protection.lblCallerFlux; makine adı ipucunda.
 
     // ÖH D16 · P11S1-03 — HANGİ SAYI KULLANILDI?
     // ÖLÇÜLDÜ (docs/scofield/raw/OH/D16/arayuz/a1/once.json, M1): güvertenin
@@ -292,41 +414,83 @@
         var pairMeasured = readPair
             && sameNumber(read.h_gas_W_m2K, usedH)
             && sameNumber(read.T_recovery_K, usedT);
-        var ortak = 'surface_energy_balance — the entered net heat flux is '
-            + 'NOT used; the flux is solved at the ablation surface '
-            + 'from h_gas and T_recovery';
+        // V307/DİL-EKRAN (kalem 18): cümle kullanıcı dilinde; temel kodu
+        // (flux_basis) data-tps-flux-basis kancasında kalır.
+        var ortak = T('panel.protection.provSurfaceBalance',
+            'The entered net heat flux is NOT used; the flux is solved at the '
+            + 'ablation surface from h_gas and T_recovery (surface energy balance)');
+        var yok = T('panel.cfd.critNoCriticalValue', 'not published');
         if (pairMeasured) {
             return {
                 basis: basis, callerUsed: false, kind: 'computed',
                 pairMatch: true, earned: true,
-                text: ortak + ' (both read from ' + read.motorType + ' · '
-                      + read.q_path + ' station)',
+                text: ortak + ' ' + U.tf('panel.protection.provPairMotor',
+                      { src: T('motor.' + read.motorType, String(read.motorType)) },
+                      '(both read from the motor result: {src})'),
             };
         }
+        //: V307/GÜVERTE-ISIL (kalem 3) — PANELİN VARSAYILAN ÇİFTİ YOK.
+        //: Eskiden form h_gas = 3000 / T_r = 3200 ile dolu geliyordu;
+        //: motorun çiftiyle örtüşmeyen çift "panelin kendi varsayılanı"
+        //: olabildiği için hüküm geri çekiliyordu (D18 · P11S1-03 ŞART).
+        //: Bugün alan ya motordan dolar ya da kullanıcı yazar: örtüşmeyen
+        //: çift KULLANICININ girdisidir ve sonucu kullanıcının kendi
+        //: hesabıdır — sayı basılır, künye 'user' der ve motorun çiftinden
+        //: farkını adıyla yazar. Ucun yankıladığı çift çözülemiyorsa
+        //: (yayımlanmadı) hüküm yine kazanılmaz (fail-closed).
+        var pairKnown = (usedH !== null && usedT !== null);
         if (readPair) {
-            //: Okunan çift VAR ama koşuma GİREN çift o değil: kullanılan
-            //: sayılar formdan geldi. Künye bunu adıyla söyler.
             return {
                 basis: basis, callerUsed: false, kind: 'user',
-                pairMatch: false, earned: false,
-                text: ortak + ' — but the pair sent to the endpoint ('
-                      + 'h_gas=' + (usedH === null ? 'not published' : usedH)
-                      + ', T_recovery='
-                      + (usedT === null ? 'not published' : usedT)
-                      + ') differs from the pair read from '
-                      + read.motorType + ' · ' + read.q_path
-                      + ' (h_gas=' + read.h_gas_W_m2K
-                      + ', T_recovery=' + read.T_recovery_K
-                      + '), so this verdict is not earned',
+                pairMatch: false, earned: pairKnown,
+                text: ortak + ' — ' + U.tf('panel.protection.provPairForm', {
+                          h: (usedH === null ? yok : U.num(usedH)),
+                          t: (usedT === null ? yok : U.num(usedT)),
+                          src: T('motor.' + read.motorType, String(read.motorType)),
+                          hm: U.num(read.h_gas_W_m2K), tm: U.num(read.T_recovery_K) },
+                      'the pair sent to the calculation (h_gas = {h}, T_recovery = {t}) '
+                      + 'comes from the form; it differs from the pair read from the '
+                      + 'motor result {src} (h_gas = {hm}, T_recovery = {tm})'),
             };
         }
         return {
-            basis: basis, callerUsed: false, kind: 'assumed',
-            pairMatch: false, earned: false,
-            text: ortak + ' (h_gas / T_recovery are the panel\'s own '
-                  + 'defaults for this run — no measured motor pair was '
-                  + 'read, so this verdict is not earned)',
+            basis: basis, callerUsed: false, kind: 'user',
+            pairMatch: false, earned: pairKnown,
+            text: ortak + ' ' + T('panel.protection.provPairNoMotor',
+                  '(h_gas / T_recovery come from the form; no motor pair was '
+                  + 'read for this run)'),
         };
+    }
+
+    //: V307/GÜVERTE-ISIL (kalem 1): motorun AYNI istasyon için hükmü.
+    //: Yalnız koşuma giren çift motorun istasyon çiftiyse basılır (başka
+    //: çiftle koşulmuş bir sonucun yanına motorun sayısı konmaz).
+    function motorStationRow(d) {
+        var st = lastStationRead;
+        if (!st || !sameNumber(st.h_gas_W_m2K, d && d.h_gas_W_m2K)
+                || !sameNumber(st.T_recovery_K, d && d.T_recovery_K)) {
+            return null;
+        }
+        var metin;
+        if (st.thickness_mm !== null) {
+            metin = U.tf('panel.protection.motorStationSized',
+                { mm: U.fmt(st.thickness_mm, 2),
+                  v: U.fmt(st.recession_rate_mm_s, 3) },
+                '{mm} mm (recession rate {v} mm/s)');
+            if (st.conduction_allowance_mm !== null) {
+                metin += ' · ' + U.tf('panel.protection.motorStationConduction',
+                    { c: U.fmt(st.conduction_allowance_mm, 2) },
+                    'includes a conduction allowance of {c} mm; this tab '
+                    + 'publishes the recession allowance only');
+            }
+        } else {
+            metin = U.tf('panel.protection.motorStationNotSized',
+                { v: U.fmt(st.recession_rate_mm_s, 3) },
+                'not sized (recession rate {v} mm/s)');
+        }
+        return [T('panel.protection.motorStation', 'Same station — motor result'),
+                '<span data-tps-motor-station="1" style="white-space:normal;">'
+                + esc(metin) + '</span>'];
     }
 
     function simplifiedBadge(note) {
@@ -369,10 +533,19 @@
     }
 
     //: Geçerlilik künyesinin satır etiketi — ucun alan adları.
-    var VALIDITY_LABEL = 'model_valid / validity_note (endpoint verdict)';
+    //: V307/DİL-EKRAN (kalem 18): panel.protection.lblValidity.
 
     //: Model geçerli mi? YALNIZ ucun açık `false` hükmü geçersizdir;
     //: alan yoksa (eski/başka bir uç) hiçbir şey İDDİA EDİLMEZ.
+    //: Sunucu cümlesi kullanıcının dilinde (I18N.serverText; tanınmazsa
+    //: AYNEN, kısaltılmadan). V307/DİL-SUNUCU-2 DEVİR (a): validity_note ve
+    //: kaynak künyesinin TR desenleri sözlükte (i18n_charts.js); panel
+    //: geçirmediği için TR ekranda İngilizce kalıyordu.
+    function SRV(text) {
+        return (window.I18N && typeof window.I18N.serverText === 'function')
+            ? window.I18N.serverText(text) : text;
+    }
+
     function modelInvalid(d) {
         return d && d.model_valid === false;
     }
@@ -381,7 +554,7 @@
     function validityBadge(d) {
         if (!modelInvalid(d)) return '';
         return U.badge(T('panel.protection.modelNotValid', 'MODEL NOT VALID'),
-                       'err', d.validity_note || '');
+                       'err', SRV(d.validity_note || ''));
     }
 
     //: Künye satırı. Geçersizse ucun cümlesi HAM basılır (kısaltılmaz —
@@ -390,15 +563,15 @@
     function validityRow(d) {
         if (d.model_valid === undefined || d.model_valid === null) return null;
         var gecersiz = modelInvalid(d);
-        return [VALIDITY_LABEL,
+        return [T('panel.protection.lblValidity', 'Model validity (declared by the calculation)'),
             '<span data-tps-model-valid="' + (gecersiz ? 'false' : 'true') + '">'
             + esc(gecersiz
-                ? (d.validity_note
+                ? (SRV(d.validity_note)
                    || T('panel.protection.modelNotValidBare',
-                        'The endpoint declared this run outside the model '
+                        'The calculation declared this run outside the model '
                         + 'validity envelope.'))
                 : T('panel.protection.modelValidText',
-                    'The endpoint declared this run inside the model validity '
+                    'The calculation declared this run inside the model validity '
                     + 'envelope.'))
             + '</span>'];
     }
@@ -458,9 +631,15 @@
             + '</div>'
             + '<div style="display:flex; flex-wrap:wrap; gap:10px; margin:10px 0;">'
             + U.statCard(T('panel.protection.cardThickness', 'Required liner thickness'),
-                (earned ? U.fmt(d.required_thickness_mm, 2) : dash)
-                + U.source.chip({ kind: prov.kind, declared: true,
-                                  basis: prov.text }),
+                // V307/KÜÇÜKLER (kalem 4): künye çipi YALNIZ sayı basıldığında.
+                // Çip akının kökenini söyler; kalınlık kazanılmadığında ('—')
+                // yanında durunca "— ● COMPUTED mm" okunuyordu (kalınlık
+                // hesaplanmış gibi). Akının kökeni aşağıdaki akı tabanı
+                // satırında adıyla duruyor.
+                (earned ? U.fmt(d.required_thickness_mm, 2)
+                    + U.source.chip({ kind: prov.kind, declared: true,
+                                      basis: prov.text })
+                    : dash),
                 'mm', 'info', T('panel.protection.cardThicknessTip', 'Total recession × design margin'))
             + U.statCard(T('panel.protection.cardRecession', 'Total recession'),
                 (earned ? U.fmt(d.total_recession_mm, 2) : dash), 'mm')
@@ -473,7 +652,7 @@
             + U.kvTable(withValidityRow([
                 // Hükmün ARDINDAKİ SAYI nereden geldi? Kartlardan ÖNCE
                 // okunması gereken satır (P17B3-02'nin ekrandaki karşılığı).
-                [FLUX_BASIS_LABEL,
+                [T('panel.protection.lblFluxUsed', 'Heat flux used — source'),
                  '<span data-tps-flux-kind="' + prov.kind + '"'
                  + ' data-tps-flux-basis="'
                  + (prov.basis || 'unpublished') + '"'
@@ -484,33 +663,55 @@
                  + (prov.pairMatch === true ? 'true'
                     : (prov.pairMatch === false ? 'false' : 'na')) + '"'
                  + ' data-tps-earned="' + (earned ? 'true' : 'false') + '">'
-                 + prov.text + '</span>'],
+                 + prov.text + '</span>', 'q_net_W_m2'],
                 // Kullanıcının YAZDIĞI sayı ile KULLANILAN sayı ayrı
                 // satırlardır; ikisinin aynı olmadığı koşumda bunu ekran
                 // söyler (D16 · P11S1-03).
-                [CALLER_FLUX_LABEL,
+                [T('panel.protection.lblCallerFlux', '[A] Net Heat Flux, as entered'),
                  '<span data-tps-caller-used="'
                  + (prov.callerUsed === false ? 'false'
                     : (prov.callerUsed === true ? 'true' : 'unknown')) + '">'
                  + (numOrNull(d.q_caller_W_m2) === null ? '—'
                     : U.fmt(d.q_caller_W_m2 / 1e6, 2) + ' MW/m²')
                  + (prov.callerUsed === false
-                    ? ' — NOT used in this run (echoed for comparison only; '
-                      + 'the used value is the mean heat flux below)'
+                    ? ' — ' + T('panel.protection.callerNotUsed',
+                        'NOT used in this run (echoed for comparison only; '
+                        + 'the used value is the mean heat flux below)')
                     : (prov.callerUsed === true
-                       ? ' — used directly as the net surface flux ('
-                         + callerProv.text + ')'
-                       : ' — flux_basis not published by the endpoint, so '
-                         + 'whether this value was used cannot be stated'))
-                 + '</span>'],
+                       ? ' — ' + U.tf('panel.protection.callerUsedDirect',
+                           { src: callerProv.text },
+                           'used directly as the net surface flux ({src})')
+                       : ' — ' + T('panel.protection.callerUnknown',
+                           'the calculation did not publish its flux basis, so '
+                           + 'whether this value was used cannot be stated')))
+                 + '</span>', 'q_caller_W_m2'],
                 [T('panel.protection.meanFlux', 'Mean heat flux'), U.fmt(d.q_mean_W_m2 / 1e6, 2) + ' MW/m²'],
                 [T('panel.protection.totalLoad', 'Total heat load'),
                  U.fmt(d.total_heat_load_J_m2 / 1e6, 1) + ' MJ/m²'],
                 [T('common.burnTime', 'Burn Time'), U.fmt(d.burn_time_s, 1) + ' s'],
                 [T('common.density', 'Density'), U.fmt(d.density_kg_m3, 0) + ' kg/m³'],
                 [T('panel.protection.designMargin', 'Design margin'), U.fmt(d.design_margin, 2) + '×'],
-                [T('common.source', 'Source'), d.source || '—'],
-            ], d));
+                // V307/GÜVERTE-ISIL (kalem 1): üfleme blokajının ve geometri
+                // kapısının girdileri — verilmediyse adıyla (uç blokajı
+                // çözmez / yalnız hız tavanını denetler).
+                [T('panel.protection.gasCp', 'Gas specific heat (blowing blockage)'),
+                 '<span data-tps-gas-cp="' + (numOrNull(d.gas_cp_J_kgK) === null ? 'absent' : 'given') + '">'
+                 + (numOrNull(d.gas_cp_J_kgK) === null
+                    ? esc(T('panel.protection.gasCpAbsent',
+                            'not supplied — blockage not solved (full convective heating)'))
+                    : U.fmt(d.gas_cp_J_kgK, 0) + ' J/kg·K · ψ = '
+                      + U.fmt(d.blowing_blockage, 3))
+                 + '</span>'],
+                [T('panel.protection.stationRadius', 'Station radius (geometry check)'),
+                 '<span data-tps-station-radius="' + (numOrNull(d.station_radius_m) === null ? 'absent' : 'given') + '">'
+                 + (numOrNull(d.station_radius_m) === null
+                    ? esc(T('panel.protection.stationRadiusAbsent',
+                            'not supplied — only the recession-rate ceiling is checked'))
+                    : U.fmt(d.station_radius_m * 1e3, 2) + ' mm')
+                 + '</span>'],
+            ].concat(motorStationRow(d) ? [motorStationRow(d)] : []).concat([
+                [T('common.source', 'Source'), d.source ? SRV(d.source) : '—'],
+            ]), d));
         root.appendChild(el);
     }
 
@@ -538,7 +739,7 @@
             + (d.exceeds_melting === true
                 ? U.badge(T('panel.protection.exceedsMelting',
                             'EXCEEDS MELTING POINT'), 'err',
-                          d.validity_note || '')
+                          SRV(d.validity_note || ''))
                 : '')
             + validityBadge(d)
             + simplifiedBadge(d.model_note)
@@ -571,7 +772,7 @@
                   : U.fmt(d.margin_to_melting_K, 0) + ' K')],
                 [T('panel.protection.absorbedEnergy', 'Absorbed energy'),
                  U.fmt(d.absorbed_energy_J_m2 / 1e6, 2) + ' MJ/m²'],
-                [T('panel.protection.hGas', 'h_gas (input, Bartz)'), U.fmt(d.h_gas_W_m2K, 0) + ' W/m²·K'],
+            ].concat(hGasRows(d), [
                 [T('panel.protection.recoveryTemp', 'Recovery temperature'), U.fmt(d.T_recovery_K, 0) + ' K'],
                 [T('panel.protection.gridStep', 'Grid / time step'),
                  U.tf('panel.protection.gridStepValue',
@@ -579,7 +780,7 @@
                       '{n} nodes · dt = {dt} ms'),
                  'Fo = ' + U.fmt(d.Fo, 3) + ', Bi = ' + U.fmt(d.Bi, 3)
                     + ', CFL ok: ' + d.cfl_ok],
-            ], d));
+            ]), d));
         root.appendChild(el);
 
         if (typeof Plotly === 'undefined') return;
@@ -706,7 +907,8 @@
             + U.badge(T('panel.protection.badgeRadiation', 'MODE: RADIATION EQUILIBRIUM'), 'info')
             + (d.material_name ? U.badge(d.material_name, 'info') : '')
             + verdictBadge
-            + (uncons ? U.badge(VERDICT_BASIS_LABEL, 'warn', uncNote) : '')
+            + (uncons ? U.badge(T('panel.protection.badgeUnconservative',
+                                  'UNCONSERVATIVE VERDICT'), 'warn', uncNote) : '')
             + validityBadge(d)
             + simplifiedBadge(d.model_note)
             + '</div>'
@@ -724,18 +926,19 @@
             + '</div>'
             + U.kvTable(withValidityRow([
                 // Hükmün DÜRÜSTLÜK satırı: kartlardan ÖNCE okunur.
-                [VERDICT_BASIS_LABEL,
+                [T('panel.protection.lblVerdictBasis', 'Is the verdict conservative?'),
                  '<span data-tps-unconservative="' + (uncons ? 'true' : 'false') + '">'
-                 + (uncons ? uncNote : VERDICT_EARNED_TEXT)
-                 + '</span>'],
-                [VIEW_FACTOR_LABEL, U.fmt(d.view_factor, 3)],
-                [GAS_RAD_LABEL,
-                 U.fmt(d.q_gas_radiation_W_m2 / 1e6, 3) + ' MW/m²'],
+                 + (uncons ? uncNote : T('panel.protection.verdictEarnedText', VERDICT_EARNED_TEXT))
+                 + '</span>', 'unconservative'],
+                [T('panel.protection.lblViewFactor', 'View factor (surface to space)'),
+                 U.fmt(d.view_factor, 3), 'view_factor'],
+                [T('panel.protection.lblGasRad', 'Incident gas radiation flux (input)'),
+                 U.fmt(d.q_gas_radiation_W_m2 / 1e6, 3) + ' MW/m²', 'q_gas_radiation_W_m2'],
                 [T('panel.protection.emissivityUsed', 'Emissivity used'), U.fmt(d.emissivity, 2)],
-                [T('panel.protection.hGas', 'h_gas (input, Bartz)'), U.fmt(d.h_gas_W_m2K, 0) + ' W/m²·K'],
+            ].concat(hGasRows(d), [
                 [T('panel.protection.recoveryTemp', 'Recovery temperature'), U.fmt(d.T_recovery_K, 0) + ' K'],
-                [T('common.source', 'Source'), d.source || '—'],
-            ], d));
+                [T('common.source', 'Source'), d.source ? SRV(d.source) : '—'],
+            ]), d));
         root.appendChild(el);
     }
 
@@ -756,7 +959,7 @@
         U.source.ledgerInto(root, d, { deep: true });
     }
 
-    window.AnalysisDock.register({
+    var SPEC = {
         id: 'protection',
         title: 'Thermal Protection — Ablative / Heat-Sink / Radiation-Cooled',
         titleKey: 'panel.protection.title',
@@ -765,19 +968,29 @@
         motorTypes: ['hybrid', 'liquid', 'solid'],
         fields: [
             ['mode', 'Analysis Mode', 'ablative', MODES, 'panel.protection.fMode', 'panel.protection.help.mode'],
-            ['q_net_W_m2', '[A] Net Heat Flux (W/m²)', DEFAULT_Q_NET_W_M2, 100000, 'panel.protection.fQNet', 'panel.protection.help.q_net_W_m2'],
+            // V307/GÜVERTE-ISIL (kalem 3): motordan gelen beş büyüklüğün tanım
+            // değeri BOŞ (eskiden 2e6 W/m² / 10 s / 3000 W/m²K / 3200 K /
+            // 5 mm). Zorunluluk kipe bağlıdır ve sunucudan okunur (`required`).
+            ['q_net_W_m2', '[A] Net Heat Flux (W/m²)', '', 100000, 'panel.protection.fQNet', 'panel.protection.help.q_net_W_m2'],
             ['material', '[A] Ablative Material', 'silica_phenolic', ABLATIVES,
              'panel.protection.fAblativeMaterial', 'panel.protection.help.material'],
             ['design_margin', '[A] Design Margin (×)', 1.5, 0.1, 'panel.protection.fDesignMargin', 'panel.protection.help.design_margin'],
             ['q_star_MJ_kg', '[A] Q* Override (MJ/kg, blank = band)', '', 0.5,
              'panel.protection.fQstarOverride', 'panel.protection.help.q_star_MJ_kg'],
-            ['burn_time_s', '[A/H] Burn Time (s)', 10, 0.5, 'panel.protection.fBurnTime', 'panel.protection.help.burn_time_s'],
-            ['h_gas_W_m2K', '[H/R] h_gas — Bartz (W/m²·K)', 3000, 100, 'panel.protection.fHgas', 'panel.protection.help.h_gas_W_m2K'],
-            ['T_recovery_K', '[H/R] Recovery Temperature (K)', 3200, 50, 'panel.protection.fTRecovery', 'panel.protection.help.T_recovery_K'],
-            ['wall_thickness_m', '[H] Wall Thickness (m)', 0.005, 0.001, 'panel.protection.fWallThickness', 'panel.protection.help.wall_thickness_m'],
+            ['burn_time_s', '[A/H] Burn Time (s)', '', 0.5, 'panel.protection.fBurnTime', 'panel.protection.help.burn_time_s'],
+            ['h_gas_W_m2K', '[H/R] h_gas — Bartz (W/m²·K)', '', 100, 'panel.protection.fHgas', 'panel.protection.help.h_gas_W_m2K'],
+            ['T_recovery_K', '[H/R] Recovery Temperature (K)', '', 50, 'panel.protection.fTRecovery', 'panel.protection.help.T_recovery_K'],
+            // V307/GÜVERTE-ISIL (kalem 1): motorun astar istasyonunun kalan
+            // iki girdisi (isteğe bağlı; boşsa gönderilmez).
+            ['gas_cp_J_kgK', '[A] Gas Specific Heat (J/kg·K)', '', 50, 'panel.protection.fGasCp', 'panel.protection.help.gas_cp_J_kgK'],
+            ['station_radius_m', '[A] Station Radius (m)', '', 0.001, 'panel.protection.fStationRadius', 'panel.protection.help.station_radius_m'],
+            ['wall_thickness_m', '[H] Wall Thickness (m)', '', 0.001, 'panel.protection.fWallThickness', 'panel.protection.help.wall_thickness_m'],
             ['wall_material', '[H] Wall Material', 'steel', WALL_MATERIALS,
              'panel.protection.fWallMaterial', 'panel.protection.help.wall_material'],
-            ['T_initial_K', '[H] Initial Temperature (K)', 300, 5, 'panel.protection.fTInitial', 'panel.protection.help.T_initial_K'],
+            // V307/KÜÇÜKLER (kalem 5): tanım değeri boş (eskiden 300: çekirdeğin
+            // kaynaksız imza varsayılanı). Motorun yayımladığı cidar başlangıç
+            // sıcaklığı tohumlanır (`fromResults`); ısı kuyusu kipinde zorunlu.
+            ['T_initial_K', '[H] Initial Temperature (K)', '', 5, 'panel.protection.fTInitial', 'panel.protection.help.T_initial_K'],
             ['radiation_material', '[R] Extension Material', 'niobium_c103', RAD_MATERIALS,
              'panel.protection.fRadMaterial', 'panel.protection.help.radiation_material'],
             ['emissivity', '[R] Emissivity Override (blank = material)', '', 0.05,
@@ -803,6 +1016,8 @@
             if (Number.isFinite(gsa.heat_flux)) {
                 out.q_net_W_m2 = gsa.heat_flux;          // W/m² (boğaz tasarım yükü)
             }
+            lastBartzConvective = Number.isFinite(gsa.gas_side_coefficient)
+                ? gsa.gas_side_coefficient : null;
             if (Number.isFinite(gsa.gas_side_coefficient)) {
                 out.h_gas_W_m2K = gsa.gas_side_coefficient;
             } else {
@@ -844,10 +1059,61 @@
                     T_recovery_K: numOrNull(out.T_recovery_K),
                 };
             }
+            // --- V307/GÜVERTE-ISIL (kalem 1): motorun astar istasyonu ---
+            // Motor boğaz / lüle girişi astarını yayımlıyorsa sürücü çift,
+            // c_p ve yarıçap O bloktan (motorun kendi girdileri); akı ve
+            // yolu yukarıdaki okumadan aynen kalır.
+            lastStationRead = motorType ? readLinerStation(m, motorType) : null;
+            if (lastStationRead) {
+                out.h_gas_W_m2K = lastStationRead.h_gas_W_m2K;
+                out.T_recovery_K = lastStationRead.T_recovery_K;
+                if (lastStationRead.gas_cp_J_kgK !== null) {
+                    out.gas_cp_J_kgK = lastStationRead.gas_cp_J_kgK;
+                }
+                if (lastStationRead.station_radius_m !== null) {
+                    out.station_radius_m = lastStationRead.station_radius_m;
+                }
+                if (lastFluxRead) {
+                    lastFluxRead.h_gas_W_m2K = lastStationRead.h_gas_W_m2K;
+                    lastFluxRead.T_recovery_K = lastStationRead.T_recovery_K;
+                }
+            }
+            // --- V307/GÜVERTE-ISIL (kalem 3): ısı kuyusu cidarı motordan ---
+            // Motorun cidar kalınlığı ve malzemesi (güvertenin ortak
+            // okuyucuları; GÜVENLİK sekmesiyle aynı yollar). İki katmanlı
+            // rejeneratif sıvı cidarda "cidar" tek bir sayı değildir (astar
+            // + kanal + kabuk): tohumlanmaz, alan boş kalır.
+            var ikiKatman = (pathGet(m, 'structural_analysis.chamber_structure.wall_model')
+                             === 'two_layer_regenerative');
+            if (!ikiKatman) {
+                var tw = U.readWallThicknessM(r);
+                if (Number.isFinite(tw) && tw > 0) out.wall_thickness_m = tw;
+                var mat = U.readChamberMaterial(r);
+                if (typeof mat === 'string' && mat) out.wall_material = mat;
+            }
+            // --- V307/KÜÇÜKLER (kalem 5): ısı kuyusu başlangıç sıcaklığı ---
+            // Motorun AYNI cidar için yayımladığı başlangıç sıcaklığı (hibrit:
+            // ısıl koruma geçmişi, kaynağı ısı transferi analizinin ortam
+            // sıcaklığı; sıvı: pasif ısıl koruma geçmişi). Katı motor bu
+            // sıcaklığı yayımlamıyor: alan boş kalır, ısı kuyusu kipinde
+            // zorunlu olduğu için adıyla istenir (sayı uydurulmaz).
+            var tIlk = [
+                'thermal_protection.wall_temperature_history.T_initial_K',
+                'thermal_protection.passive_thermal_protection.wall_temperature_history.T_initial_K',
+                'heat_transfer_analysis.design_parameters.ambient_temperature'
+            ].map(function (yol) { return pathGet(m, yol); })
+                .filter(function (v) { return Number.isFinite(v) && v > 0; })[0];
+            if (tIlk !== undefined) out.T_initial_K = tIlk;
             return out;
         },
         render: render,
+    };
+    // Kip bağımlı zorunlu küme: güverte `spec.required`ı her okuyuşta
+    // (alan çipi, gövde kurma) O ANKİ kipin kümesini alır.
+    Object.defineProperty(SPEC, 'required', {
+        enumerable: true, get: activeRequired,
     });
+    window.AnalysisDock.register(SPEC);
 
     // Merkezi katalog yüklüyse üç select'i etiket filtreleriyle doldur;
     // değilse fallback listeleri aynen kalır. Ablatif listesi MERGE ile
@@ -881,6 +1147,10 @@
         _readMeasuredFlux: readMeasuredFlux,
         _fluxProvenance: fluxProvenance,
         _lastFluxRead: function () { return lastFluxRead; },
-        _defaultQ: DEFAULT_Q_NET_W_M2,
+        // Bekçi yüzeyi (V307/GÜVERTE-ISIL): sözleşme ve astar istasyonu.
+        _modeRequired: function () { return MODE_REQUIRED; },
+        _activeRequired: activeRequired,
+        _readLinerStation: readLinerStation,
+        _lastStationRead: function () { return lastStationRead; },
     };
 })();

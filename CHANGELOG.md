@@ -11,6 +11,285 @@ listesini taşır.
 
 ---
 
+## 3.0.7 — English
+*Released 2026-11-19.*
+
+HRMA 3.0.7 contains the requests of the Roketsan engineers (tank slosh in the liquid and hybrid tanks, its coupling to the 6-DOF stability of the vehicle, a hand-off table for the vehicle team, tank geometry input), the repair of numbers that disagreed between tabs, an independent validation of the solid motor against published static firings, the design ambient of the liquid engine, a visible window during updates, and offline map packs, descent and mission tracking on the Launch Site. The motor numbers of the solid page (thrust, impulse, Isp, burn time) are the same as in 3.0.6; the 6-DOF panel of every motor page now flies the vehicle derived from the motor. The sea-level liquid and hybrid motor results are unchanged except for the items listed below.
+
+### Tank slosh (Roketsan request)
+
+- **Slosh model per tank.** New Slosh tab in the Analysis Dock (FEED SYSTEM): an equivalent mechanical model of the first slosh mode for each liquid or hybrid tank over the fill range (29 fill rows), a fill–effective axial acceleration frequency map, the fill history from the motor's own propellant consumption, NASA SP-8009 slosh loads at two amplitude levels, and a ring baffle recommendation. The model, its assumptions and its limits (linear amplitude, constant liquid density, no control loop) are stated on the tab.
+- **Hand-off to the vehicle team.** A JSON transfer table and two CSV files (fill history and time series) with the model parameters at each fill.
+- **Tank geometry input.** The inner geometry of a tank can be loaded as a point cloud (CSV, XYZ, PLY), STL, STEP or an (r, z) profile, with unit and nose direction. An axisymmetric tank is solved with the finite-element method and the difference from the motor's cylindrical tank is shown with its reason; a tank that is not axisymmetric is refused by name, with no approximate result. Files are checked for size and format before they are read.
+- **Hybrid tank.** The N2O liquid density follows the tank blowdown solution over the burn.
+- **Solid motor.** The tab states that a solid motor carries no liquid propellant and slosh does not apply.
+- **Exact first-mode root.** The first-mode root is used with its exact value (1.841184) instead of 1.8412; slosh frequencies and masses change in the fifth significant digit (at most 3.4 × 10⁻⁵ relative; example liquid LOX tank 1.39006 Hz). The unsourced "about one radius" baffle spacing was removed; the linear amplitude limit is 0.2 tank radius (Dodge 2000) instead of 0.25.
+
+### Slosh and 6-DOF stability (Roketsan request)
+
+- **Coupled flight.** The liquid and hybrid 6-DOF flight is solved coupled with tank slosh on the motor pages and on the Launch Site. The tank order (oxidiser forward by default) and the station come from the derived vehicle; the example engines are coupled without any input.
+- **Verdict over the whole burn.** The slosh verdict (STABLE, SLOSH-INDUCED INSTABILITY, RIGID BODY UNSTABLE, NO VERDICT) comes from a scan over the burn: the window in which the slosh mode is not damped, the damping needed and the growth exponent, and four characteristic instants. A flight that does not reach apogee no longer hides the verdict.
+- **Linear limit.** When the slosh amplitude passes 0.2 tank radius, the coupled whole-flight numbers (apogee, maximum angle of attack, drift) are not published; the rigid flight is shown as a "slosh-free reference run", which is not a performance estimate of the sloshing vehicle. On the Launch Site, events and live readings after the limit are marked "outside the validity of the linear model".
+- **Baffles.** A ring baffle array that closes the instability window is proposed and checked by a new scan.
+- **Scope.** The TVC and autopilot control loop, GNC and the vehicle structural analysis are outside the scope of HRMA.
+
+### Vehicle derived from the motor
+
+- **Airframe carries the tanks.** When the 6-DOF or Launch Site vehicle is derived from the motor, its diameter and length hold the motor's tanks and the motor; the conflicts "tank wider than the body" and "tank inside the nose" are gone.
+- **Centre of gravity from components.** On a derived airframe the centre of gravity is built from the motor dry mass, the tank structure and the propellant at the tank stations and moves during the burn (3.0.6: a fixed 0.55 / 0.50 fraction of the length). A centre of gravity you enter has priority. The slosh lever arm uses the same centre of gravity.
+- **Fins.** The fins of a derived vehicle are sized by the static-margin rule (target: lowest margin over the flight at least 1.5 calibres, the middle of the 1–2 calibre range of Niskanen 2013 §2.4; if no span up to four body diameters reaches it, the smallest span above 1 calibre, by name). If no span keeps the vehicle stable, the flight is refused by name with the suggestion to move mass forward.
+- **Examples (motor page 6-DOF panel, nothing entered).** Hybrid: see "Published numbers that changed". Liquid: the example vehicle carries a 120 kg payload 0.75 m from the nose and flies stable. Solid: derived airframe and centre of gravity from the components. Numbers in "Published numbers that changed".
+
+### One quantity, one number across tabs
+
+- **No hidden motor in the Analysis Dock.** If the motor is not calculated or the last calculation failed, the performance, structural, thermal, pressure vessel, safety, connection and regenerative cooling analyses do not run: the hidden definition values (chamber pressure 40–50 bar, chamber diameter 0.1 m and the like) were removed, the fields are empty and required, and the missing ones are named.
+- **PRESSURE VESSEL** evaluates the motor's own wall and material (the burst pressure equals the one on SAFETY); the heading says whose wall it is ("evaluated wall — the motor's wall" or "suggested wall").
+- **STRUCTURAL:** the load basis is at the head of the table and on every wall row; the required wall of the motor and of the tab are shown side by side with the reason they differ (design pressure 1.5 × MEOP on the tab; thick-wall Lamé model where it applies); the safety factor colours compare with the design target you entered; the wall the motor sized is labelled "sized by HRMA".
+- **THERMAL:** the cooling type comes from the motor; the ablative liner uses the motor's station input (the same recession rate as the motor) and shows the recession and conduction allowances by name; film, radiation and dump cooling are marked "not modelled in this tab" with the motor's cooling block; no cooling budget is published for a protected wall; for a liquid engine the motor's heat load is on its own line with the reason for the difference.
+- **Thermal Protection panel (THERMAL):** the hidden values (net heat flux 2 MW/m², gas-side coefficient 3000 W/m²K, recovery temperature 3200 K, 10 s, 5 mm, initial wall temperature 300 K) were removed; the fields are seeded from the motor (initial wall temperature: the motor's value, hybrid 293.15 K) or asked for by name; the heat sink mode does not run on a two-layer wall given as one number.
+- **SAFETY:** a request without a chamber temperature is refused by name instead of being assessed at 3000 K; the required fields of the panel are the ones the server checks (propellant mass instead of thrust).
+- **REGENERATIVE COOLING:** a missing chamber pressure, chamber temperature or throat diameter is refused with every missing field named, and a chamber temperature that is not a finite value above 0 K is refused by name (3.0.6: a raw message naming only the first missing field).
+- **Figures:** an API request for the Mach or heat-flux figure without the chamber temperature is refused by name instead of being drawn at a hidden 3000 K (the page always sends the motor's value); the comparison and 3-D performance figures name the design ambient. The Mach and heat-flux figures use the motor's own molecular weight (3.0.6: an assumed 24 g/mol, stated on the figure); the PERFORMANCE panel has a molecular-weight field seeded from the motor.
+- **UNCERTAINTY:** cards and histograms show the unit of every output (regression rate in mm/s, like the rest of the page).
+- **Charts:** the 3-D surface note wraps and is 12 px; the η_c* difference is a separate indicator (no overlap with the number); resizing the window no longer overlaps the thrust chart and its caption; comparison chart titles and the 3-D caption are in Turkish on the Turkish screen.
+- **PERFORMANCE, COMPARE, UNCERTAINTY:** the ambient of each Isp is named (sea level, altitude, pressure, vacuum); designs at different ambients are not ranked and their thrust, Isp and impulse differences are not computed; the heat-flux reference planes (2 and 4 MW/m²) appear only when entered.
+- **Hybrid technical PDF:** the structural safety factor is the one on screen (STRUCTURAL MIN SF card with its governing station); a nozzle set by the manufacturing minimum is no longer counted as a verified station.
+- **Solid Performance Summary:** with a test altitude away from sea level the thrust, impulse and thrust coefficient cards say "at test ambient" and a "Total Impulse at sea level" card is added; a separated sea-level Isp is labelled; **Burn Time** → **Burn Time (web burnout)** (same number, also in the PDF).
+- **Hybrid Altitude Profile:** the tab now enters the calculation (thrust and Isp of the same nozzle along the altitude, with a vacuum row; a separated row shows "—" with the reason); empty start, end or point count fields are refused by name (3.0.6 filled 0 m, 10 000 m, 10 points). **Mass Flux** and **Contraction Ratio** are shown for every burn type (numbers unchanged).
+- **Altitude is geometric everywhere.** An altitude you enter (design, test, profile, launch and site elevation) is a geometric altitude and is converted to geopotential once for the US Standard Atmosphere 1976 table; the same altitude gives the same ambient pressure on every panel. Sea level is unchanged.
+- **OpenRocket .eng and status line** carry the design or test ambient of the motor when it is not sea level.
+
+### Liquid engine
+
+- **Design ambient.** New Design Ambient input: sea level (default), altitude (geometric), ambient pressure, vacuum. The target thrust is the thrust at that ambient (field renamed **Target Engine Thrust (at the design ambient)**); away from sea level the expansion ratio is required. The result carries the design-ambient Isp and thrust, the vacuum values, the sea-level values of the same nozzle when the flow stays attached, and a ground test note when it separates at sea level (separation criterion unchanged: Summerfield, exit pressure below 0.4 × ambient). A fixed nozzle that separates at sea level in a sea-level design is still refused by name; the refusal now also offers the design ambient.
+- **Flight from a vacuum design.** The flight vehicle uses the sea-level thrust of the same nozzle; if the nozzle separates at sea level, no vehicle is built and the reason is shown on the motor page and on the Launch Site.
+- **Altitude table and chart.** A row whose flow separates shows no thrust or Isp (a gap with a note in the chart instead of a 0 s / 0 kN point).
+- **Validation record:** the Vinci record uses the expansion ratio of its fixed composite extension (240 → 174, exit diameter 1.84 → 1.82 m; IAC-17-C4.1).
+- **Injector face plate at start and shutdown.** The plate is checked with the same plate model for two load cases: running (manifold minus chamber pressure) and start/shutdown (manifold pressure against vacuum, a quasi-static upper bound without pressure surge). It is sized for the governing case and the safety factor shown is the lower of the two. In every engine measured the start/shutdown case governs; 3.0.6 plates had a safety factor of 0.38–1.08 at start. Water hammer, dynamic amplification, thermal stress and fatigue are not covered and the panel says so (NASA SP-125 p. 129; NASA SP-8089 pp. 62–63). The check runs when an injector material is selected; CAD and the engine dry mass use the same plate.
+
+### Hybrid motor
+
+- **Separated nozzle at sea level.** A nozzle designed for altitude that separates at sea level no longer publishes a negative sea-level Isp or thrust (example 20 km design: sea-level Isp −16.50 s → not published, with the reason); separated rows of the altitude tables are not published.
+- **Design ambient block.** The response and the dock carry the design ambient of the hybrid; "base thrust at sea level" is the sea-level value of the same nozzle, and the design-ambient thrust has its own name.
+- **Two gas-side coefficients.** The Thermal Protection panel names the effective coefficient used with the published throat flux and shows the Bartz convective coefficient beside it.
+- **Gaseous N2O feed:** the injector hole plan, pressure drop, exit velocity, Reynolds and Weber numbers and the injector validation axis, which were computed with the liquid model, are not published (reason shown); the injector plate mass no longer subtracts hole volume.
+- **Parachute inputs** sent to Calculate are checked like on the trajectory panel (zero, negative or non-numeric values are refused by name).
+- **Trajectory chart:** no error message after Calculate following a Trajectory run.
+- **Default ambient.** A request that does not send the ambient pressure (API callers; the page always sends it) is designed at the ISA sea level, 1.01325 bar, instead of 1.0 bar — on Calculate, Find Optimum, Uncertainty, quick geometry, transient and parametric analysis; the result names the source.
+- **Injector plate.** The plate thickness you enter is checked in both load cases (feed pressure upstream of the orifices against vacuum at start and shutdown); the verdict is the lower safety factor. The pintle face plate is sized for the governing case.
+- **Thrust coefficient of the altitude table.** The rows use the definition of the headline, C_F = F/(P_c·C_D·A_t) on the effective throat (C_D 0.98); 3.0.6 divided by the ideal c* and showed C_F·η_c*, about 11 % lower. A tip next to the table states the definition. The design-ambient row is the headline itself: with an ISA design the 0 m Isp equals the headline Isp to the last digit.
+
+### Solid motor and validation
+
+- **Page numbers unchanged.** The solid page sends its nozzle, kinetic and combustion efficiency fields; the built-in two-phase nozzle loss estimate (NASA SP-8039) is therefore not applied on the page, and every motor number of the example is the same as in 3.0.6 (the 6-DOF panel flies the derived vehicle, see "Vehicle derived from the motor").
+- **Two-phase loss rule.** For an aluminized composite the estimate applies in a calculation without an entered nozzle or kinetic efficiency (−1.2 to −4.2 % on Isp, thrust and total impulse, depending on size; below a 25.4 mm throat it is not calculable and is not applied); an entered efficiency or two-phase loss factor replaces the estimate and the loss is not counted twice. The **Basis of the delivered performance** note under the Performance Summary states the source of each efficiency and why the estimate was or was not applied; for the KN-sugar family a warning says that the two-phase loss is not included.
+- **Safety limit.** A burn that stops at the simulation limit (500 bar or 1000 s) is refused by name instead of being published with zero burn time and zero Isp. In Monte Carlo such samples are counted as failures, stay out of the statistics and are reported on their own line.
+- **Validation against static firings.** Six NASA BATES firings (NASA-CR-158815) are in the database; statistics are separated by propellant family; the comparison uses the record's own throat, expansion ratio and density, and the predicted web burnout time is compared only with a web burnout time (an action-time record is compared under its own name). Two KN-sugar records whose in-motor profile is outside the single-exponent law are kept in an out-of-scope layer with their numbers. The CORRELATION panel shows the family and the out-of-scope layer.
+
+### Launch Site
+
+- **Map packs.** Optional offline map packs (OpenStreetMap vector data, 100 km around 14 launch sites, and a Türkiye region pack): download only after explicit consent, progress and SHA-256 check, usable without a network; roads, buildings, water and place names at close zoom. The packs are not part of the installer and the update does not download them.
+- **Satellite imagery.** Seven sites (Cape Canaveral SLC-40, KSC LC-39A, Vandenberg SLC-4E, Wallops 0A, Baikonur 1/5, Sinop, Konya) carry a cloud-free mosaic made from Copernicus Sentinel-2 Level-2A scenes of 2024–2026: 10 m within 25 km of the pad, 15 m to 50 km, 31 m in the rest of the pack. The attribution "Contains modified Copernicus Sentinel data" is shown on the map. The other seven sites have the vector map only.
+- **Globe.** At close zoom a parent tile no longer covers its children; zoom up to level 15; place names from the installed pack.
+- **Fins.** Root chord, tip chord, sweep and span are inputs (3.0.6: fixed 0.20 / 0.10 / 0.08 m and a prefilled 0.11 m span); empty fields are built with the static-margin rule above; **Use this fin span** uses the same rule.
+- **Flight to the ground.** After apogee the descent is ballistic or under parachute (parachute area, drag coefficient and deployment delay; the same model as the trajectory panel), with a parachute deployment event in the event list, on the globe and in mission tracking; burnout is the end of the flown thrust; the apogee row is "Apogee" with the model limit noted on the descent rows.
+- **Coriolis.** The note "Earth rotation and Coriolis are not modelled" was wrong: Coriolis is included, with a flat-Earth projection.
+- **Sources.** Selecting a saved project loads its vehicle; new source "Project file from this computer (.hrma)", with format and size checks.
+- **Mission tracking.** New view with telemetry, event timeline, playback speed and camera modes.
+- **Vacuum design.** A liquid engine designed for vacuum whose nozzle separates at sea level is refused for flight with the reason, the same text as on the motor page.
+- **Payload.** Payload mass and its station from the nose are inputs, filled from the project, the project file or the session tool, and enter the centre of gravity. The liquid example carries a stated 120 kg payload 0.75 m from the nose, so its vehicle is stable and flies on the Launch Site. A vehicle carried over from the motor page (session tool) is now coupled with slosh like a saved project: the same verdict and numbers as the project source; the hand-off record carries only the blocks the slosh coupling reads (hybrid 3.0 MB → 34 KB).
+
+### Update window
+
+- **macOS:** while an update installs, an "Updating HRMA — please wait" window shows the version, the stages, the amount copied and the elapsed time, closes by itself at the end and on failure states the reason, what to do and where the installer is. System notifications are not sent while the window is open.
+- **Windows:** the console shows numbered stages and the same window shows the stage and the elapsed time (the silent installer reports no ratio).
+- The window is part of 3.0.7: it appears from the first update after 3.0.7.
+
+### Language and readability
+
+- The Turkish term for slosh is "çalkantı" in every panel.
+- **No developer language on screen:** "endpoint" phrasing, API paths and internal field names were removed from tips and messages (80 texts, EN and TR); refusal and model-validity reasons are readable sentences, the internal code stays out of sight.
+- **Turkish screen:** server refusals, warnings and verdict sentences have Turkish counterparts (refusal messages 40 of 40, payload refusals 7 of 7); STRUCTURAL shows no internal names in either language.
+- **Single Turkish terms:** "genişleme oranı" (expansion ratio), "su koçu" (water hammer), "Yarı-1B" (quasi-1D), "etkin eksenel ivme" (g_eff in sentences).
+- **Turkish technical PDF:** untranslated English reduced from 162 sentences (830 occurrences) to 19 passages (34 occurrences); 38 server messages and 46 FEA/CFD notes were rewritten as plain statements.
+- **What changed strip:** compares only the result cards of the page (same field, unit and digits as the card) and shows a change only when the displayed digits change; 3.0.6 listed hundreds of solver-noise rows such as 2.36e-16 → −2.36e-16 "▼ 200 %". STRUCTURAL uses one name per station.
+
+### Published numbers that changed
+
+- **Hybrid example, motor page 6-DOF panel (nothing entered):** body Ø0.150 × 2.00 m → Ø0.218 × 1.94 m (derived); centre of gravity full / empty 1.100 / 1.000 m (length fraction) → 1.110 / 1.221 m (components); static margin full / empty 2.10 / 2.77 → 2.01 / 1.50 calibres; fin span 0.11 → 0.277 m (rule); apogee 8 287.5 → 5 153.7 m; maximum angle of attack 2.35 → 3.30°; slosh verdict — → SLOSH-INDUCED INSTABILITY, window 3.54–10.32 s, linear limit not exceeded. [measured]
+- **Liquid example, motor page 6-DOF panel:** The example vehicle now carries a 120 kg payload 0.75 m from the nose: body Ø0.242 × 2.00 → Ø0.480 × 3.37 m, fin span 0.11 → 0.97 m, static margin −0.10 / 0.32 → 2.55 / 2.34 calibres (full / empty; in 3.0.6 the angle of attack reached 90°); slosh verdict SLOSH-INDUCED INSTABILITY between 6.79 and 30.00 s, and because the slosh amplitude passes the linear limit at 27.9 s the apogee is marked outside the linear model (rigid flight 44 161 m; 3.0.6 showed 14 677.7 m). [measured]
+- **Solid example, motor page 6-DOF panel:** Body Ø0.100 × 2.00 → Ø0.091 × 1.06 m, fin span 0.11 → 0.187 m, static margin 5.20 / 6.20 → 1.63 / 1.63 calibres (centre of gravity from the components instead of a length fraction), apogee 2 830.1 → 3 207.6 m. [measured]
+- **Launch Site, example vehicles with the fixed 3.0.6 fins:** liquid static margin −1.86 calibres (unstable) and hybrid 0.45 calibres (unstable) → fins sized by the rule: hybrid stable; liquid stable with the 120 kg payload (margin 2.55 / 2.34 calibres, fin span 0.97 m), and its slosh-coupled apogee is marked outside the linear model.
+- **Solid example (KNDX 75 mm), motor page:** unchanged (average thrust 1 298.5 N, total impulse 2 956.9 N·s, burn time 2.28 s; every number of the response is the same as in 3.0.6). [measured]
+- **Liquid example (LOX/RP-1 25 kN, sea level):** engine numbers unchanged (Isp 254.8 / 299.3 s sea level / vacuum, total flow 10.006 kg/s). Tank slosh first mode LOX 1.390061 → 1.390055 Hz, RP-1 1.461558 → 1.461552 Hz (exact root). Altitude table, 100 km row: ambient pressure 2.344 × 10⁻⁷ → 3.111 × 10⁻⁷ bar (thrust unchanged to 8 digits). [measured]
+- **Liquid example with expansion ratio 61:** sea level refused by name in both versions (largest attached expansion ratio 13.36); vacuum design: refused → designed, engine Isp 322.4 s, total flow 7.906 kg/s, throat 59.1 mm, exit 461.7 mm. [measured]
+- **Hybrid example (N2O/HTPB 3 kN):** total impulse 26 838.6 N·s, burn time 10.41 s, average Isp 205.7 s and vacuum Isp 234.92 s unchanged. The example is now designed at the ISA sea level (ambient 1.013 → 1.01325 bar), so the sea-level row of the altitude table is the design point: thrust 2 999.9 → 3 000.0 N; 20 km row: thrust 3 340.8 → 3 340.7 N, Isp 233.56 → 233.54 s. [measured]
+- **Hybrid altitude table, thrust coefficient (example designed at the ISA sea level):** 0 m 1.2859 → 1.4449 (equals the headline), 20 km 1.4320 → 1.6089; thrust and Isp unchanged. [TEK-TANIM]
+- **Hybrid API request without an ambient (300 N, 20 bar):** designed at 1.01325 instead of 1.0 bar: Isp 195.8068 → 195.4748 s, expansion ratio 3.8890 → 3.8517; Find Optimum maximum Isp 229.9183 → 229.5180 s. [TEK-TANIM]
+- **Heat-flux figure (the motor's molecular weight instead of an assumed 24 g/mol):** throat flux hybrid 24.62 → 23.78 MW/m², solid 12.98 → 9.81, liquid 27.26 → 29.25; peak flux hybrid 33.31 → 32.17, solid 29.31 → 22.13, liquid 36.66 → 39.34 (molecular weight 25.75 / 42.15 / 20.80 g/mol, the same pair the THERMAL panel uses). [GRAFİK-BİRİM]
+- **Injector plate, liquid example with stainless steel selected:** plate 9.07 → 20.0 mm (governing: start/shutdown; safety factor 3.475, running 12.162); plate mass 0.989 → 2.180 kg; engine dry mass 64.037 → 65.229 kg; thrust-to-weight 39.81 → 39.08; OpenRocket .eng inert mass 64.037 → 65.229 kg. Without a selected injector material nothing changes. Hybrid example (3 mm plate): safety factor 0.487 → 0.198 (the 3 mm plate was already inadequate); pintle face plate 6.260 → 9.822 mm. [PLAKA-MARŞ]
+- **Launch Site, vehicle from the motor-page session (liquid example):** rigid flight → coupled with slosh, verdict SLOSH-INDUCED INSTABILITY and apogee marked outside the linear model — the same as the project source. [FS-OTURUM]
+- **Geometric altitude (this change alone):** ambient pressure at 1 / 20 / 50 km +0.002 / +0.99 / +5.05 %; solid test altitude 20 km on an APCP 6-segment BATES motor: average thrust −0.040 %; OpenRocket 1-D profile of a 62 km vehicle: apogee 62 232.96 → 61 998.49 m. [İRTİFA-TEK]
+- **Hybrid designed at 20 km / 50 km (this change alone):** sea-level Isp −16.50 s / −1 583.07 s → not published (flow separated). [HİBRİT-ORTAM]
+- **PRESSURE VESSEL (engineering review cases):** burst pressure on the motor's wall instead of a generic suggested wall: hybrid 54.5 → 253.4 bar (= SAFETY), solid 168.0 → 191.2 bar, liquid 27.0 bar (Al 6061) → 319.5 bar (SS304, chamber material); a solid case with a 1.65 mm wall PASS → MARGINAL (burst margin 1.1998 < 1.2). [SEKME-GÜVERTE]
+- **THERMAL (engineering review cases):** required cooling area and class efficiency on a protected wall → not published with the reason; liquid cooling type NATURAL (assumed) → ablative liner (from the motor); ablative liner recession rate 0.2080 → 0.1375 mm/s (= motor). [SEKME-GÜVERTE, GÜVERTE-ISIL]
+- **Thermal Protection panel, hybrid example, radiation mode:** equilibrium wall temperature 2 980.78 → 2 982.18 K (coefficient consistent with the published throat flux). [GÜVERTE-ISIL]
+- **COMPARE / UNCERTAINTY, liquid vacuum design attached at sea level (this change alone):** Isp 254.71 s (sea level, unlabelled) → 299.25 s (vacuum, labelled). [GÜVERTE-ORTAM]
+- **Solid Monte Carlo at a design pressure near the limit (450 bar, 200 samples):** 16 samples that stopped at the 500 bar limit were counted as zero results (P5 Isp 0.0 s) → counted as failures and left out of the statistics. [KATI-DOĞRULAMA]
+- **Solid validation table:** 3.0.6 mixed all solid records in one row (Isp +18.9 %, burn time −20.3 % from one KN-sugar record) → by family: aluminized composite Isp +5.0 % (4 firings) and +7.3 % (2 firings), web burnout time −4.8 % and −3.6 %; the remaining KN-sugar record Isp +11.2 % (one firing, low confidence); two KN-sugar records in the out-of-scope layer (Isp +20.9 %); database 212 → 220 records. [KATI-DOĞRULAMA, docs/VALIDATION_STATUS.md]
+- **Vinci validation record:** vacuum Isp deviation +0.62 % → −0.19 %. [ana model, 17 Nov]
+- **Hybrid gaseous N2O:** injector hole plan, pressure drop and exit velocity → not published; injector plate mass 0.017927 → 0.018002 kg. [S2-KALINTI]
+- **Liquid performance dashboard, 800 N engine:** vacuum thrust 1.0 kN → 0.954 kN (three significant digits). [S2-KALINTI]
+- **Hybrid technical PDF (engineering review case):** "lowest SF (verified stations)" 5.12 → not printed (no verified station); structural minimum SF 4.00 with its governing station, as on screen. [SEKME-MOTOR]
+
+### Known limitations
+
+- The linear slosh model does not apply beyond 0.2 tank radius; the coupled flight is then not published (see above). The liquid density is constant over the burn (hybrid: from the blowdown solution). The TVC and autopilot loop is not modelled.
+- The ablative liner model (Level-1 Q*) covers recession rates up to 0.35 mm/s; above it the liner is not sized and the motor, THERMAL and the Thermal Protection panel give the same named refusal (for example the example liquid engine with an ablative chamber at 50 bar).
+- Flow separation is judged on the one-dimensional exit pressure (Summerfield); the wall pressure of a contoured nozzle is not solved, so a contoured sea-level nozzle can be refused although it stays attached.
+- Seven Launch Site packs have satellite imagery; the other seven sites and the Türkiye region pack have the vector map only.
+- The solid form defaults (nozzle 0.95, kinetic 0.97, combustion 0.95) are unchanged and give an Isp about 3 % below the mean of the NASA BATES measurements.
+
+## 3.0.7 — Türkçe
+
+*Yayın tarihi: 2026-11-19.*
+
+HRMA 3.0.7 şunları içerir: Roketsan mühendislerinin istekleri (sıvı ve hibrit tanklarda çalkantı, bunun aracın 6-DOF kararlılığına bağlanması, araç ekibine aktarım tablosu, tank geometrisi girdisi), sekmeler arasında çelişen sayıların onarımı, katı motorun yayımlanmış statik ateşlemelerle bağımsız doğrulaması, sıvı motorun tasarım ortamı, güncelleme sırasında görünür bir pencere ve Fırlatma Sahası'nda çevrimdışı harita paketleri, iniş ve görev izleme. Katı sayfasının motor sayıları (itki, impuls, Isp, yanma süresi) 3.0.6 ile aynıdır; her motor sayfasının 6-DOF paneli artık motordan türetilen aracı uçurur. Deniz seviyesindeki sıvı ve hibrit motor sonuçları aşağıda listelenenler dışında değişmedi.
+
+### Tank çalkantısı (Roketsan isteği)
+
+- **Tank başına çalkantı modeli.** Analiz Güvertesi'nde (BESLEME SİSTEMİ) yeni Çalkantı sekmesi: her sıvı ya da hibrit tank için doluluk aralığında birinci çalkantı kipinin eşdeğer mekanik modeli (29 doluluk satırı), doluluk–etkin eksenel ivme frekans haritası, motorun kendi itici tüketiminden doluluk geçmişi, iki genlik düzeyinde NASA SP-8009 çalkantı yükleri ve halka perde önerisi. Model, varsayımları ve sınırları (doğrusal genlik, sabit sıvı yoğunluğu, kontrol döngüsü yok) sekmede yazılıdır.
+- **Araç ekibine aktarım.** Her dolulukta model parametrelerini taşıyan bir JSON aktarım tablosu ve iki CSV dosyası (doluluk geçmişi ve zaman serisi).
+- **Tank geometrisi girdisi.** Tankın iç geometrisi nokta bulutu (CSV, XYZ, PLY), STL, STEP ya da (r, z) profili olarak, birimi ve burun yönüyle yüklenebilir. Eksenel simetrik tank sonlu elemanlar yöntemiyle çözülür ve motorun silindirik tankından farkı nedeniyle gösterilir; eksenel simetrik olmayan tank adıyla reddedilir, yaklaşık sonuç verilmez. Dosyalar okunmadan önce boyut ve biçim yönünden denetlenir.
+- **Hibrit tank.** N2O sıvı yoğunluğu yanma boyunca tank boşalma çözümünü izler.
+- **Katı motor.** Sekme, katı motorda sıvı itici bulunmadığını ve çalkantının uygulanmadığını yazar.
+- **Birinci kipin kesin kökü.** Birinci kip kökü 1,8412 yerine kesin değeriyle (1,841184) kullanılır; çalkantı frekansları ve kütleleri beşinci anlamlı basamakta değişir (bağıl en çok 3,4 × 10⁻⁵; örnek sıvı LOX tankı 1,39006 Hz). Kaynaksız "yaklaşık bir yarıçap" perde aralığı kaldırıldı; doğrusal genlik sınırı 0,25 yerine tank yarıçapının 0,2 katıdır (Dodge 2000).
+
+### Çalkantı ve 6-DOF kararlılığı (Roketsan isteği)
+
+- **Bağlaşık uçuş.** Sıvı ve hibrit 6-DOF uçuşu, motor sayfalarında ve Fırlatma Sahası'nda tank çalkantısıyla bağlaşık çözülür. Tank sırası (varsayılan: oksitleyici önde) ve istasyonu türetilen araçtan gelir; örnek motorlar kullanıcı bir şey girmeden bağlanır.
+- **Yanmanın tamamı için hüküm.** Çalkantı hükmü (KARARLI, ÇALKANTI KAYNAKLI KARARSIZLIK, RİJİT GÖVDE KARARSIZ, HÜKÜM YOK) yanma boyunca yapılan taramadan gelir: çalkantı kipinin sönümlenmediği pencere, gereken sönüm ve büyüme üssü, ayrıca dört karakteristik an. Apojeye varmayan uçuş artık hükmü gizlemez.
+- **Doğrusal sınır.** Çalkantı genliği tank yarıçapının 0,2 katını aşınca bağlaşık tüm-uçuş sayıları (apoje, en büyük hücum açısı, sürüklenme) yayımlanmaz; rijit uçuş "çalkantısız referans koşu" olarak gösterilir, bu çalkantılı aracın performans tahmini değildir. Fırlatma Sahası'nda sınırdan sonraki olaylar ve canlı okumalar "doğrusal model geçerliliği dışında" diye işaretlenir.
+- **Perdeler.** Kararsızlık penceresini kapatan halka perde dizisi önerilir ve yeni bir taramayla denetlenir.
+- **Kapsam.** TVC ve otopilot kontrol döngüsü, GNC ve araç yapısal analizi HRMA'nın kapsamı dışındadır.
+
+### Motordan türetilen araç
+
+- **Gövde tankları taşır.** 6-DOF ya da Fırlatma Sahası aracı motordan türetilince çapı ve boyu motorun tanklarını ve motoru taşır; "tank gövdeden geniş" ve "tank burnun içinde" çelişkileri kalktı.
+- **Bileşenlerden ağırlık merkezi.** Türetilen gövdede ağırlık merkezi motorun kuru kütlesinden, tank yapısından ve tank istasyonlarındaki iticiden kurulur ve yanma boyunca yer değiştirir (3.0.6: boyun sabit 0,55 / 0,50 kesri). Girdiğiniz ağırlık merkezi önceliklidir. Çalkantının moment kolu aynı ağırlık merkezini kullanır.
+- **Kanatçıklar.** Türetilen aracın kanatçıkları statik marj kuralıyla boyutlanır (hedef: uçuş boyunca en düşük marj en az 1,5 kalibre, Niskanen 2013 §2.4'teki 1–2 kalibre aralığının ortası; dört gövde çapına kadar hiçbir açıklık buna varmazsa 1 kalibrenin üstünde kalan en küçük açıklık, adıyla). Hiçbir açıklık aracı kararlı tutmuyorsa uçuş adıyla reddedilir ve kütleyi öne almak önerilir.
+- **Örnekler (motor sayfası 6-DOF paneli, hiçbir şey girilmeden).** Hibrit: "Değişen yayımlanmış sayılar" bölümüne bakın. Sıvı: örnek araç burundan 0,75 m'de 120 kg faydalı yük taşır ve kararlı uçar. Katı: türetilmiş gövde ve bileşenlerden ağırlık merkezi. Sayılar "Değişen yayımlanmış sayılar" bölümünde.
+
+### Sekmeler arasında tek büyüklük, tek sayı
+
+- **Analiz Güvertesi'nde gizli motor yok.** Motor hesaplanmamışsa ya da son hesap başarısızsa performans, yapısal, termal, basınçlı kap, güvenlik, bağlantı ve rejeneratif soğutma analizleri koşmaz: gizli tanım değerleri (40–50 bar oda basıncı, 0,1 m oda çapı ve benzerleri) kaldırıldı, alanlar boş ve zorunludur, eksik olanlar adıyla yazılır.
+- **BASINÇLI KAP** motorun kendi cidarını ve malzemesini değerlendirir (patlama basıncı GÜVENLİK'tekiyle aynıdır); başlık cidarın kime ait olduğunu söyler ("değerlendirilen cidar — motorun cidarı" ya da "önerilen cidar").
+- **YAPISAL:** yük tabanı tablonun başında ve her cidar satırındadır; motorun ve sekmenin gereken cidarı, farklarının nedeniyle yan yana gösterilir (sekmede tasarım basıncı 1,5 × MEOP; geçerli olduğu yerde kalın cidar Lamé modeli); emniyet katsayısı renkleri girdiğiniz tasarım hedefine göredir; motorun boyutlandırdığı cidar "HRMA boyutlandırdı" diye etiketlenir.
+- **TERMAL:** soğutma tipi motordan gelir; ablatif astar motorun istasyon girdisini kullanır (motorla aynı gerileme hızı) ve gerileme ile iletim paylarını adıyla gösterir; film, ışınım ve boşaltma (dump) soğutması motorun soğutma bloğuyla birlikte "bu sekmede modellenmiyor" diye işaretlenir; korunan cidar için soğutma bütçesi yayımlanmaz; sıvı motorda motorun ısı yükü, farkın nedeniyle ayrı satırdadır.
+- **Termal Koruma paneli (TERMAL):** gizli değerler (2 MW/m² net ısı akısı, 3000 W/m²K gaz tarafı katsayısı, 3200 K geri kazanım sıcaklığı, 10 s, 5 mm, 300 K başlangıç cidar sıcaklığı) kaldırıldı; alanlar motordan tohumlanır (başlangıç cidar sıcaklığı: motorun değeri, hibritte 293,15 K) ya da adıyla istenir; ısı kuyusu kipi tek sayıyla verilmiş iki katmanlı cidarda koşmaz.
+- **GÜVENLİK:** oda sıcaklığı olmayan istek 3000 K ile değerlendirilmek yerine adıyla reddedilir; panelin zorunlu alanları sunucunun denetledikleridir (itki yerine itici kütlesi).
+- **REJENERATİF SOĞUTMA:** eksik oda basıncı, oda sıcaklığı ya da boğaz çapı bütün eksik alanlar adıyla yazılarak reddedilir; 0 K'nin üstünde sonlu bir değer olmayan oda sıcaklığı adıyla reddedilir (3.0.6: yalnız ilk eksik alanı anan ham ileti).
+- **Grafikler:** oda sıcaklığı olmadan Mach ya da ısı akısı grafiği isteyen API isteği gizli 3000 K ile çizilmek yerine adıyla reddedilir (sayfa her zaman motorun değerini gönderir); karşılaştırma ve 3B performans grafikleri tasarım ortamını yazar. Mach ve ısı akısı grafikleri motorun kendi molekül ağırlığını kullanır (3.0.6: grafikte beyanlı 24 g/mol varsayımı); PERFORMANS panelinde motordan tohumlanan bir molekül ağırlığı alanı vardır.
+- **BELİRSİZLİK:** kartlar ve histogramlar her çıktının birimini yazar (gerileme hızı, sayfanın geri kalanı gibi mm/s).
+- **Grafikler:** 3B yüzey notu satırlara sarılır ve 12 px'tir; η_c* farkı ayrı bir göstergedir (sayıyla çakışmaz); pencere yeniden boyutlanınca itki grafiği altyazısıyla çakışmaz; karşılaştırma grafiği başlıkları ve 3B künye Türkçe ekranda Türkçedir.
+- **PERFORMANS, KARŞILAŞTIRMA, BELİRSİZLİK:** her Isp'nin ortamı adıyla yazılır (deniz seviyesi, irtifa, basınç, vakum); farklı ortamdaki tasarımlar sıralanmaz, itki, Isp ve impuls farkları hesaplanmaz; ısı akısı referans düzlemleri (2 ve 4 MW/m²) yalnız girildiğinde çizilir.
+- **Hibrit teknik PDF:** yapısal emniyet katsayısı ekrandakidir (belirleyen istasyonuyla YAPISAL ASGARİ EK kartı); imalat asgarisinin belirlediği nozul artık doğrulanmış istasyon sayılmaz.
+- **Katı Performans Özeti:** test irtifası deniz seviyesinde değilse itki, impuls ve itki katsayısı kartları "test ortamında" der ve "Deniz seviyesinde toplam impuls" kartı eklenir; ayrılmış deniz seviyesi Isp'si etiketlenir; **Yanma Süresi** → **Yanma Süresi (et tükenişi)** (sayı aynı, PDF'te de).
+- **Hibrit İrtifa Profili:** sekme artık hesaba girer (aynı nozulun irtifa boyunca itkisi ve Isp'si, vakum satırıyla; ayrılan satır nedeniyle "—" gösterir); boş başlangıç, bitiş ya da nokta sayısı adıyla reddedilir (3.0.6 0 m, 10 000 m, 10 nokta dolduruyordu). **Kütle Akısı** ve **Daralma Oranı** her yanma tipinde gösterilir (sayılar aynı).
+- **İrtifa her yerde geometrik.** Girdiğiniz irtifa (tasarım, test, profil, fırlatma ve saha rakımı) geometrik irtifadır ve US Standard Atmosphere 1976 tablosu için bir kez geopotansiyele çevrilir; aynı irtifa her panelde aynı ortam basıncını verir. Deniz seviyesi değişmedi.
+- **OpenRocket .eng ve durum satırı**, deniz seviyesinde değilse motorun tasarım ya da test ortamını taşır.
+
+### Sıvı motor
+
+- **Tasarım ortamı.** Yeni Tasarım Ortamı girdisi: deniz seviyesi (varsayılan), irtifa (geometrik), ortam basıncı, vakum. Hedef itki o ortamdaki itkidir (alanın yeni adı **Hedef Motor İtkisi (tasarım ortamında)**); deniz seviyesi dışında genişleme oranı zorunludur. Sonuç tasarım ortamındaki Isp'yi ve itkiyi, vakum değerlerini, akış yapışık kalıyorsa aynı nozulun deniz seviyesi değerlerini ve deniz seviyesinde ayrılıyorsa yer testi notunu taşır (ayrılma ölçütü değişmedi: Summerfield, çıkış basıncı ortamın 0,4 katının altında). Deniz seviyesi tasarımında deniz seviyesinde ayrılan sabit nozul yine adıyla reddedilir; ret artık tasarım ortamı yolunu da önerir.
+- **Vakum tasarımından uçuş.** Uçuş aracı aynı nozulun deniz seviyesi itkisini kullanır; nozul deniz seviyesinde ayrılıyorsa araç kurulmaz ve neden motor sayfasında ve Fırlatma Sahası'nda yazılır.
+- **İrtifa tablosu ve grafiği.** Akışı ayrılan satır itki ya da Isp göstermez (grafikte 0 s / 0 kN noktası yerine notlu boşluk).
+- **Doğrulama kaydı:** Vinci kaydı sabit kompozit uzatmasının genişleme oranını kullanır (240 → 174, çıkış çapı 1,84 → 1,82 m; IAC-17-C4.1).
+- **Marş ve kesmede enjektör plakası.** Plaka aynı plaka modeliyle iki yük durumunda denetlenir: çalışma (manifold eksi oda basıncı) ve marş/kesme (manifold basıncı vakuma karşı; basınç darbesi hariç yarı-statik üst sınır). Plaka yöneten duruma göre boyutlanır, gösterilen emniyet katsayısı ikisinin küçüğüdür. Ölçülen her motorda marş/kesme durumu yönetir; 3.0.6 plakaları marşta 0,38–1,08 emniyet katsayısı veriyordu. Su koçu, dinamik büyütme, ısıl gerilme ve yorulma kapsam dışıdır ve panel bunu yazar (NASA SP-125 s. 129; NASA SP-8089 s. 62–63). Denetim enjektör malzemesi seçilince koşar; CAD ve motorun kuru kütlesi aynı plakayı kullanır.
+
+### Hibrit motor
+
+- **Deniz seviyesinde ayrılan nozul.** İrtifa için tasarlanıp deniz seviyesinde ayrılan nozul artık eksi deniz seviyesi Isp'si ya da itkisi yayımlamaz (örnek 20 km tasarımı: deniz seviyesi Isp'si −16,50 s → nedeniyle yayımlanmaz); irtifa tablolarının ayrılan satırları yayımlanmaz.
+- **Tasarım ortamı bloğu.** Yanıt ve güverte hibritin tasarım ortamını taşır; "deniz seviyesi temel itkisi" aynı nozulun deniz seviyesi değeridir, tasarım ortamındaki itkinin kendi adı vardır.
+- **İki gaz tarafı katsayısı.** Termal Koruma paneli yayımlanan boğaz akısıyla kullanılan etkin katsayıyı adıyla yazar, Bartz taşınım katsayısını yanında gösterir.
+- **Gaz N2O besleme:** sıvı modelle hesaplanan enjektör delik planı, basınç düşümü, çıkış hızı, Reynolds ve Weber sayıları ile enjektör doğrulama ekseni yayımlanmaz (neden yazılır); enjektör plakası kütlesinden delik hacmi düşülmez.
+- **Hesapla'ya giden paraşüt girdileri** yörünge panelindeki gibi denetlenir (sıfır, eksi ya da sayı olmayan değer adıyla reddedilir).
+- **Yörünge grafiği:** Yörünge koşusundan sonraki Hesapla'da hata iletisi çıkmaz.
+- **Varsayılan ortam.** Ortam basıncını göndermeyen istek (API çağıranları; sayfa her zaman gönderir) 1,0 bar yerine ISA deniz seviyesinde, 1,01325 bar'da tasarlanır — Hesapla, Optimumu Bul, Belirsizlik, hızlı geometri, geçici rejim ve parametrik analizde; sonuç kaynağı adıyla yazar.
+- **Enjektör plakası.** Girdiğiniz plaka kalınlığı iki yük durumunda denetlenir (marş ve kesmede orifislerin önündeki besleme basıncı vakuma karşı); hüküm küçük emniyet katsayısıdır. Pintle yüz plakası yöneten duruma göre boyutlanır.
+- **İrtifa tablosunun itki katsayısı.** Satırlar başlığın tanımını kullanır: etkin boğaza göre C_F = F/(P_c·C_D·A_t) (C_D 0,98); 3.0.6 ideal c*'a bölüyor ve C_F·η_c*'ı, yaklaşık %11 düşük, gösteriyordu. Tablonun yanındaki ipucu tanımı yazar. Tasarım ortamının satırı başlığın kendisidir: ISA tasarımında 0 m Isp'si başlık Isp'siyle son basamağına kadar aynıdır.
+
+### Katı motor ve doğrulama
+
+- **Sayfa sayıları değişmedi.** Katı sayfası nozul, kinetik ve yanma verimi alanlarını gönderir; bu yüzden yerleşik iki fazlı nozul kaybı tahmini (NASA SP-8039) sayfada uygulanmaz ve örneğin bütün motor sayıları 3.0.6 ile aynıdır (6-DOF paneli türetilen aracı uçurur, bkz. "Motordan türetilen araç").
+- **İki fazlı kayıp kuralı.** Alüminyumlu kompozitte tahmin, nozul ya da kinetik verim girilmeyen hesapta uygulanır (büyüklüğe göre Isp, itki ve toplam impulsta −%1,2 ile −%4,2; 25,4 mm'den küçük boğazda hesaplanamaz ve uygulanmaz); girilen verim ya da iki fazlı kayıp katsayısı tahminin yerine geçer, kayıp iki kez sayılmaz. Performans Özeti'nin altındaki **Teslim performansının dayanağı** notu her verimin kaynağını ve tahminin neden uygulandığını ya da uygulanmadığını yazar; KN-şeker ailesinde iki fazlı kaybın dahil olmadığını söyleyen bir uyarı çıkar.
+- **Emniyet sınırı.** Benzetim sınırında (500 bar ya da 1000 s) duran yanma, sıfır yanma süresi ve sıfır Isp ile yayımlanmak yerine adıyla reddedilir. Monte Carlo'da bu örneklemler başarısız sayılır, istatistiğe girmez ve ayrı satırda bildirilir.
+- **Statik ateşlemelerle doğrulama.** Altı NASA BATES ateşlemesi (NASA-CR-158815) veritabanındadır; istatistik itici ailesine göre ayrılır; kıyas kaydın kendi boğazını, genişleme oranını ve yoğunluğunu kullanır, hesaplanan et tükenişi süresi yalnız et tükenişi süresiyle kıyaslanır (etki süresi taşıyan kayıt kendi adıyla kıyaslanır). Motor içi profili tek üslü yasanın dışında kalan iki KN-şeker kaydı sayılarıyla birlikte kapsam dışı katmanda tutulur. KORELASYON paneli aileyi ve kapsam dışı katmanı gösterir.
+
+### Fırlatma Sahası
+
+- **Harita paketleri.** İsteğe bağlı çevrimdışı harita paketleri (OpenStreetMap vektör verisi, 14 fırlatma sahasının 100 km çevresi ve bir Türkiye bölge paketi): yalnız açık onayla indirilir, ilerleme ve SHA-256 denetimi vardır, ağ olmadan kullanılır; yakın zoomda yollar, binalar, su ve yer adları. Paketler kurulum paketine girmez ve güncelleme onları indirmez.
+- **Uydu görüntüsü.** Yedi saha (Cape Canaveral SLC-40, KSC LC-39A, Vandenberg SLC-4E, Wallops 0A, Baykonur 1/5, Sinop, Konya) Copernicus Sentinel-2 Level-2A sahnelerinden (2024–2026) üretilen bulutsuz bir mozaik taşır: rampanın 25 km çevresinde 10 m, 50 km'ye kadar 15 m, paketin geri kalanında 31 m. Haritada "Contains modified Copernicus Sentinel data" atfı gösterilir. Öbür yedi sahada yalnız vektör harita vardır.
+- **Küre.** Yakın zoomda ebeveyn karo artık çocuklarının üstüne çıkmaz; zoom 15. düzeye kadar; yer adları kurulu paketten.
+- **Kanatçıklar.** Kök veteri, uç veteri, ok ve açıklık girdidir (3.0.6: sabit 0,20 / 0,10 / 0,08 m ve önden dolu 0,11 m açıklık); boş alanlar yukarıdaki statik marj kuralıyla kurulur; **Bu kanatçık açıklığını kullan** aynı kuralı kullanır.
+- **Yere kadar uçuş.** Apojeden sonra iniş balistik ya da paraşütlüdür (paraşüt alanı, sürükleme katsayısı ve açılma gecikmesi; yörünge paneliyle aynı model); paraşüt açılışı olay listesinde, kürede ve görev izlemede bir olaydır; yanma sonu uçurulan itkinin sonudur; apoje satırı "Apoje"dir, model sınırı iniş satırlarında yazılır.
+- **Coriolis.** "Dünya dönüşü ve Coriolis modellenmez" notu yanlıştı: Coriolis dahildir, düz-Dünya izdüşümüyle.
+- **Kaynaklar.** Kayıtlı proje seçilince aracı yüklenir; yeni kaynak "Bu bilgisayardaki proje dosyası (.hrma)", biçim ve boyut denetimiyle.
+- **Görev izleme.** Telemetri, olay zaman çizelgesi, oynatma hızı ve kamera kipleriyle yeni görünüm.
+- **Vakum tasarımı.** Vakum için tasarlanmış ve nozulu deniz seviyesinde ayrılan sıvı motor, motor sayfasındakiyle aynı metinle, nedeniyle birlikte uçuştan reddedilir.
+- **Faydalı yük.** Faydalı yük kütlesi ve burundan istasyonu girdidir; projeden, proje dosyasından ya da oturum aracından dolar ve ağırlık merkezine girer. Sıvı örnek, burundan 0,75 m'de beyanlı 120 kg faydalı yük taşır; böylece aracı kararlıdır ve Fırlatma Sahası'nda uçar. Motor sayfasından taşınan araç (oturum aracı) artık kayıtlı proje gibi çalkantıyla bağlaşık uçar: proje kaynağıyla aynı hüküm ve sayılar; aktarım kaydı yalnız çalkantı bağlamasının okuduğu blokları taşır (hibritte 3,0 MB → 34 KB).
+
+### Güncelleme penceresi
+
+- **macOS:** güncelleme kurulurken "HRMA güncelleniyor — lütfen bekleyin" penceresi sürümü, aşamaları, kopyalanan miktarı ve geçen süreyi gösterir, sonunda kendiliğinden kapanır; hata olursa nedenini, ne yapılacağını ve kurucunun yerini yazar. Pencere açıkken sistem bildirimi gönderilmez.
+- **Windows:** konsol numaralı aşamaları gösterir; aynı pencere aşamayı ve geçen süreyi gösterir (sessiz kurucu oran bildirmez).
+- Pencere 3.0.7'nin parçasıdır: 3.0.7'den sonraki ilk güncellemeden itibaren görünür.
+
+### Dil ve okunabilirlik
+
+- Çalkantının Türkçe terimi her panelde "çalkantı"dır.
+- **Ekranda geliştirici dili yok:** "uç (endpoint)" anlatımı, API yolları ve iç alan adları ipuçlarından ve iletilerden çıkarıldı (80 metin, EN ve TR); ret ve model geçerlilik gerekçeleri okunur cümledir, iç kod görünmez.
+- **Türkçe ekran:** sunucunun ret, uyarı ve hüküm cümlelerinin Türkçe karşılıkları vardır (ret iletileri 40'ta 40, faydalı yük retleri 7'de 7); YAPISAL iki dilde de iç ad göstermez.
+- **Tek Türkçe terimler:** "genişleme oranı", "su koçu", "Yarı-1B", cümlede "etkin eksenel ivme" (g_eff).
+- **Türkçe teknik PDF:** çevrilmemiş İngilizce 162 cümleden (830 geçiş) 19 parçaya (34 geçiş) indi; 38 sunucu iletisi ve 46 FEA/CFD notu yalın cümleyle yeniden yazıldı.
+- **Ne değişti şeridi:** yalnız sayfanın sonuç kartlarını karşılaştırır (kartla aynı alan, birim ve basamak) ve değişikliği yalnız gösterilen basamak değişince gösterir; 3.0.6 "2,36e-16 → −2,36e-16 ▼ %200" gibi yüzlerce çözücü gürültüsü satırı listeliyordu. YAPISAL her istasyon için tek ad kullanır.
+
+### Değişen yayımlanmış sayılar
+
+- **Hibrit örnek, motor sayfası 6-DOF paneli (hiçbir şey girilmeden):** gövde Ø0,150 × 2,00 m → Ø0,218 × 1,94 m (türetilmiş); ağırlık merkezi dolu / boş 1,100 / 1,000 m (boy kesri) → 1,110 / 1,221 m (bileşenler); statik marj dolu / boş 2,10 / 2,77 → 2,01 / 1,50 kalibre; kanatçık açıklığı 0,11 → 0,277 m (kural); apoje 8 287,5 → 5 153,7 m; en büyük hücum açısı 2,35 → 3,30°; çalkantı hükmü — → ÇALKANTI KAYNAKLI KARARSIZLIK, pencere 3,54–10,32 s, doğrusal sınır aşılmadı. [ölçüm]
+- **Sıvı örnek, motor sayfası 6-DOF paneli:** Örnek araç artık burundan 0,75 m'de 120 kg faydalı yük taşır: gövde Ø0,242 × 2,00 → Ø0,480 × 3,37 m, kanatçık açıklığı 0,11 → 0,97 m, statik marj −0,10 / 0,32 → 2,55 / 2,34 kalibre (dolu / boş; 3.0.6'da hücum açısı 90°'ye çıkıyordu); çalkantı hükmü 6,79 ile 30,00 s arasında ÇALKANTI KAYNAKLI KARARSIZLIK; çalkantı genliği 27,9 s'de doğrusal sınırı geçtiği için apoje doğrusal model dışında işaretlenir (rijit uçuş 44 161 m; 3.0.6 14 677,7 m gösteriyordu). [ölçüm]
+- **Katı örnek, motor sayfası 6-DOF paneli:** Gövde Ø0,100 × 2,00 → Ø0,091 × 1,06 m, kanatçık açıklığı 0,11 → 0,187 m, statik marj 5,20 / 6,20 → 1,63 / 1,63 kalibre (ağırlık merkezi boy kesri yerine bileşenlerden), apoje 2 830,1 → 3 207,6 m. [ölçüm]
+- **Fırlatma Sahası, 3.0.6'nın sabit kanatçıklı örnek araçları:** sıvıda statik marj −1,86 kalibre (kararsız), hibritte 0,45 kalibre (kararsız) → kanatçıklar kuralla boyutlanır: hibrit kararlı; sıvı 120 kg faydalı yükle kararlı (marj 2,55 / 2,34 kalibre, kanatçık açıklığı 0,97 m), çalkantıyla bağlaşık apojesi doğrusal model dışında işaretlenir.
+- **Katı örnek (KNDX 75 mm), motor sayfası:** değişmedi (ortalama itki 1 298,5 N, toplam impuls 2 956,9 N·s, yanma süresi 2,28 s; yanıtın her sayısı 3.0.6 ile aynı). [ölçüm]
+- **Sıvı örnek (LOX/RP-1 25 kN, deniz seviyesi):** motor sayıları değişmedi (deniz seviyesi / vakum Isp 254,8 / 299,3 s, toplam debi 10,006 kg/s). Tank çalkantısı birinci kip LOX 1,390061 → 1,390055 Hz, RP-1 1,461558 → 1,461552 Hz (kesin kök). İrtifa tablosu, 100 km satırı: ortam basıncı 2,344 × 10⁻⁷ → 3,111 × 10⁻⁷ bar (itki 8 basamağa kadar aynı). [ölçüm]
+- **Genişleme oranı 61'e çıkarılmış sıvı örnek:** deniz seviyesi iki sürümde de adıyla reddedilir (yapışık kalan en büyük genişleme oranı 13,36); vakum tasarımı: ret → tasarlandı, motor Isp'si 322,4 s, toplam debi 7,906 kg/s, boğaz 59,1 mm, çıkış 461,7 mm. [ölçüm]
+- **Hibrit örnek (N2O/HTPB 3 kN):** toplam impuls 26 838,6 N·s, yanma süresi 10,41 s, ortalama Isp 205,7 s ve vakum Isp'si 234,92 s değişmedi. Örnek artık ISA deniz seviyesinde tasarlanır (ortam 1,013 → 1,01325 bar); irtifa tablosunun deniz seviyesi satırı tasarım noktasıdır: itki 2 999,9 → 3 000,0 N; 20 km satırı: itki 3 340,8 → 3 340,7 N, Isp 233,56 → 233,54 s. [ölçüm]
+- **Hibrit irtifa tablosu, itki katsayısı (örnek ISA deniz seviyesinde tasarlanır):** 0 m 1,2859 → 1,4449 (başlığa eşit), 20 km 1,4320 → 1,6089; itki ve Isp değişmedi. [TEK-TANIM]
+- **Ortamı göndermeyen hibrit API isteği (300 N, 20 bar):** 1,0 yerine 1,01325 bar'da tasarlanır: Isp 195,8068 → 195,4748 s, genişleme oranı 3,8890 → 3,8517; Optimumu Bul en yüksek Isp 229,9183 → 229,5180 s. [TEK-TANIM]
+- **Isı akısı grafiği (beyanlı 24 g/mol yerine motorun molekül ağırlığı):** boğaz akısı hibrit 24,62 → 23,78 MW/m², katı 12,98 → 9,81, sıvı 27,26 → 29,25; tepe akı hibrit 33,31 → 32,17, katı 29,31 → 22,13, sıvı 36,66 → 39,34 (molekül ağırlığı 25,75 / 42,15 / 20,80 g/mol; TERMAL panelinin kullandığı çiftin aynısı). [GRAFİK-BİRİM]
+- **Enjektör plakası, paslanmaz çelik seçili sıvı örnek:** plaka 9,07 → 20,0 mm (yöneten: marş/kesme; emniyet katsayısı 3,475, çalışmada 12,162); plaka kütlesi 0,989 → 2,180 kg; motor kuru kütlesi 64,037 → 65,229 kg; itki/ağırlık 39,81 → 39,08; OpenRocket .eng atıl kütlesi 64,037 → 65,229 kg. Enjektör malzemesi seçilmemişse hiçbir şey değişmez. Hibrit örnek (3 mm plaka): emniyet katsayısı 0,487 → 0,198 (3 mm plaka zaten yetersizdi); pintle yüz plakası 6,260 → 9,822 mm. [PLAKA-MARŞ]
+- **Fırlatma Sahası, motor sayfası oturumundan gelen araç (sıvı örnek):** rijit uçuş → çalkantıyla bağlaşık, hüküm ÇALKANTI KAYNAKLI KARARSIZLIK, apoje doğrusal model dışında işaretli — proje kaynağıyla aynı. [FS-OTURUM]
+- **Geometrik irtifa (yalnız bu değişiklik):** 1 / 20 / 50 km'de ortam basıncı +%0,002 / +%0,99 / +%5,05; 6 parçalı APCP BATES motorunda 20 km test irtifası: ortalama itki −%0,040; 62 km'lik bir aracın OpenRocket 1-B profili: apoje 62 232,96 → 61 998,49 m. [İRTİFA-TEK]
+- **20 km / 50 km'de tasarlanan hibrit (yalnız bu değişiklik):** deniz seviyesi Isp'si −16,50 s / −1 583,07 s → yayımlanmaz (akış ayrık). [HİBRİT-ORTAM]
+- **BASINÇLI KAP (mühendislik incelemesi vakaları):** genel önerilen cidar yerine motorun cidarında patlama basıncı: hibrit 54,5 → 253,4 bar (= GÜVENLİK), katı 168,0 → 191,2 bar, sıvı 27,0 bar (Al 6061) → 319,5 bar (SS304, oda malzemesi); 1,65 mm cidarlı bir katı kasa PASS → MARGINAL (patlama payı 1,1998 < 1,2). [SEKME-GÜVERTE]
+- **TERMAL (mühendislik incelemesi vakaları):** korunan cidarda gereken soğutma alanı ve sınıf verimi → nedeniyle yayımlanmaz; sıvı soğutma tipi NATURAL (varsayım) → ablatif astar (motordan); ablatif astar gerileme hızı 0,2080 → 0,1375 mm/s (= motor). [SEKME-GÜVERTE, GÜVERTE-ISIL]
+- **Termal Koruma paneli, hibrit örnek, ışınım kipi:** denge cidar sıcaklığı 2 980,78 → 2 982,18 K (yayımlanan boğaz akısıyla tutarlı katsayı). [GÜVERTE-ISIL]
+- **KARŞILAŞTIRMA / BELİRSİZLİK, deniz seviyesinde yapışık sıvı vakum tasarımı (yalnız bu değişiklik):** Isp 254,71 s (deniz seviyesi, etiketsiz) → 299,25 s (vakum, etiketli). [GÜVERTE-ORTAM]
+- **Sınıra yakın tasarım basıncında katı Monte Carlo (450 bar, 200 örneklem):** 500 bar sınırında duran 16 örneklem sıfır sonuç olarak sayılıyordu (P5 Isp 0,0 s) → başarısız sayılır ve istatistiğe girmez. [KATI-DOĞRULAMA]
+- **Katı doğrulama tablosu:** 3.0.6 bütün katı kayıtları tek satırda karıştırıyordu (tek bir KN-şeker kaydından Isp +%18,9, yanma süresi −%20,3) → aileye göre: alüminyumlu kompozit Isp +%5,0 (4 ateşleme) ve +%7,3 (2 ateşleme), et tükenişi süresi −%4,8 ve −%3,6; kalan KN-şeker kaydı Isp +%11,2 (tek ateşleme, düşük güven); kapsam dışı katmanda iki KN-şeker kaydı (Isp +%20,9); veritabanı 212 → 220 kayıt. [KATI-DOĞRULAMA, docs/VALIDATION_STATUS.md]
+- **Vinci doğrulama kaydı:** vakum Isp sapması +%0,62 → −%0,19. [ana model, 17 Kas]
+- **Hibrit gaz N2O:** enjektör delik planı, basınç düşümü ve çıkış hızı → yayımlanmaz; enjektör plakası kütlesi 0,017927 → 0,018002 kg. [S2-KALINTI]
+- **Sıvı performans panosu, 800 N motor:** vakum itkisi 1,0 kN → 0,954 kN (üç anlamlı basamak). [S2-KALINTI]
+- **Hibrit teknik PDF (mühendislik incelemesi vakası):** "en düşük EK (doğrulanmış istasyonlar)" 5,12 → basılmaz (doğrulanmış istasyon yok); ekrandaki gibi belirleyen istasyonuyla yapısal asgari EK 4,00. [SEKME-MOTOR]
+
+### Bilinen sınırlamalar
+
+- Doğrusal çalkantı modeli tank yarıçapının 0,2 katının ötesinde geçerli değildir; o durumda bağlaşık uçuş yayımlanmaz (yukarıda). Sıvı yoğunluğu yanma boyunca sabittir (hibritte boşalma çözümünden). TVC ve otopilot döngüsü modellenmez.
+- Ablatif astar modeli (Level-1 Q*) 0,35 mm/s'ye kadar gerileme hızlarını kapsar; üstünde astar boyutlanmaz ve motor, TERMAL ve Termal Koruma paneli aynı adlı reddi verir (örneğin 50 bar'da ablatif odalı örnek sıvı motor).
+- Akış ayrılması bir boyutlu çıkış basıncıyla değerlendirilir (Summerfield); konturlu nozulun cidar basıncı çözülmez, bu yüzden yapışık kalan konturlu bir deniz seviyesi nozulu reddedilebilir.
+- Fırlatma Sahası'nda yedi paket uydu görüntüsü taşır; öbür yedi saha ve Türkiye bölge paketi yalnız vektör haritadır.
+- Katı form varsayılanları (nozul 0,95, kinetik 0,97, yanma 0,95) değişmedi ve NASA BATES ölçümlerinin ortalamasından yaklaşık %3 düşük Isp verir.
+
 ## 3.0.6 — English
 
 *Released 2026-11-10.*

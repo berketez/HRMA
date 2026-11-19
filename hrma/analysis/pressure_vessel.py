@@ -107,6 +107,14 @@ ALLOWED_WELD_EFFICIENCIES = (0.70, 0.85, 1.00)
 
 HEAD_TYPES = ('ellipsoidal_2_1', 'torispherical', 'hemispherical')
 
+#: Kapak tipinin kullanıcı metnindeki okunur adı (yalnız uyarı cümlesi;
+#: API alanı ``head_type`` kanonik anahtarı taşımaya devam eder).
+HEAD_TYPE_NAMES = {
+    'ellipsoidal_2_1': '2:1 ellipsoidal',
+    'torispherical': 'torispherical',
+    'hemispherical': 'hemispherical',
+}
+
 # AIAA S-080A-2018 tasarım faktörleri (metalik basınçlı kap, analiz+test):
 AIAA_PROOF_FACTOR = 1.5     # proof = 1.5 × MEOP
 AIAA_BURST_FACTOR = 2.0     # burst = 2.0 × MEOP
@@ -767,8 +775,9 @@ class PressureVesselAnalyzer:
                     base + " The materials database resolves this entry "
                     f"({_kanonik!r}) but records NO qualified "
                     "low-temperature ductility verdict for it "
-                    "(cryogenic_ductility is not 'cryo_ductile' or "
-                    "'dbtt_sensitive'), so this module makes NO claim "
+                    "(its low-temperature ductility class is neither "
+                    "'ductile when cold' nor 'DBTT-sensitive'), so this "
+                    "module makes NO claim "
                     "either way and grants NO ASME BPVC VIII-1 UHA-51 "
                     "exemption: qualify the actual grade against its DBTT "
                     "before cryogenic service.")
@@ -1049,8 +1058,8 @@ class PressureVesselAnalyzer:
             assumptions.append(
                 "Head thickness was not supplied, so the head is checked "
                 "against the SAME wall thickness as the shell "
-                f"({t * 1e3:.3f} mm). Pass head_thickness_mm if the head is "
-                "formed from a different plate.")
+                f"({t * 1e3:.3f} mm). If the head is formed from a "
+                "different plate, supply its own thickness.")
         else:
             head_used_m = float(head_thickness_mm) / 1e3
         head_margin = (head_used_m / head_required_m
@@ -1058,7 +1067,7 @@ class PressureVesselAnalyzer:
         head_ok = math.isfinite(head_required_m) and head_margin >= 1.0 - 1e-9
         if not head_ok:
             warnings.append(
-                f"HEAD UNDER-THICKNESS: the {head_type} head needs "
+                f"HEAD UNDER-THICKNESS: the {HEAD_TYPE_NAMES[head_type]} head needs "
                 f"{head_required_m * 1e3:.3f} mm (UG-32) but only "
                 f"{head_used_m * 1e3:.3f} mm is available. The shell check "
                 "passes on its own, but a vessel is not stronger than its "
