@@ -235,8 +235,13 @@ class TestP7B215OrtamBasinciCakismasi:
         amb = govde['nozzle_design']['performance']['ambient_pressure']
         assert amb == pytest.approx(1.01325, rel=1e-9)
 
+    # V307/İRTİFA-TEK: test irtifası GEOMETRİK okunur (ana model kararı,
+    # 16 Kas). 3000 m: eski 0.7010854467002587 bar (isa_pressure(3000),
+    # dönüşümsüz) -> yeni 0.7012116223643001 bar (isa_pressure_geometric;
+    # +%0,018). 10 km çifti: kapı artık 26,4999 kPa okur, gönderilen 26,4363
+    # kPa %0,24 içinde (bant %1) — tutarlı çift olarak geçer, değer aynı.
     @pytest.mark.parametrize('ek,beklenen', (
-        ({'test_altitude': 3000}, 0.7010854467002587),
+        ({'test_altitude': 3000}, 0.7012116223643001),
         ({'atm_pressure': 70.0}, 0.70),
         ({'test_altitude': 10000, 'atm_pressure': 26.436267593807633},
          0.26436267593807633),

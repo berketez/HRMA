@@ -420,6 +420,10 @@ def test_p12bb4_14_launch_site_anahtar_yuzeyi_kapali():
                   r'data-i18n(?:-title|-placeholder)?\s*=\s*"(site\.[\w.]+)"'):
         kullanilan |= set(re.findall(desen, html))
     kullanilan.discard('site.src.')          # dinamik önek (i18n_launch_site.js:13)
+    # V307/ONARIM2-UÇUŞ-ARAÇ (M7-FS-2): kısayol adı paket adının dinamik
+    # önekinden ('site.mapPackName.' + kimlik); her kısayol kimliğinin EN + TR
+    # karşılığını test_v307_onarim2_ucus_arac.py::test_fs2_* bekler.
+    kullanilan.discard('site.mapPackName.')
 
     tanimli_en, tanimli_tr = set(), set()
     for p in sorted(JS.glob('i18n*.js')):

@@ -147,6 +147,10 @@ RED_VAKALARI = [
                'invalid_fields': [{'field': 'wall_thickness',
                                    'reason': 'non_positive'}]}}
     for kod in ('incomplete_flow_input', 'invalid_flow_input',
+                # V307/KÜÇÜKLER-2 (kalem 1): rejeneratif soğutma ucu.
+                'invalid_regen_input',
+                # V307/ORTAM-TEK (kalem 2): aynı ucun eksik alan reddi.
+                'incomplete_regen_input',
                 'incomplete_thermal_input', 'invalid_thermal_input',
                 'incomplete_structural_input', 'invalid_structural_input',
                 'incomplete_safety_input', 'invalid_safety_input')

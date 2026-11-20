@@ -103,6 +103,7 @@ def test_fizik_disi_impuls_adli_422(client, deger, neden):
     govde = {'motor_type': 'solid', 'chamber_pressure': 40.0,
              'chamber_diameter': 0.106, 'wall_thickness': 0.0022,
              'propellant_mass': 5.0, 'thrust': 1500.0, 'burn_time': 3.0,
+             'chamber_temperature': 3000.0,   # V307/GÜVERTE-ISIL kalem 4
              'motor_total_impulse': {'total_impulse_ns': deger,
                                      'inputs': {'thrust': 1500.0,
                                                 'burn_time': 3.0}}}
@@ -117,6 +118,7 @@ def test_nesne_olmayan_baglam_tip_reddi(client):
     govde = {'motor_type': 'solid', 'chamber_pressure': 40.0,
              'chamber_diameter': 0.106, 'wall_thickness': 0.0022,
              'propellant_mass': 5.0, 'thrust': 1500.0, 'burn_time': 3.0,
+             'chamber_temperature': 3000.0,   # V307/GÜVERTE-ISIL kalem 4
              'motor_total_impulse': [1, 2, 3]}
     r = _sessiz(client.post, '/analyze_safety', json=govde)
     assert r.status_code in (400, 422), r.get_data(as_text=True)[:300]

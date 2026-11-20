@@ -432,7 +432,8 @@ class TestP11B427RaporYuku:
     def test_rapor_metni_ekrana_acildi(self):
         m = oku('hrma/static/js/panels/correlation_panel.js')
         assert 'function raporMetniHtml(' in m
-        assert 'raporMetniHtml(data.markdown)' in m
+        # V307/ONARIM2-İTKİ: ikinci argüman ham atlama özeti (yalnız açılırda)
+        assert re.search(r'raporMetniHtml\(data\.markdown[,)]', m)
 
     def test_metin_kacirilir_ve_degistirilmez(self):
         """Sunucu metni AYNEN gösterilir; özetlenmez, biçimlenmez."""

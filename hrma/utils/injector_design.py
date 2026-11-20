@@ -908,6 +908,20 @@ class InjectorDesign:
         }
 
     def calculate(self):
+        # V307/S2-KALINTI (NK3-H-6): GAZ FAZINDA DELİK PLANI ÜRETİLMEZ.
+        # ÖLÇÜLDÜ (docs/scofield/raw/OH/V307/s2-kalinti/h6_once.json,
+        # Carmicino t01: gaz N2O, tank 16 bar, Pc 8,52 bar): motorun devre
+        # çözücüsü gaz beslemeyi 'not_analyzed' bırakıyor ve uyarısı "delik
+        # planı … verilmiyor" diyor (GAS_PHASE_FEED_NOT_MODELLED, M-HIBRIT-10);
+        # bu blok ise AYNI yanıtta sıvı yoğunluğu + SPI ile 1 delik × 2,00 mm,
+        # ΔP 1,70 bar (otomatik %20·Pc, tankın 7,48 bar'ı değil) yayımlıyor ve
+        # o plana bağlı dört uyarı basıyordu (çıkış hızı bandı, "Treat these
+        # hole sizes as liquid-phase values", L/D, hedef hız / "şu an 1,70
+        # bar"). Tek hüküm: gaz beslemede bu blok da boyutlandırmaz; plaka
+        # kalınlığı (kullanıcının plakası, delik planından bağımsız) künyesiyle
+        # kalır, sayı uydurulmaz.
+        if self.ox_phase != 'liquid':
+            return self._faz_modellenmedi_blogu()
         if self.injector_type == 'showerhead':
             return self._calculate_showerhead()
         elif self.injector_type == 'pintle':
@@ -920,6 +934,39 @@ class InjectorDesign:
             return self._calculate_coaxial()
         else:
             raise ValueError(f"Unknown injector type: {self.injector_type}")
+
+    def _faz_modellenmedi_blogu(self):
+        """Gaz (sıvı olmayan) faz: delik planı YOK, nedeni adıyla.
+
+        Neden metni motorun TEK tanımıdır (``hybrid_rocket_engine.
+        GAS_PHASE_FEED_NOT_MODELLED``; kod ``gas_phase_feed_not_modelled``) —
+        ikinci bir cümle yazılmaz. Plaka kalınlığı delik planından bağımsız
+        bir kullanıcı girdisidir: kazanılmışsa sayısı ve künyesi aynen
+        yayımlanır (CAD/kütle plakayı deliksiz tartar), değilse sayı yok.
+        Bu blok UYARI ÜRETMEZ: kullanıcıya giden tek cümle motorun
+        ``warn.hybrid.gas_phase_feed_not_modelled`` uyarısıdır."""
+        from hrma.engines.hybrid_rocket_engine import (
+            GAS_PHASE_FEED_NOT_MODELLED)
+        blok = {
+            'type': self.injector_type,
+            'status': 'not_analyzed',
+            'reason_code': 'gas_phase_feed_not_modelled',
+            'reason': GAS_PHASE_FEED_NOT_MODELLED,
+            'oxidizer_phase': self.ox_phase,
+            'oxidizer_type': self.oxidizer_type,
+            'warnings': [],
+        }
+        params = None
+        if self.injector_type == 'showerhead':
+            params = self.showerhead_params
+        elif self.injector_type == 'impingement':
+            params = self.impingement_params
+        if params and 't_plate' in params:
+            kazanildi = bool(params.get('t_plate_earned'))
+            blok['plate_thickness'] = _yayin_plaka_mm(params, kazanildi)
+            blok['plate_thickness_earned'] = kazanildi
+            blok['plate_thickness_basis'] = params.get('t_plate_basis')
+        return blok
 
     # ------------------------------------------------------------------
     # Ortak çıktı sözleşmesi — TÜM tipler bu anahtarları döndürür
@@ -2183,6 +2230,9 @@ class InjectorDesign:
         # (engines/injector_design.py::compressible_orifice_flow, izentropik,
         # boğulma ayrımlı) ama bu yola bağlı değil. Bağlanana kadar durum
         # açıkça bildirilir.
+        # V307/S2-KALINTI (NK3-H-6): ``calculate`` sıvı olmayan fazda artık
+        # boyutlandırmıyor (``_faz_modellenmedi_blogu``); bu dal yalnız
+        # ``_check_warnings``i doğrudan çağıran için savunma olarak kalır.
         if self.ox_phase != 'liquid':
             warn_list.append(
                 f"Oxidiser phase '{self.ox_phase}' is NOT modelled here: the "
@@ -2295,8 +2345,17 @@ class InjectorPlateInputError(ValueError):
     """
 
 
-def _plate_required_sf(value):
+def _plate_required_sf(value, motor_target=None):
     """Hedef emniyet katsayısı sözleşmesi: verilmediyse varsayılan, verildiyse > 0.
+
+    V307/ONARIM-İTKİ-B (M7-ITKI-9): ``motor_target`` motorun KENDİ yapısal
+    boyutlandırma hedefidir (kamara/kapak/lüle/cıvata aynı hedefle
+    boyutlanır). Kullanıcı plaka için ayrı bir hedef vermediyse plaka O
+    hedefle denetlenir (kaynak ``motor_design_target``); modülün 2,0
+    varsayılanı yalnız motorun hedefi de yayımlanmamışsa kullanılır.
+    ÖLÇÜLDÜ (hibrit örnek, plaka SS316 3 mm): motorun bütün istasyonları
+    4,0 hedefle boyutlanıyordu, plaka 2,0 varsayılanıyla denetleniyordu
+    (``required_safety_factor_source: default``).
 
     ÖH Z5S / P10-A (P10B1-25) — ÖLÇÜLDÜ (28 Ağustos 2026): bu değer
     istemciden geliyor (``app.py`` ``data.get('safety_factor')``) ve HİÇ
@@ -2315,6 +2374,13 @@ def _plate_required_sf(value):
     düzeltilmez: alan ADIYLA reddedilir. Dönüş ``(sf, kaynak)``.
     """
     if value is None or (isinstance(value, str) and not value.strip()):
+        if motor_target is not None:
+            mt = _plate_num(motor_target)
+            if mt is None or mt <= 0:
+                raise InjectorPlateInputError(
+                    f"'safety_factor': the motor design safety-factor target "
+                    f"{motor_target!r} is not a positive finite number")
+            return mt, 'motor_design_target'
         return INJECTOR_PLATE_DEFAULT_SF, 'default'
     if isinstance(value, bool):
         raise InjectorPlateInputError(
@@ -2352,7 +2418,7 @@ def _plate_num(value):
 def injector_plate_structural(delta_P_bar, plate_diameter_m, material_props,
                               material_name=None, plate_thickness_m=None,
                               n_holes=0, hole_diameter_m=0.0,
-                              required_sf=None):
+                              required_sf=None, motor_target_sf=None):
     """Enjektör plakasının eğilme gerilmesi, emniyet katsayısı ve kütlesi.
 
     Dönen sözlük ya {'status': 'not_analyzed', 'reason': ...} biçimindedir ya
@@ -2365,7 +2431,7 @@ def injector_plate_structural(delta_P_bar, plate_diameter_m, material_props,
     """
     # İSTEMCİ GİRDİSİ ÖNCE DENETLENİR (P10B1-25): geometri/malzeme eksik
     # olsa bile geçersiz bir SF sessizce geçmemeli.
-    hedef_sf, sf_kaynagi = _plate_required_sf(required_sf)
+    hedef_sf, sf_kaynagi = _plate_required_sf(required_sf, motor_target_sf)
 
     q_bar = _plate_num(delta_P_bar)
     d_plate = _plate_num(plate_diameter_m)

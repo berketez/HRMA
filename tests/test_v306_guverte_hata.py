@@ -339,12 +339,26 @@ def test_koruma_capraz_denetimi_tam_degerle_kazanilir(tur):
         motor = _sivi_kati_yanit('liquid', {})
     motor = T._json_guvenli(motor)
     if tur == 'hybrid':
-        # Ön koşul (K2-P3 ölçümü): 6 basamağa yuvarlanmış çiftle panelin
-        # kendi çapraz denetimi hükmü kazanılmamış sayıyordu.
-        assert 'this verdict is not earned' in _koruma_akisi(
-            tur, motor, yuvarla=True)
+        # Ön koşul (K2-P3 ölçümü): 6 basamağa yuvarlanmış çift panelin
+        # çapraz denetiminde motorun çiftiyle UYUŞMAZ. V307/GÜVERTE-ISIL
+        # (kalem 3): uyuşmazlık cümlesi değişti — eski "this verdict is not
+        # earned" (uyuşmayan çift güvertenin kendi varsayılanı olabiliyordu),
+        # yeni "differs from the pair read from" (varsayılan kalktı; uyuşmayan
+        # çift formdan gelir). Ölçülen şey aynı: yuvarlanmış çift motorun
+        # çifti sayılmaz.
+        # Ön koşul sayıya bağlıdır: panel motorun astar istasyonu katsayısını
+        # okuyor (V307; 11 878,909…) ve 6 basamağa yuvarlanmışı panelin
+        # 1e-6 bağıl toleransının İÇİNDE kalabiliyor (eski Bartz katsayısı
+        # 11 798,3179… dışında kalıyordu). Beklenti toleransa göre kurulur.
+        sug = _koruma_node(tur, motor)['suggested']
+        ayrisir = any(
+            abs(float('%.6g' % sug[k]) - sug[k]) > 1e-6 * max(1.0, abs(sug[k]))
+            for k in ('h_gas_W_m2K', 'T_recovery_K'))
+        eski = _koruma_akisi(tur, motor, yuvarla=True)
+        assert ('differs from the pair read from' in eski) is ayrisir
+        assert ('both read from' in eski) is (not ayrisir)
     yeni = _koruma_akisi(tur, motor, yuvarla=False)
-    assert 'this verdict is not earned' not in yeni
+    assert 'differs from the pair read from' not in yeni
     assert 'both read from' in yeni
 
 

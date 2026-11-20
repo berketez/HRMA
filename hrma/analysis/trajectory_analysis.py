@@ -43,6 +43,7 @@ from typing import Dict, List, Tuple, Optional
 # ISA_LAYERS: U.S. Standard Atmosphere 1976 katman tablosu.
 from hrma.constants import (
     G_0,
+    ISA_GEOPOTENTIAL_EARTH_RADIUS_M,
     ISA_LAYERS,
     ISA_TABLE_BOTTOM_M,
     ISA_TABLE_TOP_M,
@@ -449,7 +450,8 @@ class TrajectoryAnalyzer:
         self.g0 = G_0  # Standard gravity (m/s²) -- hrma.constants.G_0 ile tutarlı
         self.R_earth = 6371000  # Earth radius (m)
         # Geopotential height conversion için referans yarıçap (US Std Atm 1976)
-        self.R_geopotential = 6356766.0  # m
+        # V307/SIVI-ORTAM: tek tanım hrma.constants (aynı değer, 6356766.0).
+        self.R_geopotential = ISA_GEOPOTENTIAL_EARTH_RADIUS_M  # m
 
         # --- Fırlatma sahası katmanı (v1, 2026-07-22) -------------------
         # g_surface: SAHADAKİ yerel yerçekimi (enlem + rakım). Yalnız ağırlık

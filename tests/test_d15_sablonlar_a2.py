@@ -424,8 +424,12 @@ def test_b3_03_irtifa_basinc_ceviricisi_gercekten_ussa_1976(advanced_src):
     (0,000483 bar ⟷ USSA 0,000759 bar). Bu test şablonun çeviricisini node
     ile koşturup deponun kendi `hrma.constants.isa_pressure` uygulamasıyla
     karşılaştırır — iki taraf ayrışırsa kırmızı olur (TEK KAYNAK).
+
+    V307/İRTİFA-TEK: form irtifası GEOMETRİK okunur (ana model kararı,
+    16 Kas): referans isa_pressure_geometric (eski: isa_pressure, dönüşümsüz;
+    20 km'de %0,99, 50 km'de %5,05 düşük basınç veriyordu).
     """
-    from hrma.constants import isa_pressure
+    from hrma.constants import isa_pressure, isa_pressure_geometric
 
     m = re.search(r'var ISA_LAYERS_JS = \[.*?var ISA_TABLE_TOP_M_JS = [0-9.]+;',
                   advanced_src, re.S)
@@ -451,7 +455,7 @@ console.log(JSON.stringify({
     en_kotu = 0.0
     en_kotu_h = None
     for h, p in r['noktalar']:
-        ref = isa_pressure(h) / 1e5          # Pa -> bar
+        ref = isa_pressure_geometric(h) / 1e5          # Pa -> bar
         bagil = abs(p / ref - 1.0)
         if bagil > en_kotu:
             en_kotu, en_kotu_h = bagil, h
@@ -461,7 +465,7 @@ console.log(JSON.stringify({
 
     # Kampanyanın ölçtüğü nokta ayrıca sayıyla kilitlenir.
     p50 = dict(r['noktalar'])[50000]
-    assert abs(p50 - isa_pressure(50000) / 1e5) < 1e-15
+    assert abs(p50 - isa_pressure_geometric(50000) / 1e5) < 1e-15
     assert p50 > 7.0e-4, (
         'eski basitleştirilmiş stratosfer geri gelmiş (50 km 4,83e-4 bar '
         'veriyordu, doğrusu 7,59e-4 bar)')
@@ -486,8 +490,12 @@ def test_b3_03_katman_tablosu_deponun_tablosuyla_ayni(advanced_src):
         assert tuple(float(x) for x in js) == tuple(float(x) for x in py), (
             js, py)
 
+    # V307/İRTİFA-TEK: geopotansiyel dönüşüm yarıçapı r0 da aynı tek kaynağa
+    # çaprazlanır (form irtifası H = h·r0/(r0 + h) ile çevrilir).
+    from hrma.constants import ISA_GEOPOTENTIAL_EARTH_RADIUS_M
     for ad, beklenen in (('ISA_G0_JS', G_0), ('ISA_M_AIR_JS', M_AIR),
                          ('ISA_R_STAR_JS', R_STAR_ICAO),
+                         ('ISA_R0_JS', ISA_GEOPOTENTIAL_EARTH_RADIUS_M),
                          ('ISA_TABLE_TOP_M_JS', ISA_TABLE_TOP_M)):
         mm = re.search(r'var %s = ([0-9.eE+-]+);' % ad, advanced_src)
         assert mm, '%s bulunamadı' % ad

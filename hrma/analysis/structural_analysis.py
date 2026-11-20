@@ -231,14 +231,43 @@ MODEL_VALIDITY_MASS_BASIS = (
     'validity limit of the structural model '
     '(chamber_analysis.model_validity_limit_exceeded).')
 #: Geçerlilik dışı değerlendirmede hüküm gerekçesi
-#: (``minimum_safety_factor_verdict_basis``; sabit metin).
+#: (``minimum_safety_factor_verdict_basis``; sabit metin). V307 DİL-SON: ekrana
+#: basılan cümle alan yolu ('see chamber_analysis.model_validity_limit_exceeded')
+#: yerine ölçütün kendisini söyler (structural_model_validity: erime noktası
+#: ya da düşürme verisinin sonu); bayrak alanı yanıtta aynen durur.
 MODEL_VALIDITY_VERDICT_BASIS = (
     'No acceptance and no numeric design verdict is issued: the chamber was '
-    'evaluated outside the validity limit of the structural model (see '
-    'chamber_analysis.model_validity_limit_exceeded). The safety factors in '
+    'evaluated outside the validity limit of the structural model (wall '
+    'temperature at or above the melting point of the material, or above its '
+    'strength-derating data). The safety factors in '
     'this response are diagnostic numbers. A remaining MARGINAL or UNSAFE '
     'status is a warning from the CURRENT model and is never suppressed, but '
     'it is not a statement that a real motor of this design is impossible.')
+
+#: Hüküm gerekçesindeki (``minimum_safety_factor_verdict_basis``) istasyon
+#: anahtarlarının kullanıcıya görünen İngilizce adları (V307 DİL-SON). Ekran
+#: kartıyla (app.js ``sfIstasyonAdi``, sözlük ``app.sfst.*``) ve PDF
+#: künyesiyle (``pdf_generator._SF_SCREEN_STATION_NAMES``) AYNI İngilizce:
+#: aynı İngilizceye iki Türkçe yok (eşitliği test_v307_dil_son bekler).
+#: Haritada olmayan anahtar ADIYLA kalır; yerine başka ad konmaz.
+STRUCTURAL_STATION_NAMES_EN = {
+    'nozzle': 'nozzle',
+    'end_cap': 'end cap',
+    'chamber_hoop': 'chamber hoop stress',
+    'chamber_von_mises': 'chamber von Mises stress',
+    'buckling_axial': 'axial buckling',
+}
+#: Boş istasyon listesinin gerekçedeki karşılığı (istemci deseni 'yok' basar).
+STRUCTURAL_STATION_LIST_EMPTY_EN = 'none'
+
+
+def structural_station_list_en(stations) -> str:
+    """İstasyon anahtarı listesini gerekçe cümlesinin okunur İngilizcesine çevirir.
+
+    Sıra korunur (çağıran sıralı verir); tanınmayan anahtar adıyla kalır.
+    """
+    adlar = [STRUCTURAL_STATION_NAMES_EN.get(ad, ad) for ad in stations]
+    return ', '.join(adlar) or STRUCTURAL_STATION_LIST_EMPTY_EN
 
 
 def structural_model_validity(evaluated_deratings: Dict) -> Dict:
@@ -2761,10 +2790,14 @@ class StructuralAnalyzer:
                  'safety factor below is a MEASUREMENT, not a read-back')
                 if design_mode == 'size' else
                 'verified against user-supplied wall thickness'),
-            # Boyutlandırmanın kullandığı gerilme modeli — değerlendirmede
-            # kullanılan ``pressure_hoop_model`` ile AYNI olmak zorundadır.
-            'sizing_stress_model': (sizing_stress_model
-                                    if design_mode == 'size' else None),
+            # Boyutlandırmanın kullandığı gerilme modeli. Boyutlandırma
+            # kipinde değerlendirmenin ``pressure_hoop_model``ıyla AYNI olmak
+            # zorundadır. V307/KÜÇÜKLER (kalem 3): doğrulama kipinde de
+            # yayımlanır — orada ÖNERİLEN cidarın (minimum/recommended)
+            # modelidir (``sizing_load`` gibi); değerlendirilen kullanıcı
+            # cidarının modeli ``pressure_hoop_model``dadır, ikisi farklı
+            # olabilir (ince kullanıcı cidarı ⟷ Lamé'yle boyutlanan öneri).
+            'sizing_stress_model': sizing_stress_model,
             'sizing_feasible': bool(sizing_feasible),
             'sizing_infeasible_reason': sizing_infeasible_reason,
             # V3 yapi-sf: boyutlandırmanın hangi YÜKÜ hedefe oturttuğu
@@ -4358,9 +4391,14 @@ class StructuralAnalyzer:
         # Hükmün gerekçesi — DÖRT dal, hepsi hangi SAYIdan konuşulduğunu
         # adıyla söyler (kimse "bu bir doğrulamadır" derken hedefi geri
         # okumaz).
-        _kapsam = ', '.join(verdict_scope) or 'none'
-        _dis = ', '.join(stations_not_verified) or 'none'
-        _eko = ', '.join(stations_reading_back_target) or 'none'
+        # V307 DİL-SON: cümle kullanıcıya basılır (güverte YAPISAL paneli ve
+        # app.js hüküm şeridi); alan adları (verdict_safety_factor,
+        # design_target_assessment, measured_scope_status) ve istasyon
+        # anahtarları yerine panelin okunur adları yazılır. Alanların kendisi
+        # makine-okur yanıtta aynen durur; sayı ve hüküm değişmez.
+        _kapsam = structural_station_list_en(verdict_scope)
+        _dis = structural_station_list_en(stations_not_verified)
+        _eko = structural_station_list_en(stations_reading_back_target)
         if model_validity_exceeded:
             verdict_basis_text = MODEL_VALIDITY_VERDICT_BASIS
         elif 'no_station_verified' in verdict_withheld_reasons:
@@ -4371,27 +4409,28 @@ class StructuralAnalyzer:
                 'sections to meet the target, so the number cannot fall below '
                 'it and carries no information about a wall you built. Supply '
                 'the real wall / throat / head thickness to earn a verdict; '
-                'the target itself is graded in design_target_assessment.')
+                'the target itself is graded separately (sections HRMA sized, '
+                'design target read back).')
         elif 'stations_not_verified' in verdict_withheld_reasons:
             verdict_basis_text = (
                 'No acceptance is issued: the measured sections (' + _kapsam
                 + ') would pass, but ' + _dis + ' were sized by HRMA and '
                 'therefore not verified. An acceptance that does not cover '
                 'every station is not an acceptance. The measured-scope '
-                'result is published separately in measured_scope_status.')
+                'result is published separately (measured-scope status).')
         elif status in ('MARGINAL', 'UNSAFE'):
             verdict_basis_text = (
-                'The verdict comes from verdict_safety_factor, the lowest '
-                'safety factor actually measured on a drawn wall (' + _kapsam
-                + '). This is a measured warning and is never suppressed. '
-                'Sections not verified: ' + _dis + '; of those, ' + _eko
-                + ' only read the design target back.')
+                'The verdict comes from the safety factor behind the verdict: '
+                'the lowest safety factor actually measured on a drawn wall ('
+                + _kapsam + '). This is a measured warning and is never '
+                'suppressed. Sections not verified: ' + _dis + '; of those, '
+                + _eko + ' only read the design target back.')
         else:
             verdict_basis_text = (
                 'Every station in the basket was evaluated against a '
                 'user-supplied thickness (' + _kapsam + '), so the verdict is '
-                'an independent verification drawn from '
-                'verdict_safety_factor.')
+                'an independent verification drawn from the safety factor '
+                'behind the verdict.')
 
         # Öneriler artık {code, params, severity} kaydı olarak döner (D-track):
         # sabit İngilizce metin sızmasını önler, frontend TF() ile çevirir.

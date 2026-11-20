@@ -1227,7 +1227,9 @@ class TestSG05PanelSunucuMetni:
         ('panels/structural_panel.js', r'\$\{U\.esc\(rec\.reason \|\| \'\'\)\}', 2),
         ('panels/structural_panel.js', r'\$\{String\(rec\.(?:reason|value)', 0),
         ('panels/structural_panel.js', r'\$\{U\.esc\(rec\.value\)\}\$\{U\.esc\(birim\)\}', 1),
-        ('panels/structural_panel.js', r'return \[U\.esc\(k\),', 2),
+        # V307/DİL-EKRAN (ÜB-3): kullanılmayan girdi satırının etiketi alan
+        # adı yerine formdaki etiket (U.esc içinde); kaçış aynı.
+        ('panels/structural_panel.js', r'return \[(?:U\.esc\(k\)|adliEtiket\(U\.esc\(alanEtiketi\(k\)\), k\)),', 2),
         ('panels/flow_panel.js', r'\$\{U\.esc\(flow\.model \|\| \'\'\)\}', 1),
         ('panels/flow_panel.js', r'\$\{flow\.model', 0),
     ])

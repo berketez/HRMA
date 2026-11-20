@@ -167,10 +167,17 @@ def test_rapor_sozlugu_ekranla_cakismaz():
     yazılamaz (aynı İngilizceye iki Türkçe yok). Büyük/küçük harf duyarsız:
     rapor 'Annular gap t' yazsaydı ekranın 'Annular Gap t' karşılığını
     gölgelerdi (ters arama önce birebir bakar). Ekranla AYNI Türkçeyi taşıyan
-    kayıt (sınıf adının okunur biçimi gibi) çakışma sayılmaz."""
+    kayıt (sınıf adının okunur biçimi gibi) çakışma sayılmaz.
+
+    Türkçe taraf Türkçe harf kuralıyla küçültülür (``rs._tr_kucuk``: I → ı,
+    İ → i). 18 Kas 2026: ``str.casefold`` 'ÖLÇÜLMEDİ'yi 'ölçülmedi̇' (i +
+    birleşik nokta) yapıyordu; ekranın 'NOT MEASURED' → 'ÖLÇÜLMEDİ' kaydı
+    raporun 'not measured' → 'ölçülmedi' kaydıyla AYNI kelime olduğu hâlde
+    'başka Türkçe' sayıldı (DİL-EKRAN O5'ten sonra). İngilizce taraf
+    ``casefold`` ile kalır."""
     en, tr = _blok('en'), _blok('tr')
     rapor = {rs.normalize(rs._kacis_coz(v)).casefold():
-             rs.normalize(rs._kacis_coz(tr[k])).casefold()
+             rs._tr_kucuk(rs.normalize(rs._kacis_coz(tr[k])))
              for k, v in en.items()}
     ekran = {}
     for ad in rs.RAPOR_SOZLUK_PARCALARI[:-1]:
@@ -180,8 +187,8 @@ def test_rapor_sozlugu_ekranla_cakismaz():
         for k, v in e_govde.items():
             if k in t_govde:
                 ekran.setdefault(rs.normalize(rs._kacis_coz(v)).casefold(),
-                                 set()).add(rs.normalize(
-                                     rs._kacis_coz(t_govde[k])).casefold())
+                                 set()).add(rs._tr_kucuk(rs.normalize(
+                                     rs._kacis_coz(t_govde[k]))))
     cakisan = sorted(e for e, t in rapor.items()
                      if e in ekran and t not in ekran[e])
     assert not cakisan, cakisan[:20]

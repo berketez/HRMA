@@ -204,7 +204,12 @@ class TestAmbientFollowsTheInput:
     def test_ambient_pressure_tracks_test_altitude(self):
         motor = _quiet(SolidRocketEngine, overrides={'test_altitude': 5000})
         perf = _quiet(motor._design_nozzle_geometry)['performance']
-        expected = float(isa_pressure(5000)) / 1e5  # bar
+        # V307/İRTİFA-TEK: test irtifası GEOMETRİK okunur (ana model kararı,
+        # 16 Kas). Eski beklenti isa_pressure(5000) = 54 019,91 Pa
+        # (dönüşümsüz, geopotansiyel); yeni isa_pressure_geometric(5000) =
+        # 54 048,29 Pa (+%0,053). Ölçüm: docs/scofield/raw/OH/V307/irtifa-tek.
+        from hrma.constants import isa_pressure_geometric
+        expected = float(isa_pressure_geometric(5000)) / 1e5  # bar
         assert perf['ambient_pressure'] == pytest.approx(expected, rel=1e-9)
         # Tasarım ε'su Pe = Pa verecek şekilde boyutlandırılır: çıkış basıncı
         # da kullanıcının ortamını izlemeli, deniz seviyesinde kalmamalı.

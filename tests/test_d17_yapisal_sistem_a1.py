@@ -252,7 +252,12 @@ class TestP5B209KardesUretici:
         # HRMA boyutladığı için oran yarıçaptan bağımsızdır (t ∝ r), K-A
         # KT-03'ün +4 mm kasası bu sayıyı değiştirmez; kayan yalnız MEOP
         # (40,0001617 -> 40,0001556 bar).
-        assert basinc['burst_margin'] == pytest.approx(4.652337530766883,
+        # V307 KATI-DOĞRULAMA faz 3 (B1, 16 Kas 2026): 4,652337530766883 -> 4,652339064440147
+        # (+3,3·10⁻⁷ bağıl). Yük hedef itkilidir (5000 N); boyutlandırma artık
+        # iki fazlı kaybı gördüğü için taneyi biraz farklı boyutluyor ve MEOP
+        # son basamaklarda kayıyor. Oran yarıçaptan bağımsız kalmaya devam
+        # ediyor (tanım ve yön aynı); tolerans aynı.
+        assert basinc['burst_margin'] == pytest.approx(4.652339064440147,
                                                        rel=1e-9)
 
     def test_tanim_adiyla_yayimlanir(self, basinc):
@@ -388,10 +393,13 @@ class TestOHD1607FillSweep:
                 egriler[0]['slosh_mass_ratio'], rel=1e-12)
             assert e['fill_ratio'] == pytest.approx(egriler[0]['fill_ratio'],
                                                     rel=1e-12)
+        # 3.0.7 (V307/K1): ξ1 kesin kök (Dodge (1.41), scipy); 4 basamaklı
+        # 1,8412 ile 0.8308141711841972 / 0.1136233579275338 idi. Son değer
+        # betik v1 §3 (h/R = 4: 0,1136271982) ile aynı.
         assert egriler[0]['slosh_mass_ratio'][0] == pytest.approx(
-            0.8308141711841972, rel=1e-9)
+            0.8308350374285158, rel=1e-9)
         assert egriler[0]['slosh_mass_ratio'][-1] == pytest.approx(
-            0.1136233579275338, rel=1e-9)
+            0.11362719819477533, rel=1e-9)
 
     def test_frekans_ve_sarkac_geometriyle_oynar(self):
         """Aynı yaprak öbeğindeki BOYUTLU sonuçlar donuk DEĞİLDİR."""

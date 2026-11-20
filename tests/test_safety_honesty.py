@@ -390,16 +390,19 @@ class TestSafetyEndpointFailsClosed:
         assert resp.status_code == 422
         payload = resp.get_json()
         assert payload['error'] == 'incomplete_safety_input'
+        # V307/GÜVERTE-ISIL kalem 4: oda sıcaklığı da zorunlu (eskiden uç
+        # 3000 K varsayıp ``defaults_applied`` ile beyan ediyordu).
         assert set(payload['missing_fields']) == {
-            'chamber_pressure', 'propellant_mass', 'chamber_diameter',
-            'wall_thickness'}
+            'chamber_pressure', 'chamber_temperature', 'propellant_mass',
+            'chamber_diameter', 'wall_thickness'}
 
     @pytest.mark.parametrize('dropped', [
-        'chamber_pressure', 'propellant_mass', 'chamber_diameter',
-        'wall_thickness'])
+        'chamber_pressure', 'chamber_temperature', 'propellant_mass',
+        'chamber_diameter', 'wall_thickness'])
     def test_each_required_field_is_enforced(self, dropped):
         body = {'chamber_pressure': 40, 'propellant_mass': 5,
-                'chamber_diameter': 0.1, 'wall_thickness': 0.005}
+                'chamber_diameter': 0.1, 'wall_thickness': 0.005,
+                'chamber_temperature': 3000.0}
         body.pop(dropped)
         resp = self._client().post('/analyze_safety', json=body,
                                    headers={'Host': '127.0.0.1:8080'})
@@ -410,6 +413,7 @@ class TestSafetyEndpointFailsClosed:
         resp = self._client().post('/analyze_safety', json={
             'chamber_pressure': 40, 'propellant_mass': 5,
             'chamber_diameter': 0.1, 'wall_thickness': 0.005,
+            'chamber_temperature': 3000.0,
         }, headers={'Host': '127.0.0.1:8080'})
         assert resp.status_code == 200
         assert resp.get_json()['safety_analysis']
@@ -419,9 +423,14 @@ class TestSafetyEndpointFailsClosed:
         resp = self._client().post('/analyze_safety', json={
             'chamber_pressure': 40, 'propellant_mass': 5,
             'chamber_diameter': 0.1, 'wall_thickness': 0.005,
+            'chamber_temperature': 3000.0,
         }, headers={'Host': '127.0.0.1:8080'})
         applied = resp.get_json()['defaults_applied']
-        assert 'chamber_temperature' in applied
+        # V307/GÜVERTE-ISIL kalem 4 — ÇEVRİLDİ, gerekçeli: oda sıcaklığına
+        # artık 3000 K VARSAYILANI UYGULANMIYOR (kaynaksız sayı; beyan çözüm
+        # değildi). Alan zorunlu: verilmezse 422 + missing_fields
+        # (yukarıdaki iki test). Beyan listesinde artık hiç geçmez.
+        assert 'chamber_temperature' not in applied
         # V301/PANEL (K-C1 AÇIK 5) — ÇEVRİLDİ, gerekçeli: uç itkiye artık
         # 1000 N VARSAYILANI UYGULAMIYOR (beyan çözüm değildi; bağlama
         # kuvveti ve serbest motor kolu motorun olmayan bir itkisinden
@@ -437,6 +446,7 @@ class TestSafetyEndpointFailsClosed:
         resp = self._client().post('/analyze_safety', json={
             'chamber_pressure': 40, 'propellant_mass': 5,
             'chamber_diameter': 0.1, 'wall_thickness': 0.005,
+            'chamber_temperature': 3000.0,
             'motor_type': 'liquid',
         }, headers={'Host': '127.0.0.1:8080'})
         assert resp.status_code == 200

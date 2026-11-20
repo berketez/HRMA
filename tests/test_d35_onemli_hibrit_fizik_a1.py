@@ -131,9 +131,14 @@ def test_ON01_plaka_denetimi_DENETLEDIGI_plakayi_ADIYLA_yayimliyor(h1):
     plaka = h1['injector']['plate_structural']
     inj = h1['injector']
     assert plaka['status'] == 'analyzed', plaka
-    assert plaka['delta_P_bar'] == pytest.approx(inj['pressure_drop'],
-                                                 rel=1e-9), (
+    # V307/PLAKA-MARŞ: üst düzey ``delta_P_bar`` YÖNETEN yük durumunun
+    # yüküdür; enjektörün çözdüğü ΔP ``injector_pressure_drop_bar`` ve
+    # çalışma durumunun yüküdür (4 ondalık yayım). Ölçtüğü şey aynı.
+    assert plaka['injector_pressure_drop_bar'] == pytest.approx(
+        inj['pressure_drop'], rel=1e-9), (
         'plaka, enjektörün çözdüğünden BAŞKA bir ΔP ile denetleniyor')
+    assert plaka['load_cases']['operating']['delta_P_bar'] == pytest.approx(
+        inj['pressure_drop'], abs=5e-5)
     assert int(plaka['n_holes']) == int(inj['n_holes'])
     # Rapor delik çapını 4 ondalığa yuvarlayarak yayımlar (sözleşme);
     # kıyas o yuvarlamanın mertebesinde yapılır.

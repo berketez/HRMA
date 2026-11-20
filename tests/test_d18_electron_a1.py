@@ -223,6 +223,15 @@ def test_p12ab4_10_canli_ve_ozet_bloklari_ayrildi():
         assert basliklar and basliklar[-1] == grup, (
             '%s satırı %r başlığı altında değil (bulunan: %r)'
             % (eid, grup, basliklar[-1] if basliklar else None))
+        if grup == 'site.summaryHead':
+            # V307/ONARIM2-FS-EKRAN (M7-FS-1): tüm-çözüm özeti küre oynatma
+            # durumundan (`s.*`) DEĞİL, çözümden (sözleşme) basılır; WebGL
+            # yoksa da dolar. Kaynak alanlar: summary.apogee, samples.downrange_m.
+            i_oz = html.index('function ucusOzetiniBas(')
+            oz = html[i_oz:html.index('function cozumOlaylari(', i_oz)]
+            assert {'apogee': 'var a = num_(sm.apogee);',
+                    'range': 'son = num_(o.downrange_m[o.downrange_m.length - 1]);'}[alan] in oz, eid
+            continue
         assert re.search(r"el\('%s'\)\.textContent\s*=[^;]*\bs\.%s\b"
                          % (eid, alan), html), (
             '%s satırı `s.%s` alanından beslenmiyor' % (eid, alan))

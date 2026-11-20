@@ -820,9 +820,9 @@
                 <span data-i18n="feaT.intro">${T('feaT.intro',
                     'A transient heat-conduction finite element run on the nozzle wall '
                     + 'of THIS result: the gas-side film coefficient profile h(z) is '
-                    + 'computed first (Bartz, wall-profile endpoint) and fed to the '
-                    + 'solver as a boundary condition — nothing is fabricated from a '
-                    + 'single throat number. You see the temperature field on the '
+                    + 'computed first (Bartz, wall heat-flux profile calculation) and fed to the '
+                    + 'solver as a boundary condition — the profile is not derived from a '
+                    + 'single throat value. You see the temperature field on the '
                     + 'mesh at the end of the burn, the gas-side surface temperature '
                     + 'along the wall and the peak wall temperature history. If an '
                     + 'input is missing, nothing is drawn and the missing item is '
@@ -1248,8 +1248,12 @@
     function renderBadges(el, vm) {
         let html = '';
         if (vm.engine_layout) {
+            // V307/DİL-EKRAN (NK3-H-8): motor türü okunur adla ve dilin büyük
+            // harf kuralıyla ("HİBRİT"); tanınmayan değer AYNEN.
+            const tur = String(vm.engine_layout);
+            const dil = (window.I18N && window.I18N.lang === 'tr') ? 'tr' : 'en';
             html += badge(T('feaT.badgeEngine', 'ENGINE') + ': '
-                + esc(String(vm.engine_layout).toUpperCase()), 'info');
+                + esc(T('motor.' + tur, tur).toLocaleUpperCase(dil)), 'info');
         }
         html += badge(TF('feaT.badgeMesh',
             { elems: vm.mesh_info.n_elems, nodes: vm.mesh_info.n_nodes },
@@ -1909,7 +1913,7 @@
                 missing: built.missing,
                 reason: T('feaT.clientMissingReason',
                     'The motor result on this page does not carry these '
-                    + 'fields. The wall-profile endpoint would silently '
+                    + 'fields. The wall heat-flux profile calculation would silently '
                     + 'substitute defaults for them — that would be another '
                     + 'motor\'s profile — so it is not called. (Declared by '
                     + 'the panel, before any request.)'),
@@ -1944,7 +1948,7 @@
             if (!r.ok || !r.body || r.body.status !== 'success') {
                 throw new Error((r.body && r.body.error)
                     || T('feaT.profileHttpError',
-                         'The wall-profile endpoint returned an error; the '
+                         'The wall heat-flux profile calculation returned an error; the '
                          + 'thermal FEA was not attempted.'));
             }
             const wp = r.body.wall_profile;
@@ -1967,7 +1971,7 @@
                 ? wp.gas_properties_basis : null;
             if (!wp || !Array.isArray(wp.x_mm) || !wp.x_mm.length) {
                 throw new Error(T('feaT.profileEmpty',
-                    'The wall-profile endpoint returned no axial stations; '
+                    'The wall heat-flux profile calculation returned no axial stations; '
                     + 'the thermal FEA was not attempted.'));
             }
             // Adım 2 — geçici termal FEA: wall_profile bloğu AYNEN geçer.
@@ -2012,7 +2016,7 @@
                 lastPayload = null;
                 lastError = (r.body && (r.body.detail || r.body.error))
                     || T('feaT.httpError',
-                         'The thermal FEA endpoint returned an error.');
+                         'The thermal FEA calculation returned an error.');
             }
             kosumBitti();
             render();

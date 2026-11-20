@@ -82,6 +82,11 @@ HIBRIT_CIDARSIZ = {
     'chamber_pressure': 20, 'of_ratio': 2.5, 'fuel_type': 'htpb',
     'oxidizer_type': 'n2o', 'expansion_ratio': 4.0,
     'nozzle_type': 'conical', 'chamber_material': 'steel_4130',
+    # V307/ORTAM-TEK (19 Kas): tasarım ortamı AÇIKÇA — hibrit sayfasının
+    # formunun gerçekten gönderdiği 1,01325 bar (ölçüldü: docs/scofield/raw/
+    # OH/V307/ortam-tek/olcum/form_ortam.json). Ortamsız istek yokluk
+    # varsayılanına düşüyordu (18 Kas'tan beri ISA; önce 1,0 bar).
+    'atmospheric_pressure': 1.01325,
 }
 #: Aynı motor, kullanıcının KENDİ cidarıyla (5 mm) — doğrulama yolu.
 HIBRIT_CIDARLI = dict(HIBRIT_CIDARSIZ, wall_thickness=5)
@@ -209,7 +214,15 @@ CIVATA_GOVDE = {
 #: 6441514.278282809, 74b55500a 7070956.591500392; e0f0db0a5 ve e038d626f
 #: aynı): oran 1,097717, bağımsız kâhinden sapma 5,1e-6 (geri kalan,
 #: c*'a bağlı ikincil terimler). Tolerans DEĞİŞMEDİ.
-HIBRIT_BOGAZ_AKISI_W_M2 = 7070956.591500392
+#: V307/ORTAM-TEK (19 Kas) — ÇAPA YENİLENDİ: gövde artık tasarım ortamını
+#: AÇIKÇA gönderir (1,01325 bar, formun değeri; HIBRIT_CIDARSIZ notu). Çapa
+#: 1,0 bar yokluk varsayılanında ölçülmüştü. Kök ölçüldü (docs/scofield/raw/
+#: OH/V307/ortam-tek/olcum/k1_olcum.json 'z5_cidarli'): açık 1,0 bar eski
+#: çapayı BİT-AYNI verir (7070956.591500392); ortamsız istek açık 1,01325
+#: ile BİT-AYNI. Isp 168,7455 -> 168,4193 s, ε sabit (4,0), boğaz akısı
+#: −%0,019. Tolerans DEĞİŞMEDİ.
+#: 7070956.591500392 -> 7069588.74756689 W/m².
+HIBRIT_BOGAZ_AKISI_W_M2 = 7069588.74756689
 
 
 def _sessiz(fn, *a, **k):
@@ -861,6 +874,22 @@ URUN_KATLI_ALANLARI = [
     ("blowdown_panel.js", 3, ('style',)),
     ("blowdown_panel.js", 4, ()),
     ("cfd_panel.js", 1, ('class', 'style')),
+    # V307/ÇALKANTI-ARAYÜZ (16 Kas): Besleme → Çalkantı tank modeli
+    # bölümünün üç katlısı — dosyadan tank geometrisi girdileri, 29 satırlık
+    # eşdeğer model tablosu, SP-8009 yük tablosu (düzey başına bir kaynak
+    # yeri). Hepsi varsayılan KAPALI; ikinci iddia ayrıca ölçer.
+    ("calkanti_panel.js", 1, ('style',)),
+    ("calkanti_panel.js", 2, ('style',)),
+    ("calkanti_panel.js", 3, ('style',)),
+    # V307/SEKME-GÜVERTE (NK3-K-2, 16 Kas): yapısal sekmede ucun İngilizce
+    # "basınçlı eksenel gerilme neden tam sıfır olabilir" gerekçesi kapalı
+    # "Teknik ayrıntı" kutusunda (hd-teknik-ayrinti; makine alan adı ve
+    # paragraf görünür metinden indi). Varsayılan KAPALI.
+    ("structural_panel.js", 1, ('class', 'style')),
+    # V307/FS-HARİTA-KÜRE (16 Kas): Fırlatma Sahası "Harita paketleri" paneli
+    # (<details id="ls-packs" class="ls-basis">; indirme onayı + ilerleme).
+    # Varsayılan KAPALI.
+    ("launch_site.html", 1, ('class', 'id')),
     ("fea_panel.js", 1, ('id', 'style')),
     ("fea_panel.js", 2, ('id', 'style')),
     ("fea_panel.js", 3, ('id', 'style')),

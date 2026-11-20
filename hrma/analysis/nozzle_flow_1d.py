@@ -158,6 +158,58 @@ def _ozgul_isi_orani(md):
     return GAMMA_REPO_DEFAULT, 'repo_default'
 
 
+def _oda_sicakligi_zorunlu(md, modul):
+    """V307/KÜÇÜKLER-2 (kalem 2) — ``from_motor_data`` oda sıcaklığı ZORUNLU.
+
+    Eski satır ``float(md.get('chamber_temperature', 3000.0))`` idi (bu
+    dosyada ve ``regen_cooling``de): sıcaklık yoksa 3000 K sessizce
+    konuyordu. ÖLÇÜLDÜ (taban b3221d092, ``docs/scofield/raw/OH/V307/
+    kucukler-2/olcum/k2_once.json``): ürün içindeki tek çağıran
+    (``visualization._nozzle_fig_motor_data`` üzerinden Mach / ısı akısı
+    figürleri) sıcaklığı her zaman geçiriyor; depodaki bütün test çağrıları
+    da geçiriyor. Yedeğe hiçbir yoldan ulaşılmıyordu. Sayı uydurulmaz: yoksa
+    ya da sonlu pozitif değilse ADIYLA ``ValueError``. İki modülün TEK
+    tanımı burasıdır (``regen_cooling`` buradan ithal eder).
+    """
+    # Sayıya çevirme + sonluluk merkezî kapıdan (input_guard, TEK KAYNAK;
+    # OH-D27-11): bağımsız ikinci çevirici yazılmaz. bool sayı sayılmaz.
+    from hrma.utils import input_guard
+    ham = md.get('chamber_temperature')
+    tc = input_guard.finite_number(ham)
+    if tc is None or not tc > 0.0:
+        raise ValueError(
+            '%s.from_motor_data: chamber_temperature (K) is required and must '
+            'be a finite absolute temperature above 0 K (got %r); no chamber '
+            'temperature is assumed.' % (modul, ham))
+    return tc
+
+
+def _pozitif_girdi_zorunlu(md, alan, birim, modul):
+    """V307/GRAFİK-BİRİM (kalem 2) — ``from_motor_data`` oda basıncı ve
+    molekül ağırlığı ZORUNLU.
+
+    Eski satırlar ``float(md.get('chamber_pressure', 20.0))`` ve
+    ``float(md.get('molecular_weight', 24.0))`` idi: alan yoksa 20 bar /
+    24 g/mol sessizce konuyordu. ÖLÇÜLDÜ (``docs/scofield/raw/OH/V307/
+    grafik-birim/olcum/k2_erisim.json``): ürün içindeki tek çağıran
+    (``visualization._nozzle_fig_motor_data``, Mach / ısı akısı figürleri)
+    iki alanı her zaman doldurur — çağıran vermediyse kendi BEYANLI
+    varsayımıyla (alt başlıkta "Assumed"); depodaki test çağrıları da
+    ikisini geçirir. Yedeğe hiçbir yoldan ulaşılmıyordu. Sayı uydurulmaz:
+    yoksa ya da sonlu pozitif değilse ADIYLA ``ValueError``. Sayıya çevirme
+    ``_oda_sicakligi_zorunlu`` ile aynı merkezî kapıdan (input_guard).
+    """
+    from hrma.utils import input_guard
+    ham = md.get(alan)
+    deger = input_guard.finite_number(ham)
+    if deger is None or not deger > 0.0:
+        raise ValueError(
+            '%s.from_motor_data: %s (%s) is required and must be a finite '
+            'value above 0 (got %r); no %s is assumed.'
+            % (modul, alan, birim, ham, alan.replace('_', ' ')))
+    return deger
+
+
 # ---------------------------------------------------------------------------
 # İstasyon sayısı sınırları (Dalga 4 planı: 30-60 istasyon)
 # ---------------------------------------------------------------------------
@@ -485,8 +537,9 @@ class NozzleFlow1D:
         """
         md = dict(motor_data or {})
         return cls(
-            chamber_pressure=float(md.get('chamber_pressure', 20.0)) * 1e5,
-            chamber_temperature=float(md.get('chamber_temperature', 3000.0)),
+            chamber_pressure=_pozitif_girdi_zorunlu(
+                md, 'chamber_pressure', 'bar', 'NozzleFlow1D') * 1e5,
+            chamber_temperature=_oda_sicakligi_zorunlu(md, 'NozzleFlow1D'),
             # ÖH D21 / B3-13(c) — SESSİZ 1,2 YEDEĞİ KALKTI, KÜNYE GELDİ.
             # Eski satır ``float(md.get('gamma', md.get('gamma_avg',
             # 1.2)))`` idi: γ hiç yokken 1,2 sessizce konuyor, üstelik
@@ -497,7 +550,8 @@ class NozzleFlow1D:
             # oraya ODA gamma'sını koyar, ortalama değil); adın
             # düzeltilmesi üretici dosyayı gerektirir (hibrit kulvarı).
             gamma=_ozgul_isi_orani(md)[0],
-            molecular_weight=float(md.get('molecular_weight', 24.0)),
+            molecular_weight=_pozitif_girdi_zorunlu(
+                md, 'molecular_weight', 'g/mol', 'NozzleFlow1D'),
             throat_diameter=md.get('throat_diameter'),
             exit_diameter=md.get('exit_diameter'),
             expansion_ratio=md.get('expansion_ratio'),

@@ -361,13 +361,21 @@ def test_karo_lru_tavani_64():
 
 
 def test_en_yakin_hedef_yorumu_25_5_km():
-    """CTRL_MIN_TARGET = 0,4 birim = 25.484 m; eski yorum '2.5 km' diyordu."""
+    """CTRL_MIN_TARGET yorumu sayısıyla tutarlı (eski yorum '2.5 km' diyordu).
+
+    V307/FS-HARİTA (9 Kas): sınır 25,5 km'den near düzlemi kuralının
+    (near = NEAR_ORANI·mesafe) tabana çarpmadığı en küçük mesafeye indi:
+    NEAR_MIN / NEAR_ORANI = 3,33e-4 birim = 21,2 m. Kilit, yorumdaki sayının
+    sabitlerden türetilen değerle aynı olmasını sınar."""
     src = _oku(GLOBE)
     satir = [s for s in src.splitlines() if 'var CTRL_MIN_TARGET' in s]
     assert len(satir) == 1
-    assert '25,5 km' in satir[0] and '2.5 km' not in satir[0], satir[0]
-    m = re.search(r'var CTRL_MIN_TARGET = GLOBE_R \* ([0-9.]+);', src)
-    assert abs(float(m.group(1)) * 100 * M_PER_UNIT - 25484) < 1
+    assert '21 m' in satir[0] and '2.5 km' not in satir[0], satir[0]
+    assert '= KAMERA_MIN_MESAFE;' in satir[0], satir[0]
+    assert 'var KAMERA_MIN_MESAFE = NEAR_MIN / NEAR_ORANI;' in src
+    n_min = float(re.search(r'var NEAR_MIN = ([0-9.e-]+);', src).group(1))
+    oran = float(re.search(r'var NEAR_ORANI = ([0-9.]+);', src).group(1))
+    assert abs(n_min / oran * M_PER_UNIT - 21.237) < 0.01
 
 
 def test_eski_110m_yedegi_korunuyor():

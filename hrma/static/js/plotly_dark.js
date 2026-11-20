@@ -505,10 +505,43 @@
     /* Figürü yerinde çevirir. İngilizce dilde hiçbir şey değişmez.
        ÖH D36 dil2 a2: TR'de görünen metin çevirisi (`trGorunen`) ondalık
        virgülden de geçer; veri eksenleri (`tr`) geçmez. */
+    /* V307/DİL-EKRAN-2 (DİL-HİBRİT O15): gösterge (indicator) sayısının
+       yüzde soneki. Sunucu figürü `number.suffix = ' %'` kuruyor; TR ekranda
+       "89,00 %" basılıyordu, Türkçede yüzde işareti sayının ÖNÜNDEDİR
+       ("%89,00"). Karar ayraçla aynı kanondan (`ondalikVirgulMu`) okunur.
+       Yalnız soneki tam olarak '%' (boşluklu ya da boşluksuz) ve öneki boş
+       göstergeye dokunulur; taşınan sonek iz alanında saklanır, EN'e
+       dönüşte (figür yerinde çevrildiyse) aynen geri yazılır. Sayı, biçim
+       (`valueformat`) ve delta değişmez. */
+    var YUZDE_IZ = '_hrmaYuzdeSoneki';
+
+    function yuzdeIsaretiKur(data, virgul) {
+        if (!Array.isArray(data)) return;
+        data.forEach(function (t) {
+            if (!t || t.type !== 'indicator' || !t.number
+                    || typeof t.number !== 'object') return;
+            var n = t.number;
+            if (virgul) {
+                if (typeof n.suffix === 'string' && /^\s*%$/.test(n.suffix)
+                        && !n.prefix) {
+                    n[YUZDE_IZ] = n.suffix;
+                    n.prefix = '%';
+                    n.suffix = '';
+                }
+            } else if (typeof n[YUZDE_IZ] === 'string' && n.prefix === '%'
+                       && !n.suffix) {
+                n.suffix = n[YUZDE_IZ];
+                n.prefix = '';
+                delete n[YUZDE_IZ];
+            }
+        });
+    }
+
     function translateFigure(data, layout) {
         var tr = translator();
         var virgul = ondalikVirgulMu();
         ayraclariKur(layout, virgul);
+        yuzdeIsaretiKur(data, virgul);
         if (!tr) {
             if (!virgul) return;
             tr = function (s) { return s; };

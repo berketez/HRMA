@@ -468,7 +468,13 @@ class TestP16B408OzetTabloCelismesi:
     def test_ozet_ile_tablo_ayni_hukmu_veriyor(self, client, iyi_motor):
         import re
         metin = self._pdf_metni(client, {'motor_data': dict(iyi_motor)})
-        for alan in self.ALANLAR:
+        # V307/SEKME-MOTOR (KATI-DOĞRULAMA D4): katı motorda süre satırının
+        # adı "Burn Time (web burnout)" (et tükenme süresi); özet ve tablo
+        # AYNI adı taşır. Fikstür katı motor.
+        assert iyi_motor['motor_type'] == 'solid'
+        alanlar = tuple('Burn Time (web burnout)' if a == 'Burn Time' else a
+                        for a in self.ALANLAR)
+        for alan in alanlar:
             okunan = re.findall(re.escape(alan) + r'\s*:?\s*([-\w./]+)', metin)
             assert len(set(okunan)) == 1, (
                 'aynı belgede iki farklı hüküm (P16B4-08): %s -> %s'

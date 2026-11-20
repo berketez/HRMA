@@ -364,10 +364,16 @@ class TestP15B1_02PlakaKalinligi:
         # ölçer; η'dan bağımsız kalsın diye koşu ideal c* (η = %100) ile
         # yapılır. ÖLÇÜLDÜ (28 Eki): η = %100'de L/D bit-aynı 1,4407513659900986
         # (C1'in hibrit kenar vakalarıyla aynı çözüm).
-        bos = self._inj(istemci, combustion_efficiency=100)
+        # V307/ORTAM-TEK (19 Kas): bu çapanın konusu plaka onarımıdır, ortam
+        # değil; istek tasarım ortamını AÇIKÇA gönderir (hibrit sayfasının
+        # formunun gerçekten gönderdiği 1,01325 bar; ölçüldü:
+        # docs/scofield/raw/OH/V307/ortam-tek/olcum/form_ortam.json).
+        ortam = {'atmospheric_pressure': 1.01325}
+        bos = self._inj(istemci, combustion_efficiency=100, **ortam)
         assert bos['plate_thickness'] is None and bos['L_D_ratio'] is None, (
             bos['plate_thickness'], bos['L_D_ratio'])
-        inj = self._inj(istemci, plate_thickness=3.0, combustion_efficiency=100)
+        inj = self._inj(istemci, plate_thickness=3.0, combustion_efficiency=100,
+                        **ortam)
         assert inj['hole_diameter'] == pytest.approx(bos['hole_diameter'], rel=1e-12)
         assert inj['plate_thickness'] == pytest.approx(3.0)
         # ÇAPA YENİLENDİ — kitap p1a B16 (karar §28-18 (a)): N₂O 293,15 K
@@ -387,7 +393,14 @@ class TestP15B1_02PlakaKalinligi:
         # bit-aynı. Ölçüm: docs/scofield/raw/OH/V306/sivi-onarim/
         # kalem4_ld.json (cb11df981^ ⟷ cb11df981). Tolerans DEĞİŞMEDİ.
         #   L/D 1,4407513659900986 -> 1,440440220781379
-        assert inj['L_D_ratio'] == pytest.approx(1.440440220781379,
+        # ÇAPA YENİLENDİ — V307/ORTAM-TEK (19 Kas): istek ortamı AÇIKÇA
+        # 1,01325 bar (çapa 1,0 bar'da ölçülmüştü; ortamsız istek 18 Kas'tan
+        # beri ISA'ya düşüyor). Kök ölçüldü (docs/scofield/raw/OH/V307/
+        # ortam-tek/olcum/k1_olcum.json 'd20_hib'): açık 1,0 bar eski çapayı
+        # BİT-AYNI verir; ortamsız istek açık 1,01325 ile BİT-AYNI. Isp
+        # 222,9540 -> 222,5671 s, ṁ ↑, delik çapı ↑, L/D ↓. Tolerans DEĞİŞMEDİ.
+        #   L/D 1,440440220781379 -> 1,439190122717241
+        assert inj['L_D_ratio'] == pytest.approx(1.439190122717241,
                                                  rel=1e-9)
         # Çapa TEK sayı değil: L/D = plaka / delik çapı özdeşliği de
         # kilitlenir, yoksa iki sayı sessizce ayrışabilir.
@@ -397,7 +410,9 @@ class TestP15B1_02PlakaKalinligi:
         # mm (+%0,037; L/D ile aynı oran, özdeşlik aşağıda kilitli).
         # V306/SIVI-ONARIM kalem 4 (cb11df981, tek N₂O doyma basıncı; L/D
         # çapasıyla aynı ölçüm): 2,0822468545350783 -> 2,0826966344862443 mm.
-        assert inj['hole_diameter'] == pytest.approx(2.0826966344862443,
+        # V307/ORTAM-TEK (ortam açıkça 1,01325 bar; L/D ile aynı ölçüm):
+        # 2,0826966344862443 -> 2,0845056901418246 mm.
+        assert inj['hole_diameter'] == pytest.approx(2.0845056901418246,
                                                      rel=1e-9)
         assert inj['L_D_ratio'] == pytest.approx(
             inj['plate_thickness'] / inj['hole_diameter'], rel=1e-12)

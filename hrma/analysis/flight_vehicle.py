@@ -348,13 +348,57 @@ def _single_item(key: str, mass: Optional[float]) -> List[Dict[str, Any]]:
 
 
 def _tank_entry(key: str, d_m: Optional[float], l_m: Optional[float],
-                v_m3: Optional[float]) -> Optional[Dict[str, Any]]:
-    """Tank kaydı; çap ya da boy yoksa ``None`` (uydurulmaz)."""
+                v_m3: Optional[float],
+                pressure_vessel: Any = None) -> Optional[Dict[str, Any]]:
+    """Tank kaydı; çap ya da boy yoksa ``None`` (uydurulmaz).
+
+    V307/UÇUŞ-GÖVDE: ``diameter_m`` / ``length_m`` tankın İÇ ölçüleridir
+    (motorun boyutlandırma modeli: düz kapaklı dik silindir, V = π/4·D²·L).
+    Kabuk kalınlıkları motorun AYNI tank için yayımladığı basınçlı kap
+    bloğundan (``hrma.analysis.pressure_vessel``; birim alan adında, mm)
+    okunur: ``wall_thickness_m`` (silindir cidarı) ve
+    ``end_closure_thickness_m`` (baş / kapak). Yayımlanmamışsa ``None``
+    (uydurulmaz); gövde türetimi o durumu adıyla söyler.
+    """
     if d_m is None or l_m is None or d_m <= 0.0 or l_m <= 0.0:
         return None
+    pv = pressure_vessel if isinstance(pressure_vessel, dict) else {}
+    cidar = _mm_to_m(pv.get('wall_thickness_used_mm'))
+    bas = _mm_to_m(pv.get('head_thickness_available_mm'))
     return {'key': key, 'diameter_m': float(d_m), 'length_m': float(l_m),
             'volume_m3': (float(v_m3) if v_m3 is not None and v_m3 > 0.0
-                          else None)}
+                          else None),
+            'wall_thickness_m': (cidar if cidar is not None and cidar > 0.0
+                                 else None),
+            'end_closure_thickness_m': (bas if bas is not None and bas > 0.0
+                                        else None)}
+
+
+def _liquid_tank_diameter_m(blok: Any) -> Optional[float]:
+    """Sıvı tankın iç çapı [m]: motorun METRE değeri (mm gidiş-dönüşü yok).
+
+    V307/FS-OTURUM (kalem 2; TEK-TANIM DEVİR 1). Motor tank çapını metrede
+    hesaplar (D) ve kartta ``dimensions.diameter`` = D·1000 [mm] yayımlar;
+    çalkantı kartı aynı tankı ``slosh.radius`` = D/2 [m] ile yayımlar
+    (ikiye bölme kayan noktada tamdır: 2·r = D bit-aynı). Kayıt eskiden
+    (D·1000)/1000 ile kuruluyordu; ölçüldü (200 000 rastgele tasarım,
+    docs/scofield/raw/OH/V307/fs-oturum/mm_gidis_donus.py): %2,2'sinde D'den
+    1 ulp farklı → çalkantı tablosunun R'si motorunkinden son bitte ayrışır.
+
+    Yarıçap yalnız yayımlanan mm sayısını BİT BİT yeniden üretiyorsa
+    (2·r·1000 == dimensions.diameter, motorun kendi işlem sırası) kullanılır:
+    o zaman mm alanının üretildiği metre değeri odur. Yarıçap yoksa
+    (çalkantı hesaplanmadı) ya da mm alanını üretmiyorsa kayıt kartın mm
+    alanından kurulur (bugünkü yol; uydurma ya da tolerans yok).
+    """
+    dim = _get(blok, 'dimensions') or {}
+    d_mm_ham = _num(dim.get('diameter'))
+    d_mm = _mm_to_m(dim.get('diameter'))
+    r = _num(_get(blok, 'slosh', 'radius'))
+    if (r is not None and r > 0.0 and d_mm_ham is not None
+            and 2.0 * r * 1000.0 == d_mm_ham):
+        return 2.0 * r
+    return d_mm
 
 
 def _liquid_tanks(results: Dict) -> Optional[List[Dict[str, Any]]]:
@@ -369,9 +413,10 @@ def _liquid_tanks(results: Dict) -> Optional[List[Dict[str, Any]]]:
     for key in ('oxidizer_tank', 'fuel_tank'):
         dim = _get(pt, key, 'dimensions') or {}
         hacim_l = _num(dim.get('volume'))           # litre (adıyla)
-        kayit = _tank_entry(key, _mm_to_m(dim.get('diameter')),
+        kayit = _tank_entry(key, _liquid_tank_diameter_m(pt.get(key)),
                             _mm_to_m(dim.get('length')),
-                            hacim_l / 1000.0 if hacim_l is not None else None)
+                            hacim_l / 1000.0 if hacim_l is not None else None,
+                            _get(pt, key, 'pressure_vessel'))
         if kayit is None:
             return None        # bir tank okunamıyorsa toplam da bilinmez
         out.append(kayit)
@@ -385,7 +430,9 @@ def _hybrid_tanks(eng: Dict) -> Optional[List[Dict[str, Any]]]:
         return None
     kayit = _tank_entry('oxidizer_tank', _num(blok.get('tank_diameter_m')),
                         _num(blok.get('tank_length_m')),
-                        _num(blok.get('tank_volume_m3')))
+                        _num(blok.get('tank_volume_m3')),
+                        _get(eng, 'oxidizer_tank_pressure_vessel',
+                             'pressure_vessel'))
     return None if kayit is None else [kayit]
 
 
@@ -436,7 +483,9 @@ def _hybrid_inert_note(inert: Optional[float], prop: Optional[float],
     note = ('dry mass computed by the motor structural model, NOT the '
             f'{HYBRID_INERT_RULE_OF_THUMB_RATIO:g} rule of thumb')
     if prop is not None and prop > 0.0:
-        note += f'; measured dry/propellant ratio {inert / prop:.2f}'
+        # V307/ONARIM2-UÇUŞ-ARAÇ (M7-FS-8): oran iki yayımlanan sayının
+        # bölümüdür (hesaplanan), ölçülmüş bir değer değil.
+        note += f'; computed dry/propellant ratio {inert / prop:.2f}'
     if basis_txt:
         note += '; basis: ' + basis_txt
     return note
@@ -846,10 +895,23 @@ def _normalize_liquid(results: Dict) -> Dict[str, Any]:
         kamara_od, kamara_kaynak = _length_m(results, 'chamber_diameter')
     od_m, od_kaynak = _envelope_od_m(kamara_od, kamara_kaynak, kd, results)
 
+    # V307/SIVI-ORTAM: ``thrust`` motorun TASARIM ORTAMINDAKİ itkisidir.
+    # Araç yerden kalkar ve itkinin irtifa düzeltmesi deniz seviyesi
+    # referansıyla kurulur (``motor_flight_thrust``: thrust_sl_N + 1,01325
+    # bar). Tasarım ortamı deniz seviyesi DEĞİLSE aracın itkisi de aynı
+    # lülenin deniz seviyesi itkisidir; lüle orada ayrılıyorsa motor o
+    # sayıyı yayımlamaz ve araç itkisiz kalır (uç adıyla reddeder: uçuş yok).
+    # Deniz seviyesi tasarımında iki sayı aynıdır (satır eskisiyle aynı).
+    itki = _num(results.get('thrust'))
+    _ortam = results.get('design_ambient')
+    if isinstance(_ortam, dict) and _ortam.get('is_sea_level') is False:
+        itki = _num(_get(results, 'design_summary', 'performance',
+                         'thrust_sl_N'))
+
     return {
         # Kararlı sonuç itki eğrisi taşımaz (transient sıvıda modellenmiyor).
         'thrust_curve': None,
-        'thrust': _num(results.get('thrust')),
+        'thrust': itki,
         'burn_time': _num(results.get('burn_time')),
         'propellant_mass': prop,
         # P4B3-20: uçan atıl kütle tankları ve artık propelanı İÇERİR;
@@ -1215,6 +1277,15 @@ def normalize(motor_type: str, results: Dict,
     vehicle['flight_thrust'] = ucus
     vehicle['thrust_curve'] = ucus['thrust_curve']
     vehicle['airframe_resolved'] = derive_airframe(vehicle)
+    # V307/AĞIRLIK-MERKEZİ: türetilmiş gövdenin kütle yerleşimi (ağırlık
+    # merkezi 6-DOF ucunda :func:`component_cg` ile, isteğin kütleleriyle).
+    yerlesim, yerlesim_yok = mass_layout(mt, results, vehicle)
+    vehicle['airframe_resolved']['mass_layout'] = yerlesim
+    vehicle['airframe_resolved']['mass_layout_not_built'] = yerlesim_yok
+    # V307/ONARIM2-UÇUŞ-ARAÇ (M7-UCUS-18): bileşen tablosu motordan tohumlanır.
+    (vehicle['airframe_resolved']['component_rows'],
+     vehicle['airframe_resolved']['component_rows_not_built']) = \
+        component_table_rows(yerlesim)
     return vehicle
 
 
@@ -1222,9 +1293,19 @@ def normalize(motor_type: str, results: Dict,
 
 # --- Gövde ⟷ motor uygunluğu (NK-47, TEK işlev) -----------------------------
 
+#: V307/ONARIM-UÇUŞ (M7-UCUS-8): gövde boyu alanlarının çözünürlüğünün
+#: yarısı. 6-DOF paneli ve Fırlatma Sahası toplam boyu 2 ondalıkla yazar
+#: (``sixdof_panel.js`` tankliGovdeyiKur ``toFixed(2)``, ``launch_site.html``
+#: GOVDE_ALANLARI ``basamak: 2``): türetilen 1,062 m alanda 1,06 m olur. Bu
+#: kadarlık açık yuvarlamadır, motorun burna girmesi değil. Sayı gösterimi,
+#: fizik değil (``CG_DRY_MASS_FIELD_TOL_KG`` ile aynı gerekçe).
+AIRFRAME_LENGTH_FIELD_TOL_M = 0.005
+
+
 def airframe_fit_conflicts(engine_od_m: Any, engine_length_m: Any,
                            body_diameter_m: Any,
-                           body_length_m: Any) -> List[Dict[str, Any]]:
+                           body_length_m: Any,
+                           nose_length_m: Any = None) -> List[Dict[str, Any]]:
     """Gövde bu motoru TAŞIYABİLİR mi? Çelişki listesi (boş = uygun).
 
     V301/UÇUŞ NK-47 (son kullanıcı testi 26 Eki): Fırlatma Sahası 189,6 mm
@@ -1241,6 +1322,14 @@ def airframe_fit_conflicts(engine_od_m: Any, engine_length_m: Any,
     büyüğü) küçük olamaz; gövde boyu motor boyundan kısa olamaz. Zarf ya da
     gövde ölçüsü bilinmiyorsa (``None``) o denetim YAPILMAZ ve bir sayı
     uydurulmaz.
+
+    V307/ONARIM-UÇUŞ (M7-UCUS-8): burun boyu verildiyse motor burnun
+    ARKASINDAKİ silindirik gövdeye sığmalıdır (toplam boy − burun ≥ motor
+    boyu). Bu, gövde türetme kuralının kendi varsayımıdır (toplam boy =
+    burun + motor, :func:`derive_airframe`); burun daralan bir kabuktur,
+    motor zarfı orada taşınmaz. ÖLÇÜLDÜ (mühendis turu): katı örnekte toplam
+    boy 0,80 m girilince motor (0,562 m) burnun (0,50 m) 0,262 m içine
+    giriyor, ağırlık merkezi bu çakışık yerleşimden (0,519 m) geliyordu.
     """
     od = _num(engine_od_m)
     boy = _num(engine_length_m)
@@ -1257,6 +1346,7 @@ def airframe_fit_conflicts(engine_od_m: Any, engine_length_m: Any,
                 'outer diameter or nozzle exit, whichever is larger): this '
                 'airframe cannot carry this engine.'),
         })
+    burun = _num(nose_length_m)
     if boy is not None and boy > 0.0 and gboy is not None and gboy < boy:
         out.append({
             'field': 'body_length', 'reason': 'body_shorter_than_engine',
@@ -1264,6 +1354,19 @@ def airframe_fit_conflicts(engine_od_m: Any, engine_length_m: Any,
             'message': (
                 f'The body length {gboy:.3f} m is shorter than the engine '
                 f'length {boy:.3f} m: this airframe cannot carry this engine.'),
+        })
+    elif (boy is not None and boy > 0.0 and gboy is not None
+          and burun is not None and burun > 0.0
+          and gboy - burun < boy - AIRFRAME_LENGTH_FIELD_TOL_M):
+        out.append({
+            'field': 'body_length', 'reason': 'engine_reaches_into_nose',
+            'body_length_m': gboy, 'nose_length_m': burun,
+            'length_behind_nose_m': gboy - burun, 'engine_length_m': boy,
+            'unit': 'm',
+            'message': (
+                f'The body length {gboy:.3f} m minus the nose {burun:.3f} m '
+                f'leaves {gboy - burun:.3f} m, shorter than the engine length '
+                f'{boy:.3f} m: the engine would reach into the nose.'),
         })
     return out
 
@@ -1289,13 +1392,122 @@ def airframe_fit_conflicts(engine_od_m: Any, engine_length_m: Any,
 #: Gövde türetme kuralının künyesi. HRMA SEÇİMİDİR (kaynaklı bir tasarım
 #: kuralı değil): araç tasarımı HRMA'nın kapsamı dışındadır (karar 56), bu
 #: kural yalnız "motor ve tankları bu gövdeye sığar" alt sınırını kurar.
+#:
+#: V307/UÇUŞ-GÖVDE (17 Kas 2026) — TÜRETİLMİŞ GÖVDE TANKLARI TAŞIR. ÖLÇÜLDÜ
+#: (``docs/scofield/raw/OH/V307/ucus-govde/ONKAYIT.md``): eski kural dış
+#: çapı tankın İÇ çapına, boyu tank İÇ boylarının toplamına eşitliyordu;
+#: motorun aynı tank için yayımladığı cidar (sıvı 3,0 mm, hibrit 2,7 mm)
+#: hesaba girmiyordu ve Fırlatma Sahası alanı aşağı yuvarlayınca (0,473395
+#: → 0,473; 3,3523 → 3,35) gövde tankın iç çapından bile dar kalıyordu —
+#: çalkantı bağlantısı ``TANK_GOVDEDEN_GENIS`` / ``TANK_BURUN_ICINDE`` ile
+#: reddediliyordu. Bugünkü kural: dış çap tankın DIŞ çapını (iç çap + 2 ×
+#: yayımlanan cidar), boy tankların dış boyunu (iç boy + iki baş kalınlığı)
+#: taşır; ikisi de sayfa alanlarının çözünürlüğüne YUKARI yuvarlanır. Yeni
+#: sayı yoktur: kalınlıklar motorun basınçlı kap bloğundandır; seçimler
+#: (bütünleşik tank, temas eden başlar, sıra, burun) aşağıdaki metinde adıyla.
 AIRFRAME_DERIVATION_BASIS = (
     'HRMA choice, not a sourced design rule: the source carries no airframe, '
-    'so the body is the smallest cylinder that holds the engine and its '
+    'so the body is the smallest cylinder that carries the engine and its '
     'propellant tanks as the engine sized them. Outer diameter = the larger '
-    'of the engine envelope and the widest propellant tank; length behind '
-    'the nose = engine length + the tank lengths stacked in line. The '
-    'airframe wall is not modelled and its dry mass is not derived: enter it.')
+    'of the engine envelope and the widest propellant tank outer diameter '
+    '(the published inner diameter + 2 x the wall thickness the engine '
+    'publishes for that tank; the tank wall is taken as the body skin, no '
+    'separate skin or clearance is added). Length behind the nose = engine '
+    'length + the tanks stacked in line in the order of the engine tank '
+    'list (oxidizer forward), each with its inner length + its two end '
+    'closure thicknesses, neighbouring closures in contact (no inter-tank '
+    'bay or feed line length is added). With tanks, both are rounded up to '
+    'the resolution of the vehicle forms (1 mm and 10 mm) so every page '
+    'shows and flies the same number. A wall or closure thickness the '
+    'engine does not publish is taken as zero and named in '
+    'tank_shell_not_published (the body is then a lower bound). The nose is '
+    'the fixed 0.50 m ogive of the Launch Site view. The airframe dry mass '
+    'is not derived: enter it.')
+
+#: Türetilmiş gövdenin burnu (HRMA SEÇİMİ; kaynaklı bir tasarım kuralı
+#: değil). Fırlatma Sahası'nın sorulmayan sabit burnuyla AYNI sayıdır
+#: (``templates/launch_site.html`` ``LS_FIXED_AIRFRAME``; eşitliği
+#: ``tests/test_v307_ucus_govde.py`` bekler). Motor sayfası 6-DOF paneli
+#: türetilmiş gövdeyi bu burunla kurar: iki sayfa aynı gövdeyi uçurur.
+DERIVED_AIRFRAME_NOSE_LENGTH_M = 0.50
+DERIVED_AIRFRAME_NOSE_TYPE = 'ogive'
+
+#: Türetilmiş gövdenin yukarı yuvarlandığı adımlar = sayfaların gövde
+#: alanı çözünürlüğü (çap 3, boy 2 ondalık; ``launch_site.html``
+#: ``GOVDE_ALANLARI``, ``sixdof_panel.js``). Yuvarlama YUKARIdır: aşağı
+#: yuvarlanan gövde taşıdığı tanktan dar/kısa kalır (ölçülen kök).
+DERIVED_AIRFRAME_DIAMETER_STEP_M = 0.001
+DERIVED_AIRFRAME_LENGTH_STEP_M = 0.01
+#: Yukarı yuvarlamada kayan nokta artığı payı (adım cinsinden): 0,116·1000 =
+#: 116,00000000000001 bir üst adıma çıkmasın. Fizik değil, sayı gösterimi.
+_STEP_ROUNDING_GUARD = 1e-9
+
+
+def _round_up_to_step(value: float, step: float) -> float:
+    """``value``yi ``step``in katına YUKARI yuvarla (onluk adımda tam sayı)."""
+    return math.ceil(value / step - _STEP_ROUNDING_GUARD) / round(1.0 / step)
+
+
+def tank_stack(tanks: Any, engine_length_m: Any,
+               inner_lengths_m: Optional[Dict[str, float]] = None
+               ) -> Optional[Dict[str, Any]]:
+    """Tankların gövde içindeki dizilimi — TEK TANIM (gövde boyu + tank yeri).
+
+    Kıçtan buruna: motor, sonra tanklar; ``tanks`` listesi BURUNDAN KIÇA
+    sıradadır (son tank motorun hemen önünde). Her tank iç boyu + iki baş
+    kalınlığı kadar yer tutar; komşu başlar temas hâlindedir (tanklar arası
+    bölme / boru boşluğu eklenmez — :data:`AIRFRAME_DERIVATION_BASIS`).
+
+    ``inner_lengths_m``: tank anahtarı → iç boy [m] (çalkantı bağlantısı
+    yüklenen tank geometrisinin tablo boyunu verir); yoksa kaydın
+    ``length_m``i. Baş kalınlığı yayımlanmamışsa 0 alınır ve anahtar
+    ``shell_not_published`` listesine girer.
+
+    Dönüş: ``{'length_m': motor + tanklar [m], 'tanks': [{'key',
+    'base_from_tail_m', 'top_from_tail_m'}, ...] (burundan kıça),
+    'shell_not_published': [key, ...]}``; ``base`` tankın kıça bakan İÇ
+    tabanı, ``top`` buruna bakan İÇ tepesidir (gövdenin kıç ucundan uzaklık).
+    Motor boyu ya da bir tank boyu bilinmiyorsa ``None`` (uydurulmaz).
+    """
+    motor = _num(engine_length_m)
+    if motor is None or motor < 0.0 or not isinstance(tanks, list):
+        return None
+    x = motor
+    yerler = []
+    eksik = []
+    for t in reversed(tanks):
+        if not isinstance(t, dict):
+            return None
+        anahtar = t.get('key')
+        boy = _num((inner_lengths_m or {}).get(anahtar)
+                   if inner_lengths_m and anahtar in inner_lengths_m
+                   else t.get('length_m'))
+        if boy is None or boy <= 0.0:
+            return None
+        bas = _num(t.get('end_closure_thickness_m'))
+        if bas is None:
+            eksik.append(anahtar)
+            bas = 0.0
+        taban = x + bas
+        tepe = taban + boy
+        yerler.append({'key': anahtar, 'base_from_tail_m': taban,
+                       'top_from_tail_m': tepe})
+        x = tepe + bas
+    yerler.reverse()
+    eksik.reverse()
+    return {'length_m': x, 'tanks': yerler, 'shell_not_published': eksik}
+
+
+def tank_outer_diameter_m(tank: Any) -> Optional[float]:
+    """Tankın DIŞ çapı: iç çap + 2 × yayımlanan cidar (cidar yoksa iç çap)."""
+    if not isinstance(tank, dict):
+        return None
+    d = _num(tank.get('diameter_m'))
+    if d is None:
+        return None
+    cidar = _num(tank.get('wall_thickness_m'))
+    return d + 2.0 * cidar if cidar is not None else d
+
 
 #: Fırlatma Sahası "Örnek araç" — TEK TANIM (HRMA seçimi; gerçek bir motorun
 #: ya da roketin verisi DEĞİL, gösterim aracıdır). Sayılar eskiden
@@ -1342,25 +1554,53 @@ def derive_airframe(vehicle: Dict[str, Any]) -> Dict[str, Any]:
     """Araç tanımı taşımayan kaynak için gövde (kural: AIRFRAME_DERIVATION_BASIS).
 
     Dönüş: ``{'source': 'derived', 'body_diameter_m', 'length_behind_nose_m',
-    'body_length_m': None, 'airframe_dry_mass_kg': None, 'basis'}``. Toplam
-    boy burun boyunu içerir; burun Fırlatma Sahası'nda sabit olduğu için
-    sayfa ``burun + length_behind_nose_m`` toplar. Motor zarfı ya da boyu
-    bilinmiyorsa ilgili alan ``None`` kalır (uydurulmaz) — sayfa alanı boş
-    bırakır ve kullanıcıdan ister.
+    'body_length_m': None, 'airframe_dry_mass_kg': None, 'basis',
+    'nose_length_m', 'nose_type', 'tank_order', 'tank_stations',
+    'tank_shell_not_published'}``. Toplam boy burun boyunu içerir: sayfa
+    ``nose_length_m + length_behind_nose_m`` toplar (Fırlatma Sahası kendi
+    sabit burnuyla — aynı sayı). Motor zarfı ya da boyu bilinmiyorsa ilgili
+    alan ``None`` kalır (uydurulmaz) — sayfa alanı boş bırakır ve
+    kullanıcıdan ister.
+
+    V307/UÇUŞ-GÖVDE: tank taşıyan araçta (sıvı, hibrit) çap tankın DIŞ
+    çapını, boy tankların dış boyunu taşır ve alan çözünürlüğüne yukarı
+    yuvarlanır; ``tank_order`` burundan kıça tank anahtarları,
+    ``tank_stations`` her tankın iç tepe/taban istasyonu (burun tabanından,
+    m). Tanksız araçta (katı, örnek) sayılar 3.0.6 ile bit-aynıdır.
     """
     od = _num(vehicle.get('engine_od_m'))
     boy = _num(vehicle.get('engine_length_m'))
     tanklar = vehicle.get('propellant_tanks')
     cap = od
     arka = boy
+    sira: Optional[List[str]] = None
+    istasyonlar: Optional[List[Dict[str, Any]]] = None
+    eksik: List[str] = []
     if isinstance(tanklar, list):
+        sira = [t.get('key') for t in tanklar if isinstance(t, dict)]
         for t in tanklar:
-            d = _num(t.get('diameter_m')) if isinstance(t, dict) else None
-            l = _num(t.get('length_m')) if isinstance(t, dict) else None
+            d = tank_outer_diameter_m(t)
             if d is not None and cap is not None:
                 cap = max(cap, d)
-            if l is not None and arka is not None:
-                arka += l
+            if isinstance(t, dict) and _num(t.get('wall_thickness_m')) is None:
+                eksik.append(t.get('key'))
+        yigin = tank_stack(tanklar, boy) if tanklar else None
+        if tanklar:
+            # Tank taşıyan gövde: dizilim tek tanımdan; alan çözünürlüğüne
+            # YUKARI yuvarlanır (aşağı yuvarlanan gövde tanktan dar kalır).
+            arka = yigin['length_m'] if yigin is not None else None
+            if yigin is not None:
+                eksik.extend(k for k in yigin['shell_not_published']
+                             if k not in eksik)
+            if cap is not None:
+                cap = _round_up_to_step(cap, DERIVED_AIRFRAME_DIAMETER_STEP_M)
+            if arka is not None:
+                arka = _round_up_to_step(arka, DERIVED_AIRFRAME_LENGTH_STEP_M)
+                istasyonlar = [
+                    {'key': y['key'],
+                     'top_behind_nose_m': arka - y['top_from_tail_m'],
+                     'base_behind_nose_m': arka - y['base_from_tail_m']}
+                    for y in yigin['tanks']]
     elif tanklar is None and vehicle.get('motor_type') in ('liquid', 'hybrid'):
         # Tank geometrisi yayımlanmamış bir sıvı/hibrit motorda gövde boyu
         # motordan kurulamaz (tankın yeri bilinmez): uydurulmaz.
@@ -1372,7 +1612,679 @@ def derive_airframe(vehicle: Dict[str, Any]) -> Dict[str, Any]:
         'length_behind_nose_m': arka,
         'airframe_dry_mass_kg': None,
         'basis': AIRFRAME_DERIVATION_BASIS,
+        'nose_length_m': DERIVED_AIRFRAME_NOSE_LENGTH_M,
+        'nose_type': DERIVED_AIRFRAME_NOSE_TYPE,
+        'tank_order': sira,
+        'tank_stations': istasyonlar,
+        'tank_shell_not_published': eksik,
     }
+
+
+
+# --- V307/ONARIM2-UÇUŞ-ARAÇ (M7-CALK-15) · YÜKLENEN TANK GÖVDEYE GİRER --------
+#
+# ÖLÇÜLDÜ (mühendis turu M7-CALK-15, sıvı örnek): Besleme Sistemi → Çalkantı
+# sekmesinde oksitleyici tankına motorunkinden farklı bir geometri yüklenince
+# (R 0,300 m × H 0,800 m; ya da R 0,200 m × H 1,6577 m) 6-DOF paneli gövdeyi
+# yine MOTORUN tankından türetiyordu (Ø0,480 m): yüklenen tank çapça ya da
+# boyca sığmıyor, çalkantı bağlantısından ``TANK_GOVDEDEN_GENIS`` /
+# ``TANK_BURUN_ICINDE`` ile düşüyordu. Formun "yüklenen tank geometrisi burada
+# da kullanılır" vaadi tutmuyordu. Kural: türetilmiş gövde (aynı
+# :func:`derive_airframe`, aynı :data:`AIRFRAME_DERIVATION_BASIS`) yüklenen
+# tankın İÇ çapını (profilin en büyük yarıçapı × 2) ve İÇ boyunu (profilin
+# z açıklığı) taşır; cidar ve baş kalınlığı motorun o tank için yayımladığı
+# sayılardır (çalkantı bağlantısının ``_uygunluk`` denetimiyle aynı tanım).
+# Kütle yerleşiminde sıvı sütunu yüklenen profilden kurulur (silindir
+# varsayılmaz). Yeni sayı yoktur.
+
+#: Çalkantı tank kimliği (``slosh_tablo.TANK_KIMLIKLERI``) → uçuş tank
+#: anahtarı (``propellant_tanks[].key``). Eşleme çalkantı bağlantısının
+#: (``slosh_motor_baglanti.SIVI_TANKLARI`` ve hibrit oksitleyici adayı)
+#: kendisidir; burada yalnız ters yönü yazılır.
+LOADED_TANK_FLIGHT_KEYS = {'oksitleyici': 'oxidizer_tank',
+                           'yakit': 'fuel_tank', 'n2o': 'oxidizer_tank'}
+#: Motor türüne göre çalkantı tank kimlikleri (sıvıda iki tank; hibritte tek
+#: oksitleyici tankı, N₂O ise ``n2o`` — çalkantı bağlantısının adayları).
+LOADED_TANK_IDS_BY_MOTOR = {'liquid': ('oksitleyici', 'yakit'),
+                            'hybrid': ('oksitleyici', 'n2o')}
+
+LOADED_TANK_BASIS = (
+    'the propellant tank geometry you loaded on the Feed System slosh tab '
+    'replaces the engine tank in the airframe: inner diameter = 2 x the '
+    'largest radius of the loaded profile, inner length = its height; the '
+    'wall and end closure thicknesses stay those the engine publishes for '
+    'that tank; the liquid column in the centre of gravity is built from '
+    'the loaded profile.')
+
+
+class LoadedTankRejected(ValueError):
+    """Yüklenen tank geometrisi gövdeye konamadı: adlı kod, alan, cümle."""
+
+    def __init__(self, code: str, field: str, message: str):
+        super().__init__(message)
+        self.code = code
+        self.field = field
+
+
+def loaded_tank_geometry(motor_type: str, vehicle: Dict[str, Any],
+                         tank_geometries: Any) -> Dict[str, Dict[str, Any]]:
+    """Çalkantı bloğunun ``tank_geometrileri``si → uçuş tank anahtarı →
+    ``{'tank_id', 'diameter_m', 'length_m', 'volume_m3', 'profile_rz_m'}``.
+
+    Biçim kapısı çalkantı ucununkidir (``calkanti_arayuz._geometri_kapisi``),
+    profil denetimi kütle özelliklerininki (``tank_mass_properties.
+    profil_dogrula``): ikinci bir kapı yazılmaz. Profil tank çerçevesine
+    (en alt nokta z = 0) taşınır. Araçta karşılığı olmayan tank adıyla
+    reddedilir (:class:`LoadedTankRejected`).
+    """
+    from hrma.analysis import calkanti_arayuz as _ca
+    from hrma.analysis import tank_mass_properties as _tmp
+    try:
+        k4, _ozet = _ca._geometri_kapisi(tank_geometries)
+    except _ca.CalkantiArayuzHatasi as exc:
+        raise LoadedTankRejected(str(exc.kod), 'tank_geometrileri'
+                                 + ('.' + str(exc.alan).split('.', 1)[1]
+                                    if exc.alan and '.' in str(exc.alan)
+                                    else ''), str(exc))
+    anahtarlar = {t.get('key') for t in (vehicle.get('propellant_tanks') or [])
+                  if isinstance(t, dict)}
+    out: Dict[str, Dict[str, Any]] = {}
+    for tid, g in (k4 or {}).items():
+        anahtar = LOADED_TANK_FLIGHT_KEYS.get(tid)
+        if (tid not in LOADED_TANK_IDS_BY_MOTOR.get(motor_type, ())
+                or anahtar is None or anahtar not in anahtarlar
+                or anahtar in out):
+            raise LoadedTankRejected(
+                'LOADED_TANK_NOT_IN_VEHICLE', f'tank_geometrileri.{tid}',
+                f'this {motor_type} engine has no {tid} tank to replace with '
+                'the loaded geometry.')
+        try:
+            p = _tmp.profil_dogrula(g['sonuc']['profil_rz_m'])
+        except ValueError as exc:
+            raise LoadedTankRejected('LOADED_PROFILE_INVALID',
+                                     f'tank_geometrileri.{tid}.profil_rz_m',
+                                     f'the loaded tank profile is not usable '
+                                     f'({exc}).')
+        z0 = float(p[0, 1])
+        profil = [[float(r), float(z) - z0] for r, z in p.tolist()]
+        out[anahtar] = {'tank_id': tid,
+                        'diameter_m': 2.0 * float(p[:, 0].max()),
+                        'length_m': float(p[-1, 1]) - z0,
+                        'volume_m3': float(_tmp.ic_hacim(profil)),
+                        'profile_rz_m': profil}
+    return out
+
+
+def vehicle_with_loaded_tanks(motor_type: str, results: Dict,
+                              vehicle: Dict[str, Any],
+                              tank_geometries: Any) -> Dict[str, Any]:
+    """Aracın yüklenen tank geometrisiyle yeniden türetilmiş kopyası.
+
+    ``propellant_tanks`` kayıtlarında yüklenen tankın iç çapı/boyu/hacmi
+    yüklenen profilden gelir (cidar ve baş kalınlığı motorunki); gövde
+    (:func:`derive_airframe`) ve kütle yerleşimi (:func:`mass_layout`) bu
+    kayıtlardan yeniden kurulur. ``airframe_resolved.loaded_tanks`` yüklenen
+    tankların anahtarlarıdır (gövde notu bunu söyler). Kaynak araç
+    değişmez.
+    """
+    yuklu = loaded_tank_geometry(motor_type, vehicle, tank_geometries)
+    v = dict(vehicle)
+    if not yuklu:
+        return v
+    tanklar = []
+    for t in vehicle.get('propellant_tanks') or []:
+        t2 = dict(t) if isinstance(t, dict) else t
+        y = yuklu.get(t2.get('key')) if isinstance(t2, dict) else None
+        if y is not None:
+            t2['diameter_m'] = y['diameter_m']
+            t2['length_m'] = y['length_m']
+            t2['volume_m3'] = y['volume_m3']
+            t2['loaded_geometry'] = {'tank_id': y['tank_id'],
+                                     'profile_rz_m': y['profile_rz_m']}
+        tanklar.append(t2)
+    v['propellant_tanks'] = tanklar
+    hacimler = [_num(t.get('volume_m3')) for t in tanklar if isinstance(t, dict)]
+    v['propellant_volume_m3'] = (sum(hacimler) if hacimler
+                                 and all(h is not None for h in hacimler)
+                                 else None)
+    v['airframe_resolved'] = derive_airframe(v)
+    v['airframe_resolved']['loaded_tanks'] = sorted(yuklu)
+    v['airframe_resolved']['loaded_tank_basis'] = LOADED_TANK_BASIS
+    yerlesim, yerlesim_yok = mass_layout(motor_type, results, v)
+    v['airframe_resolved']['mass_layout'] = yerlesim
+    v['airframe_resolved']['mass_layout_not_built'] = yerlesim_yok
+    (v['airframe_resolved']['component_rows'],
+     v['airframe_resolved']['component_rows_not_built']) = \
+        component_table_rows(yerlesim)
+    return v
+
+# --- Ağırlık merkezi: bileşenlerden, TEK TANIM (V307/AĞIRLIK-MERKEZİ) --------
+#
+# Berke kararı (18 Kas, seçenek b): türetilmiş gövdede aracın ağırlık merkezi
+# çözücünün sabit boy kesri (0,55·L dolu / 0,50·L boş) DEĞİL, motorun
+# yayımladığı kütle kalemlerinden ve gövdenin dizilim tanımından
+# (:func:`tank_stack`) kurulur. ÖLÇÜLDÜ (UÇUŞ-GÖVDE KARAR 1,
+# ``docs/scofield/raw/OH/V307/ucus-govde/agirlik_merkezi.json``): boş araçta
+# kesir tahmini sıvıda 0,70 m, hibritte 0,47 m öndeydi — boş marj, kanat
+# açıklığı ve çalkantı kolu ξ = x_tank − x_cg iyimserdi.
+#
+# İki adım: ``normalize`` motor sonucundan YERLEŞİMİ kurar (kütle + kıçtan
+# istasyon; gövde boyundan bağımsız, çünkü motor kıçta ve tanklar onun
+# önünde dizilir); 6-DOF ucu isteğin gövde boyu ve kütleleriyle
+# :func:`component_cg`'yi çağırır. İstemci yerleşimi olduğu gibi taşır (aynı
+# kalıp ``engine_od_m`` / ``propellant_volume_m3``); uç onu güvenilmeyen
+# girdi olarak kapıdan geçirir.
+
+#: Yerleşim ve tablonun şema adı/sürümü (istemci taşır, uç denetler).
+CG_LAYOUT_SCHEMA = 'hrma.mass_layout'
+CG_LAYOUT_SCHEMA_VERSION = 1
+#: Yanan itici kesri ızgarasının nokta sayısı (0 … 1 eşit adım). HRMA
+#: seçimi: bileşen ağırlık merkezi kesrin düzgün işlevidir; 41 noktada
+#: doğrusal ara değerin hatası ölçülen örneklerde 1e-4 m'nin altındadır
+#: (RAPOR §2).
+CG_TABLE_POINTS = 41
+#: Kapı: yerleşimdeki kalem sayısı üst sınırı (saldırgan girdiye karşı;
+#: bugünkü motorlarda en çok 3 atıl + 2 itici kalemi). HRMA seçimi.
+CG_LAYOUT_ITEM_LIMIT = 16
+#: Kütle bütçesi karşılaştırmasının bağıl payı (kayan nokta toplama sırası).
+CG_MASS_REL_TOL = 1e-6
+#: Sayfa alanlarının çözünürlüğünün yarısı: 6-DOF paneli kuru kütleyi 2,
+#: itici kütlesini 3 ondalıkla gönderir (``sixdof_panel.js`` FIELDS). Bu
+#: kadarlık fark yuvarlamadır, bütçe farkı değil. Sayı gösterimi, fizik değil.
+CG_DRY_MASS_FIELD_TOL_KG = 0.005
+CG_PROPELLANT_MASS_FIELD_TOL_KG = 0.0005
+
+#: Yerleşim seçimlerinin künyesi (yanıtta ``stability_basis``; ekranda
+#: ``sixdof.cgComponents``). Her seçim HRMA seçimidir, kaynaklı kural değil.
+CG_LAYOUT_BASIS = (
+    'centre of gravity built from the engine mass items and the airframe '
+    'stack (HRMA choice of placement, not a sourced design rule): engine '
+    'dry mass at the middle of the engine length (the engine publishes no '
+    'station per part); liquid engine tank structure per tank '
+    '(propellant_tanks.<tank>.structural.tank_mass) at the middle of that '
+    'tank; propellant in a tank is a liquid column settled on the aft tank '
+    'bottom under thrust, its centre of gravity from the same fill model as '
+    'the slosh model (fill = m / (rho V), liquid height and centroid of the '
+    'tank profile), density at ignition; reserve and residual propellant '
+    'stay in their tank as part of that column; hybrid oxidizer left in the '
+    'tank (liquid and vapour) is counted as liquid; fuel grain (hybrid) and '
+    'solid propellant at the middle of the engine length (radial burn keeps '
+    'the grain centroid in place); propellant of every tank burns in the '
+    'same fraction of its consumed mass; dry mass not published by the '
+    'engine (airframe structure, nose, fins, payload, avionics) spread '
+    'uniformly along the body (centre at L/2). Enter the centre of gravity '
+    'yourself (component table) to override.')
+
+
+#: V307/AĞIRLIK-MERKEZİ-2 (Berke kararı, 18 Kas) — FAYDALI YÜK kalemi. Gerçek
+#: araç önden yüklüdür (aviyonik, kurtarma sistemi, yük burnun arkasında);
+#: motorun yayımlamadığı bu kütle L/2'ye yayılırsa sıvı örnek kanat kuralını
+#: sağlayamıyordu (agirlik-merkezi RAPOR KARAR 1). Kütle ve istasyon
+#: KULLANICI GİRDİSİDİR (6-DOF isteği ``payload_mass`` [kg] + ``payload_station``
+#: [m, burun ucundan]); HRMA sayı üretmez. Noktasal kütle, kuru kütlenin
+#: parçası (istemci kuru kütleye ekler); kalan motordan gelmeyen kütle L/2'de.
+PAYLOAD_BASIS = (
+    'payload entered by you (avionics + recovery + payload): a point mass at '
+    'the station you gave, measured from the nose tip; it is part of the dry '
+    'mass, the rest of the dry mass the engine does not publish stays spread '
+    'along the body (centre at L/2).')
+
+
+class CgLayoutRejected(ValueError):
+    """Bileşen ağırlık merkezi kurulamadı: adlı kod, alan ve cümle."""
+
+    def __init__(self, code: str, field: str, message: str):
+        super().__init__(message)
+        self.code = code
+        self.field = field
+
+
+def _cg_red(code: str, field: str, message: str):
+    raise CgLayoutRejected(code, field, message)
+
+
+def _tank_liquid_profile(d_m: float, l_m: float) -> List[List[float]]:
+    """Düz kapaklı dik silindirin (r, z) iç profili — motorun boyutlandırma
+    modeli (V = π/4·D²·L) ve çalkantı modelinin tank çerçevesi (z tabandan
+    buruna; ``tank_mass_properties`` sözleşmesi)."""
+    r = 0.5 * d_m
+    return [[0.0, 0.0], [r, 0.0], [r, l_m], [0.0, l_m]]
+
+
+def _liquid_column_centroid_m(d_m: float, l_m: float, rho: float,
+                              m_kg: float,
+                              profile_rz_m: Optional[List[List[float]]] = None
+                              ) -> float:
+    """Tank tabanından sıvı sütununun ağırlık merkezi [m].
+
+    Çalkantı modeliyle AYNI doluluk tanımı (doluluk = m/(ρ·V_iç);
+    ``six_dof_slosh.parametreler``, ``SloshTablo.doluluk_kutleden``) ve AYNI
+    profil işlevleri (``tank_mass_properties.doluluk_yuksekligi`` +
+    ``kesit_ozellikleri``; silindirde z_km = h/2 = K1 ``silindir_tablosu``).
+    """
+    from hrma.analysis import tank_mass_properties as _tmp
+    # V307/ONARIM2-UÇUŞ-ARAÇ (M7-CALK-15): yüklenen tankta sütun yüklenen
+    # profilden (tank çerçevesinde), değilse motorun düz kapaklı silindiri.
+    profil = (profile_rz_m if profile_rz_m is not None
+              else _tank_liquid_profile(d_m, l_m))
+    doluluk = m_kg / (rho * _tmp.ic_hacim(profil))
+    if not 0.0 < doluluk < 1.0:
+        _cg_red('LIQUID_DOES_NOT_FIT', 'mass_layout.propellant',
+                f'{m_kg:.6g} kg of liquid at {rho:.6g} kg/m3 fills '
+                f'{doluluk:.4g} of the tank; the centre of gravity of the '
+                'liquid column is defined for a fill between 0 and 1.')
+    try:
+        h = _tmp.doluluk_yuksekligi(profil, doluluk)
+        return float(_tmp.kesit_ozellikleri(profil, rho, h)['z_km_m'])
+    except ValueError as exc:      # profil kapısı / kök bulma (adıyla, 500 yok)
+        _cg_red('LIQUID_COLUMN_NOT_RESOLVED', 'mass_layout.propellant',
+                f'the liquid column could not be resolved ({exc}).')
+
+
+def _layout_tank_items(vehicle: Dict[str, Any]
+                       ) -> Tuple[Optional[Dict[str, Dict[str, float]]], str]:
+    """Tank anahtarı → {base, top, d, l} (kıçtan, m) ya da (None, sebep)."""
+    tanklar = vehicle.get('propellant_tanks')
+    if not isinstance(tanklar, list) or not tanklar:
+        return {}, ''
+    yigin = tank_stack(tanklar, vehicle.get('engine_length_m'))
+    if yigin is None:
+        return None, 'tank_stack_not_resolved'
+    out = {}
+    kayit = {t.get('key'): t for t in tanklar if isinstance(t, dict)}
+    for y in yigin['tanks']:
+        t = kayit.get(y['key']) or {}
+        out[y['key']] = {'base': y['base_from_tail_m'],
+                         'top': y['top_from_tail_m'],
+                         'd': _num(t.get('diameter_m')),
+                         'l': _num(t.get('length_m')),
+                         'profile': (t.get('loaded_geometry') or {}).get(
+                             'profile_rz_m')}
+    return out, ''
+
+
+#: V307/ONARIM2-UÇUŞ-ARAÇ (M7-UCUS-18): bileşen tablosunun motor satırları.
+#: ÖLÇÜLDÜ (mühendis turu): bileşen kipine geçince tablo sabit oyuncak
+#: değerleriyle (0,5/3,0/0,5/4,0/4,0 kg; İngilizce adlar) doluyor, koşu 12 kg
+#: araçla 225,825 kg oksitleyici tankını reddediyordu. Satırlar artık
+#: motorun kütle yerleşiminden (:func:`mass_layout`): her atıl kalem, her
+#: itici kaleminin yanan kısmı (itici satırı) ve tankta kalan kısmı (atıl
+#: satır). Sıvı sütununda kalanın yeri kalan sütunun ağırlık merkezidir,
+#: yananınki dolu sütunla kalan sütunun kütle ağırlıklı farkıdır: tablonun
+#: dolu ve boş ağırlık merkezi bileşen ağırlık merkeziyle (:func:`
+#: component_cg`) aynıdır. İstasyonlar kıçtandır (sayfa burun ucundan
+#: yazar: L − x). Yeni sayı yoktur.
+COMPONENT_ROWS_BASIS = (
+    'rows from the engine mass layout: each engine dry item at its station; '
+    'each propellant item split into the part that burns (propellant row) '
+    'and the part left in the tank (dry row), a liquid at the centroid of its '
+    'column; the dry mass the engine does not publish (airframe) at L/2 and '
+    'the payload at its station, as in the centre of gravity built from '
+    'components.')
+
+
+def component_table_rows(layout: Any) -> Tuple[Optional[List[Dict[str, Any]]],
+                                                Optional[str]]:
+    """Kütle yerleşimi → bileşen tablosu satırları (kıçtan) ya da
+    ``(None, sebep)``. Satır: ``{'key', 'mass_kg', 'x_from_tail_m',
+    'propellant'}``; tankta kalan kısım ``<key>.residual``."""
+    if not isinstance(layout, dict):
+        return None, 'mass_layout_not_built'
+    satirlar: List[Dict[str, Any]] = []
+    for k in layout.get('inert') or []:
+        satirlar.append({'key': k['key'], 'mass_kg': float(k['mass_kg']),
+                         'x_from_tail_m': float(k['x_from_tail_m']),
+                         'propellant': False})
+    try:
+        for p in layout.get('propellant') or []:
+            m0, mb = float(p['loaded_kg']), float(p['consumed_kg'])
+            kalan = m0 - mb
+            kalan_var = kalan > CG_MASS_REL_TOL * max(m0, 1.0)
+            if p['model'] == 'fixed':
+                x_dolu = x_kalan = float(p['x_from_tail_m'])
+            else:
+                args = (p['inner_diameter_m'], p['inner_length_m'],
+                        p['density_kg_m3'])
+                prof = p.get('inner_profile_rz_m')
+                x_dolu = p['base_from_tail_m'] + _liquid_column_centroid_m(
+                    *args, m0, prof)
+                x_kalan = (p['base_from_tail_m'] + _liquid_column_centroid_m(
+                    *args, kalan, prof)) if kalan_var else x_dolu
+            x_yanan = ((m0 * x_dolu - kalan * x_kalan) / mb
+                       if kalan_var else x_dolu)
+            satirlar.append({'key': p['key'], 'mass_kg': mb,
+                             'x_from_tail_m': float(x_yanan),
+                             'propellant': True})
+            if kalan_var:
+                satirlar.append({'key': p['key'] + '.residual',
+                                 'mass_kg': kalan,
+                                 'x_from_tail_m': float(x_kalan),
+                                 'propellant': False})
+    except CgLayoutRejected:
+        return None, 'liquid_column_not_resolved'
+    return satirlar, None
+
+
+def _sum_close(a: float, b: float) -> bool:
+    return abs(a - b) <= CG_MASS_REL_TOL * max(abs(a), abs(b), 1.0)
+
+
+def mass_layout(motor_type: str, results: Dict,
+                vehicle: Dict[str, Any]) -> Tuple[Optional[Dict[str, Any]],
+                                                  Optional[str]]:
+    """Türetilmiş gövdenin kütle YERLEŞİMİ (kıçtan istasyonlar) ya da
+    ``(None, sebep)``. Sayı üretmez: kütleler motorun yayımladığı
+    kalemlerdir, istasyonlar :func:`tank_stack`'tir; seçimler
+    :data:`CG_LAYOUT_BASIS`'te adıyla.
+
+    Dönüş şeması: ``{'schema', 'version', 'stations_from': 'tail',
+    'inert': [{'key', 'mass_kg', 'x_from_tail_m'}],
+    'propellant': [{'key', 'model': 'fixed'|'liquid_column', 'loaded_kg',
+    'consumed_kg', 'x_from_tail_m' | ('base_from_tail_m',
+    'inner_diameter_m', 'inner_length_m', 'density_kg_m3')}],
+    'dry_total_kg', 'consumed_total_kg', 'basis'}``.
+    """
+    boy = _num(vehicle.get('engine_length_m'))
+    if boy is None or boy <= 0.0:
+        return None, 'engine_length_not_published'
+    motor_orta = 0.5 * boy
+    kalemler = {k['key']: k['mass_kg'] for k in
+                vehicle.get('engine_inert_mass_items') or []
+                if isinstance(k, dict) and _num(k.get('mass_kg')) is not None}
+    ucus = vehicle.get('flight_thrust') or {}
+    yuklu = _num(ucus.get('propellant_loaded_kg'))
+    yanan = _num(ucus.get('propellant_consumed_kg'))
+    if yuklu is None or yanan is None or yanan <= 0.0 or yuklu < yanan:
+        return None, 'flight_propellant_not_published'
+    tanklar, sebep = _layout_tank_items(vehicle)
+    if tanklar is None:
+        return None, sebep
+    inert: List[Dict[str, Any]] = []
+    itici: List[Dict[str, Any]] = []
+
+    def _sutun(key, loaded, consumed, rho):
+        t = tanklar.get(key)
+        if (t is None or t['d'] is None or t['l'] is None or rho is None
+                or rho <= 0.0):
+            return False
+        itici.append({'key': key, 'model': 'liquid_column',
+                      'loaded_kg': float(loaded), 'consumed_kg': float(consumed),
+                      'base_from_tail_m': float(t['base']),
+                      'inner_diameter_m': float(t['d']),
+                      'inner_length_m': float(t['l']),
+                      'density_kg_m3': float(rho)})
+        if t.get('profile') is not None:
+            itici[-1]['inner_profile_rz_m'] = t['profile']
+        return True
+
+    if motor_type == 'liquid':
+        kuru = kalemler.get('engine_dry')
+        if kuru is None:
+            return None, 'engine_dry_mass_not_published'
+        inert.append({'key': 'engine_dry', 'mass_kg': float(kuru),
+                      'x_from_tail_m': motor_orta})
+        pt = results.get('propellant_tanks') if isinstance(
+            results.get('propellant_tanks'), dict) else {}
+        yapi_toplam = 0.0
+        yuklu_t = yanan_t = 0.0
+        for key in ('oxidizer_tank', 'fuel_tank'):
+            blok = pt.get(key) if isinstance(pt.get(key), dict) else {}
+            t = tanklar.get(key)
+            yapi = _num(_get(blok, 'structural', 'tank_mass'))
+            if 'tank_structure' in kalemler:
+                if yapi is None or yapi < 0.0 or t is None:
+                    return None, 'tank_structure_split_not_published'
+                inert.append({'key': 'tank_structure.' + key,
+                              'mass_kg': float(yapi),
+                              'x_from_tail_m': 0.5 * (t['base'] + t['top'])})
+                yapi_toplam += yapi
+            pd = blok.get('propellant_data') if isinstance(
+                blok.get('propellant_data'), dict) else {}
+            m0, m_nom = _num(pd.get('mass')), _num(pd.get('mass_nominal'))
+            if m0 is None or m_nom is None or m_nom < 0.0 or m0 < m_nom:
+                return None, 'tank_propellant_not_published'
+            if not _sutun(key, m0, m_nom, _num(pd.get('density'))):
+                return None, 'tank_propellant_not_published'
+            yuklu_t += m0
+            yanan_t += m_nom
+        if 'tank_structure' in kalemler and not _sum_close(
+                yapi_toplam, kalemler['tank_structure']):
+            return None, 'tank_structure_split_not_published'
+        # Uçan atıl kütlenin yedek kalemi tanklardaki (yüklenen − nominal)
+        # sıvıdır; sütunun parçası olarak taşınır, ikinci kez sayılmaz.
+        if not _sum_close(kalemler.get('reserve_propellant', 0.0),
+                          yuklu_t - yanan_t) or not _sum_close(yanan_t, yanan) \
+                or (_num(ucus.get('propellant_residual_kg')) or 0.0) > 0.0:
+            return None, 'tank_propellant_budget_not_closed'
+    elif motor_type == 'hybrid':
+        kuru = kalemler.get('engine_dry_estimate')
+        if kuru is None:
+            return None, 'engine_dry_mass_not_published'
+        inert.append({'key': 'engine_dry_estimate', 'mass_kg': float(kuru),
+                      'x_from_tail_m': motor_orta})
+        eng = results.get('motor') if isinstance(results.get('motor'), dict) \
+            else results
+        f_yuklu = _num(eng.get('fuel_mass_loaded'))
+        f_yanan = _num(eng.get('fuel_mass'))
+        if f_yuklu is None or f_yanan is None or f_yanan < 0.0 \
+                or f_yuklu < f_yanan:
+            return None, 'fuel_grain_mass_not_published'
+        ox_yuklu, ox_yanan = yuklu - f_yuklu, yanan - f_yanan
+        if ox_yanan < 0.0 or ox_yuklu < ox_yanan:
+            return None, 'tank_propellant_budget_not_closed'
+        rho = _num(_get(eng, 'oxidizer_tank_slosh', 'liquid_density_kg_m3'))
+        if not _sutun('oxidizer_tank', ox_yuklu, ox_yanan, rho):
+            return None, 'tank_propellant_not_published'
+        itici.append({'key': 'fuel_grain', 'model': 'fixed',
+                      'loaded_kg': float(f_yuklu), 'consumed_kg': float(f_yanan),
+                      'x_from_tail_m': motor_orta})
+    elif motor_type == 'solid':
+        kuru = kalemler.get('engine_dry')
+        if kuru is None:
+            return None, 'engine_dry_mass_not_published'
+        inert.append({'key': 'engine_dry', 'mass_kg': float(kuru),
+                      'x_from_tail_m': motor_orta})
+        itici.append({'key': 'propellant_grain', 'model': 'fixed',
+                      'loaded_kg': float(yuklu), 'consumed_kg': float(yanan),
+                      'x_from_tail_m': motor_orta})
+    else:
+        return None, 'motor_type_not_supported'
+    kuru_toplam = (sum(k['mass_kg'] for k in inert)
+                   + sum(p['loaded_kg'] - p['consumed_kg'] for p in itici))
+    return {'schema': CG_LAYOUT_SCHEMA, 'version': CG_LAYOUT_SCHEMA_VERSION,
+            'stations_from': 'tail', 'inert': inert, 'propellant': itici,
+            'dry_total_kg': kuru_toplam,
+            'consumed_total_kg': sum(p['consumed_kg'] for p in itici),
+            'basis': CG_LAYOUT_BASIS}, None
+
+
+def _layout_number(v: Any, field: str, *, positive: bool = False) -> float:
+    # Tel biçimi + sonluluk merkezî kapıdan (input_guard, TEK KAYNAK; OH-D27-11).
+    x = input_guard.finite_number(v) if input_guard.is_json_number(v) else None
+    if x is None or x < 0.0 or (positive and x <= 0.0):
+        _cg_red('LAYOUT_NUMBER_INVALID', field,
+                f'{field} must be a finite number '
+                + ('above 0' if positive else '0 or above') + '.')
+    return x
+
+
+def _layout_gate(layout: Any, body_length_m: float) -> Dict[str, Any]:
+    """İstemcinin taşıdığı yerleşimi denetle (güvenilmeyen girdi)."""
+    if not isinstance(layout, dict) or layout.get('schema') != CG_LAYOUT_SCHEMA \
+            or layout.get('version') != CG_LAYOUT_SCHEMA_VERSION \
+            or layout.get('stations_from') != 'tail':
+        _cg_red('LAYOUT_SCHEMA', 'mass_layout',
+                'mass_layout is not a layout this version publishes.')
+    inert, itici = layout.get('inert'), layout.get('propellant')
+    if not isinstance(inert, list) or not isinstance(itici, list) \
+            or len(inert) + len(itici) > CG_LAYOUT_ITEM_LIMIT or not itici:
+        _cg_red('LAYOUT_SIZE', 'mass_layout',
+                f'mass_layout needs 1 to {CG_LAYOUT_ITEM_LIMIT} items.')
+    out_i, out_p = [], []
+    for i, k in enumerate(inert):
+        a = f'mass_layout.inert[{i}]'
+        if not isinstance(k, dict):
+            _cg_red('LAYOUT_SCHEMA', a, f'{a} must be an object.')
+        x = _layout_number(k.get('x_from_tail_m'), a + '.x_from_tail_m')
+        if x > body_length_m:
+            _cg_red('ITEM_OUTSIDE_BODY', a + '.x_from_tail_m',
+                    f'{a} sits {x:.4g} m ahead of the tail, beyond the '
+                    f'{body_length_m:.4g} m body.')
+        out_i.append((_layout_number(k.get('mass_kg'), a + '.mass_kg'), x))
+    for i, p in enumerate(itici):
+        a = f'mass_layout.propellant[{i}]'
+        if not isinstance(p, dict) or p.get('model') not in (
+                'fixed', 'liquid_column'):
+            _cg_red('LAYOUT_SCHEMA', a, f'{a} must be a fixed or liquid_column '
+                    'item.')
+        m0 = _layout_number(p.get('loaded_kg'), a + '.loaded_kg')
+        mb = _layout_number(p.get('consumed_kg'), a + '.consumed_kg')
+        if mb > m0:
+            _cg_red('LAYOUT_NUMBER_INVALID', a + '.consumed_kg',
+                    f'{a} burns more than it holds.')
+        q = {'model': p['model'], 'm0': m0, 'mb': mb}
+        if p['model'] == 'fixed':
+            q['x'] = _layout_number(p.get('x_from_tail_m'), a + '.x_from_tail_m')
+            ust = q['x']
+        else:
+            q['base'] = _layout_number(p.get('base_from_tail_m'),
+                                       a + '.base_from_tail_m')
+            q['d'] = _layout_number(p.get('inner_diameter_m'),
+                                    a + '.inner_diameter_m', positive=True)
+            q['l'] = _layout_number(p.get('inner_length_m'),
+                                    a + '.inner_length_m', positive=True)
+            q['rho'] = _layout_number(p.get('density_kg_m3'),
+                                      a + '.density_kg_m3', positive=True)
+            # V307/ONARIM2-UÇUŞ-ARAÇ (M7-CALK-15): yüklenen tankın iç profili
+            # (isteğe bağlı; kütle özelliklerinin kendi kapısından geçer, iç
+            # boyu ``inner_length_m`` ile aynı olmalı).
+            if p.get('inner_profile_rz_m') is not None:
+                from hrma.analysis import tank_mass_properties as _tmp
+                try:
+                    pr = _tmp.profil_dogrula(p['inner_profile_rz_m'])
+                except (ValueError, TypeError) as exc:
+                    _cg_red('LAYOUT_NUMBER_INVALID', a + '.inner_profile_rz_m',
+                            f'{a} profile is not usable ({exc}).')
+                if float(pr[0, 1]) != 0.0 or abs(
+                        float(pr[-1, 1]) - q['l']) > CG_MASS_REL_TOL * q['l']:
+                    _cg_red('LAYOUT_NUMBER_INVALID', a + '.inner_profile_rz_m',
+                            f'{a} profile must start at z = 0 and be '
+                            'inner_length_m high.')
+                q['profile'] = pr.tolist()
+            ust = q['base'] + q['l']
+        if ust > body_length_m:
+            _cg_red('ITEM_OUTSIDE_BODY', a,
+                    f'{a} reaches {ust:.4g} m ahead of the tail, beyond the '
+                    f'{body_length_m:.4g} m body.')
+        out_p.append(q)
+    return {'inert': out_i, 'propellant': out_p}
+
+
+def _payload_gate(mass: Any, station: Any, body_length_m: float
+                  ) -> Optional[Tuple[float, float]]:
+    """Faydalı yük girdisi (güvenilmeyen) → ``(kütle, burundan istasyon)``
+    ya da ``None`` (ikisi de yok). Biri tek başına gelemez."""
+    if mass is None and station is None:
+        return None
+    if mass is None or station is None:
+        _cg_red('PAYLOAD_INCOMPLETE',
+                'payload_station' if station is None else 'payload_mass',
+                'The payload needs both its mass and its station from the nose '
+                'tip.')
+    m = _layout_number(mass, 'payload_mass')
+    x = _layout_number(station, 'payload_station', positive=True)
+    if x > body_length_m:
+        _cg_red('PAYLOAD_OUTSIDE_BODY', 'payload_station',
+                f'The payload station {x:.4g} m from the nose tip is beyond '
+                f'the {body_length_m:.4g} m body.')
+    return m, x
+
+
+def component_cg(layout: Any, body_length_m: float, dry_mass_kg: float,
+                 propellant_mass_kg: float, payload_mass_kg: Any = None,
+                 payload_station_m: Any = None) -> Dict[str, Any]:
+    """Aracın ağırlık merkezi bileşenlerden — TEK TANIM (burundan, m).
+
+    ``dry_mass_kg`` / ``propellant_mass_kg`` 6-DOF isteğinin kütleleridir.
+    Kuru kütlenin motorun yayımlamadığı kısmı (gövde yapısı vb.) gövde
+    boyunca tekdüze sayılır (L/2). İtici kütlesi yerleşimin yanan
+    toplamına eşit olmalı (sayfa alanı çözünürlüğü kadar fark kabul); kuru
+    kütle motorun uçan kuru kütlesinden küçük olamaz. Uymazsa
+    :class:`CgLayoutRejected` (sayı uydurulmaz).
+
+    Dönüş: ``{'x_cg_full_m', 'x_cg_empty_m', 'table': {'propellant_kg':
+    [artan, 0 … P], 'x_cg_m': [...]}, 'airframe_dry_mass_not_from_engine_kg',
+    'source', 'basis'}``. Tablo çözücünün kalan itici kütlesine göre ara
+    değerlediği ağırlık merkezidir (``SixDOFTrajectory(x_cg_table=…)``).
+    """
+    from hrma.analysis.six_dof_trajectory import CG_SOURCE_COMPONENTS
+    L = float(body_length_m)
+    g = _layout_gate(layout, L)
+    yuk = _payload_gate(payload_mass_kg, payload_station_m, L)
+    kuru_motor = (sum(m for m, _ in g['inert'])
+                  + sum(p['m0'] - p['mb'] for p in g['propellant']))
+    m_yuk = yuk[0] if yuk is not None else 0.0
+    yanan = sum(p['mb'] for p in g['propellant'])
+    P = float(propellant_mass_kg)
+    if abs(P - yanan) > max(CG_PROPELLANT_MASS_FIELD_TOL_KG,
+                            CG_MASS_REL_TOL * max(P, yanan)):
+        _cg_red('PROPELLANT_MASS_DIFFERS', 'propellant_mass',
+                f'The propellant mass {P:.6g} kg is not the {yanan:.6g} kg the '
+                'engine burns in flight, so the engine tanks cannot place it: '
+                'the centre of gravity from components is not built. Restore '
+                "the engine's propellant mass or enter the centre of gravity "
+                '(component table).')
+    ek = float(dry_mass_kg) - kuru_motor - m_yuk
+    if m_yuk > 0.0 and ek < -max(CG_DRY_MASS_FIELD_TOL_KG,
+                                 CG_MASS_REL_TOL * (kuru_motor + m_yuk)):
+        _cg_red('DRY_MASS_BELOW_ENGINE_AND_PAYLOAD', 'payload_mass',
+                f'The dry mass {float(dry_mass_kg):.6g} kg is below the '
+                f'{kuru_motor:.6g} kg the engine flies with plus the '
+                f'{m_yuk:.6g} kg payload, so the centre of gravity from '
+                'components is not built. The payload is part of the dry mass.')
+    if ek < -max(CG_DRY_MASS_FIELD_TOL_KG, CG_MASS_REL_TOL * kuru_motor):
+        _cg_red('DRY_MASS_BELOW_ENGINE', 'dry_mass',
+                f'The dry mass {float(dry_mass_kg):.6g} kg is below the '
+                f'{kuru_motor:.6g} kg the engine flies with (dry items + '
+                'propellant left in the tanks), so the centre of gravity from '
+                'components is not built. Enter at least the engine flying '
+                'dry mass or the centre of gravity (component table).')
+    tablo_P, tablo_x = [], []
+    n = CG_TABLE_POINTS
+    for i in range(n):
+        f = 1.0 - i / (n - 1)               # yanan kesir: boş (1) → dolu (0)
+        m_top = ek
+        mx = ek * 0.5 * L
+        if m_yuk > 0.0:
+            m_top += m_yuk
+            mx += m_yuk * (L - yuk[1])     # istasyon burundan → kıçtan
+        for m, x in g['inert']:
+            m_top += m
+            mx += m * x
+        for p in g['propellant']:
+            m = p['m0'] - p['mb'] * f
+            if m <= 0.0:
+                continue
+            if p['model'] == 'fixed':
+                s = p['x']
+            else:
+                s = p['base'] + _liquid_column_centroid_m(
+                    p['d'], p['l'], p['rho'], m, p.get('profile'))
+            m_top += m
+            mx += m * s
+        if not m_top > 0.0:
+            _cg_red('DRY_MASS_BELOW_ENGINE', 'dry_mass',
+                    'the vehicle mass is not positive.')
+        tablo_P.append(P * (1.0 - f))
+        tablo_x.append(L - mx / m_top)
+    tablo_P[0], tablo_P[-1] = 0.0, P
+    return {'x_cg_full_m': tablo_x[-1], 'x_cg_empty_m': tablo_x[0],
+            'table': {'propellant_kg': tablo_P, 'x_cg_m': tablo_x},
+            'airframe_dry_mass_not_from_engine_kg': ek,
+            'payload': (None if yuk is None else {
+                'mass_kg': yuk[0], 'station_from_nose_m': yuk[1],
+                'basis': PAYLOAD_BASIS}),
+            'source': CG_SOURCE_COMPONENTS, 'basis': CG_LAYOUT_BASIS}
 
 
 def project_airframe(airframe: Any) -> Optional[Dict[str, Any]]:
@@ -1393,6 +2305,103 @@ def project_airframe(airframe: Any) -> Optional[Dict[str, Any]]:
         if v is not None and v > 0.0:
             out[hedef] = v
             bulundu = True
+    return out if bulundu else None
+
+
+#: V307/FS-YÜK — kayıtlı projenin 6-DOF uçuş kurulumundaki faydalı yük
+#: alanları (motor sayfası 6-DOF paneli ``sixdof_panel.js`` FIELDS
+#: kimlikleri; belgede ``inputs.dynamic.flight.sixdof.fields``) → aracın
+#: ``payload`` bloğundaki ad. Fırlatma Sahası alanlarını bundan doldurur.
+PROJECT_PAYLOAD_FIELDS = {'sd_payload_m': 'payload_mass_kg',
+                          'sd_payload_x': 'payload_station_m'}
+
+
+def project_payload(doc: Any, source: str = 'project'
+                    ) -> Optional[Dict[str, Any]]:
+    """Kayıtlı projenin (ya da proje dosyasının) faydalı yükü ya da ``None``.
+
+    Motor sayfasının 6-DOF paneli projeyi açınca bu iki alanı belgeden AYNEN
+    kurar ve koşuda gönderir; Fırlatma Sahası aynı aracı uçursun diye aynı
+    değerler okunur (tek araç, tek sayı). Panel bileşen kipindeyse alanlar
+    kullanılmaz → ``None``. Boş alan yok sayılır (kalem yok); dolu ama sayı
+    olmayan alan ``unreadable`` listesine adıyla girer (sessizce düşmez).
+    Kabul aralığı burada DENETLENMEZ: 6-DOF ucunun tek kapısı
+    (:func:`_payload_gate`) uçuşta adıyla reddeder.
+    """
+    try:
+        sd = doc['inputs']['dynamic']['flight']['sixdof']
+    except (KeyError, TypeError):
+        return None
+    if not isinstance(sd, dict) or sd.get('mass_mode') == 'component':
+        return None
+    alanlar = sd.get('fields')
+    if not isinstance(alanlar, dict):
+        return None
+    out = {'payload_mass_kg': None, 'payload_station_m': None,
+           'unreadable': [], 'source': source,
+           'basis': ('payload stored with the 6-DOF setup of the motor page '
+                     '(inputs.dynamic.flight.sixdof)')}
+    bulundu = False
+    for anahtar, hedef in PROJECT_PAYLOAD_FIELDS.items():
+        ham = alanlar.get(anahtar)
+        if ham is None or (isinstance(ham, str) and ham.strip() == ''):
+            continue
+        bulundu = True
+        deger = None if isinstance(ham, bool) else _num(ham)
+        if deger is None:
+            out['unreadable'].append(hedef)
+        else:
+            out[hedef] = deger
+    return out if bulundu else None
+
+
+#: V307/ONARIM-UÇUŞ (M7-FS-14, M7-FS-5) — kayıtlı projenin 6-DOF uçuş
+#: kurulumundaki araç Cd₀'ı ve uçuş ortamı (motor sayfası 6-DOF paneli
+#: ``sixdof_panel.js`` FIELDS kimlikleri) → Fırlatma Sahası'nın istek adları
+#: (``launch_site.html`` buildFlightPayload). ÖLÇÜLDÜ (mühendis turu,
+#: 19 Kas): hibrit örnek projede ``sd_cd0`` = 0,50; Fırlatma Sahası aynı
+#: projeyi HTML varsayılanı 0,45 ile uçuruyordu (apoje +%7,0).
+PROJECT_SIXDOF_SETUP_FIELDS = {'sd_cd0': 'cd0',
+                               'sd_wind': 'wind_speed',
+                               'sd_wind_dir': 'wind_direction_deg',
+                               'sd_elev': 'launch_elevation_deg',
+                               'sd_azimuth': 'launch_azimuth_deg',
+                               'sd_rail': 'rail_length_m'}
+
+
+def project_sixdof_setup(doc: Any, source: str = 'project'
+                         ) -> Optional[Dict[str, Any]]:
+    """Kayıtlı projenin 6-DOF kurulumundaki Cd₀ ve uçuş ortamı ya da ``None``.
+
+    Cd₀ aracın özelliğidir: Fırlatma Sahası alanı bundan dolar (tek araç,
+    tek sayı). Ortam (rüzgâr, atış/azimut açısı, ray) sahanın girdisidir;
+    sayfa onu doldurmaz, farkı ekranda adıyla yazar. Bileşen kipinde de
+    geçerlidir (Cd₀ kütle kipinden bağımsız). Boş alan yok sayılır; dolu ama
+    sayı olmayan alan ``unreadable`` listesine adıyla girer. Kabul aralığı
+    burada DENETLENMEZ: 6-DOF ucunun kapıları uçuşta adıyla reddeder.
+    """
+    try:
+        alanlar = doc['inputs']['dynamic']['flight']['sixdof']['fields']
+    except (KeyError, TypeError):
+        return None
+    if not isinstance(alanlar, dict):
+        return None
+    out: Dict[str, Any] = {hedef: None for hedef in
+                           PROJECT_SIXDOF_SETUP_FIELDS.values()}
+    out.update({'unreadable': [], 'source': source,
+                'basis': ('6-DOF setup stored with the motor page '
+                          '(inputs.dynamic.flight.sixdof.fields)')})
+    bulundu = False
+    for anahtar, hedef in PROJECT_SIXDOF_SETUP_FIELDS.items():
+        ham = alanlar.get(anahtar)
+        if ham is None or (isinstance(ham, str) and ham.strip() == ''):
+            continue
+        bulundu = True
+        deger = None if isinstance(ham, bool) else _num(ham)
+        if deger is None:
+            out['unreadable'].append(hedef)
+        else:
+            out[hedef] = deger
     return out if bulundu else None
 
 
@@ -1497,6 +2506,14 @@ def page_payload(motor_type: str, fields: Any) -> Dict[str, Any]:
     if motor_type == 'hybrid':
         if 'single_pressure' in data:
             data['atmospheric_pressure'] = data.pop('single_pressure')
+        # V307/ONARIM2-UÇUŞ-ARAÇ (İTKİ-A DEVİR): sayfa tek irtifa kipinde
+        # irtifa alanı sayıyken ``design_ambient_altitude_m`` gönderir
+        # (``advanced.html`` getFormData, M7-ITKI-13); ayna da aynısını
+        # yapar. Ad yalnız basınç o irtifanın ISA basıncıysa uygulanır (uç,
+        # ``_hibrit_ortam_irtifasini_adlandir``); sayılar değişmez.
+        if _is_number(data.get('single_altitude')) and \
+                'design_ambient_altitude_m' not in data:
+            data['design_ambient_altitude_m'] = data['single_altitude']
         if _is_number(data.get('thrust')) and _is_number(data.get('burn_time')):
             data['total_impulse'] = data['thrust'] * data['burn_time']
         data.setdefault('contraction_ratio', 0)

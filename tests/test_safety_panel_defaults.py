@@ -63,8 +63,12 @@ pytestmark = pytest.mark.skipif(NODE is None, reason='node kurulu değil')
 
 #: Ucun zorunlu saydığı alanlar (app.py::REQUIRED_SAFETY_FIELDS ile aynı
 #: küme; eksikse 422 döner, o yüzden her istek bunları taşır).
+# V307/GÜVERTE-ISIL kalem 4: ``chamber_temperature`` varsayılanlı kümeden
+# ZORUNLU kümeye taşındı (uç 3000 K uydurmuyor; eksikse 422). Değer eski
+# örtük varsayılanın kendisi: yanıtın sayıları bit-aynı.
 SAFETY_ZORUNLU_ALANLAR = {'chamber_pressure': 40.0, 'propellant_mass': 5.0,
-                          'chamber_diameter': 0.1, 'wall_thickness': 0.005}
+                          'chamber_diameter': 0.1, 'wall_thickness': 0.005,
+                          'chamber_temperature': 3000.0}
 
 #: Ucun varsayılanı olan alanlar — istekte verilirse beyan listesi boşalır.
 # ÖH D31 / OH-D30-11 — ``motor_type`` BU KÜMEYE EKLENDİ (bekçi çevrildi).
@@ -78,7 +82,6 @@ SAFETY_ZORUNLU_ALANLAR = {'chamber_pressure': 40.0, 'propellant_mass': 5.0,
 # bu dalgada birlikte güncellendi. Bekçinin niyeti korunur: kümenin her
 # alanı ucun beyanında ADIYLA görünmeli.
 SAFETY_VARSAYILANLI_ALANLAR = {'motor_type': 'hybrid',
-                               'chamber_temperature': 3000.0,
                                'thrust': 1000.0, 'burn_time': 10.0,
                                'propellant_type': 'composite',
                                'facility_type': 'test_stand',

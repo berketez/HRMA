@@ -275,12 +275,57 @@ class TestP11B406HukumGerekcesi:
         assert 'notEval.map(degerlendirilmeyenMetni)' in s, (
             '`not_evaluated` listesi hâlâ HAM basılıyor')
 
-    def test_bilinen_kod_cumleye_cevrilir_ham_anahtar_KALIR(self):
-        """ÖK-22: künye izlenebilirliği daralmaz — ham anahtar kalır."""
+    def test_bilinen_kod_okunur_cumleye_cevrilir_makine_adi_basilmaz(self):
+        """ÖK-22 — V307/DİL-EKRAN-2 (ana model kararı, 18 Kas 2026).
+
+        3.0.6'ya kadar bu düğüm ham anahtarın cümlenin YANINDA parantez
+        içinde kalmasını kilitliyordu ("… totolojidir.
+        (safety_factor_is_tautological)"), gerekçe künye
+        izlenebilirliğiydi. Karar: makine adı kullanıcıya GÖSTERİLMEZ;
+        ÖK-22'nin taşıdığı anlam — emniyet katsayısının çözümün kendi
+        boyutlandırdığı kalınlığa karşı sınandığı, yani bir doğrulama
+        değil TOTOLOJİ olduğu uyarısı — okunur cümlenin kendisinde kalır.
+        Bu düğüm artık o cümleyi kilitler: (1) çevirici yalnız cümleyi
+        döndürür, kod eklemez; (2) totoloji kodu sözlükte; (3) cümle EN
+        ve TR'de totoloji uyarısını taşır. Ters mutasyon: eski
+        ``+ ' (' + ad + ')'`` eki geri gelirse ya da TR cümleden
+        "totoloji" düşerse KIRMIZI.
+        """
         s = govde(JS / 'panels' / 'structural_panel.js')
         assert 'safety_factor_is_tautological: [' in s
-        assert "return T(rec[0], rec[1]) + ' (' + ad + ')';" in s, (
-            'çeviri ham anahtarı GİZLİYOR — izlenebilirlik daraldı')
+        assert 'return T(rec[0], rec[1]);' in s, (
+            'çevirici okunur cümleyi döndürmüyor')
+        assert "' (' + ad + ')'" not in s, (
+            'makine adı yine cümlenin yanında basılıyor (ÖK-22 kararı)')
+        sozluk = ham(JS / 'i18n_common.js')
+        en = re.search(r"'panel\.structural\.reasonTautological': '([^\n]*)',",
+                       sozluk)
+        tr = re.findall(r"'panel\.structural\.reasonTautological': '([^\n]*)',",
+                        sozluk)
+        assert en and len(tr) == 2, 'totoloji cümlesi EN + TR olmalı'
+        assert 'tautology, not a verification' in tr[0], tr[0]
+        assert 'bir doğrulama değil, totolojidir' in tr[1], tr[1]
+
+    def test_panele_ulasan_her_kod_sozlukte(self):
+        """V307/DİL-EKRAN-2: bu panele ulaşan gerekçe kodlarının envanteri
+        (app.py, structural_analysis.py, safety_analysis.
+        motor_structural_verdict append noktaları, 18 Kas ölçümü).
+        Sözlükte olmayan kod HAM basılır (fail-closed); 3.0.6'da dördü
+        (no_station_verified, stations_not_verified,
+        structural_outcome_not_published,
+        solver_publishes_no_structural_verdict) böyle ekrana iniyordu."""
+        s = govde(JS / 'panels' / 'structural_panel.js')
+        for kod in ('safety_factor_is_tautological',
+                    'wall_temperature_not_computed',
+                    'material_identity_unresolved',
+                    'user_wall_thickness_not_applied',
+                    'model_validity_limit_exceeded',
+                    'no_station_verified', 'stations_not_verified',
+                    'structural_outcome_not_published',
+                    'solver_publishes_no_structural_verdict',
+                    'wall_temperature'):
+            assert re.search(r'\n\s+%s: \[' % kod, s), (
+                f'{kod} panelin kod sözlüğünde yok — ekranda ham basılır')
 
     def test_bilinmeyen_kod_GIZLENMEZ(self):
         s = govde(JS / 'panels' / 'structural_panel.js')
@@ -294,6 +339,10 @@ class TestP11B406HukumGerekcesi:
                         'panel.structural.reasonWallTempNotComputed',
                         'panel.structural.reasonMaterialUnresolved',
                         'panel.structural.reasonUserWallNotApplied',
+                        'panel.structural.reasonNoStationVerified',
+                        'panel.structural.reasonStationsNotVerified',
+                        'panel.structural.reasonOutcomeNotPublished',
+                        'panel.structural.reasonSolverNoVerdict',
                         'panel.structural.notEvalWallTemperature'):
             assert s.count("'%s'" % anahtar) == 2, (
                 f'{anahtar} EN ve TR bloklarının İKİSİNDE olmalı')

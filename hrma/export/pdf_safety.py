@@ -23,8 +23,10 @@ oluşmaz.
 FAIL-CLOSED (Doktrin 1): ``SafetyAnalyzer`` eksik girdide SESSİZCE kendi
 sabitlerine düşer (``analyze_comprehensive_safety``:
 ``chamber_pressure=20.0``, ``chamber_diameter=0.1``,
-``wall_thickness=0.005``) — o yüzden analiz, dört zorunlu alanın DÖRDÜ de
-gerçekten çözülmeden ÇAĞRILMAZ. Çözülemeyen alan için sayı uydurulmaz;
+``wall_thickness=0.005``) — o yüzden analiz, zorunlu alanların HEPSİ
+gerçekten çözülmeden ÇAĞRILMAZ (V307/GÜVERTE-ISIL kalem 4: oda sıcaklığı da
+zorunlu; ``SafetyAnalyzer`` sıcaklıksız motor verisinde 3000 K
+uyduruyordu). Çözülemeyen alan için sayı uydurulmaz;
 bölüm basılmaz ve rapor hangi alanın eksik olduğunu ADIYLA söyler.
 
 TEK KAYNAK (Doktrin 4):
@@ -33,7 +35,7 @@ TEK KAYNAK (Doktrin 4):
   * basınç bandı ``MotorDataValidator().limits`` sözlüğünden okunur,
   * uygulanan varsayılanların DEĞERLERİ burada yeniden yazılmaz —
     çözümleyicinin kendi imzasından okunur (``inspect.signature``),
-  * zorunlu dörtlü ``/analyze_safety`` kapısıyla AYNI olmak zorundadır ve
+  * zorunlu alan kümesi ``/analyze_safety`` kapısıyla AYNI olmak zorundadır ve
     bu eşitlik bekçiye bağlıdır
     (``tests/test_d31_ihracat_a1.py::TestP9B321TekKaynak``).
 """
@@ -42,12 +44,17 @@ from typing import Dict, Optional, Tuple
 
 from hrma.utils.input_guard import finite_positive
 
-#: ``/analyze_safety`` ucunun fail-closed kapısıyla AYNI dörtlü. Değer
+#: ``/analyze_safety`` ucunun fail-closed kapısıyla AYNI küme. Değer
 #: listesi DEĞİL, alan adı listesidir; ucun kendi ``REQUIRED_SAFETY_FIELDS``
 #: demetiyle eşitliği bekçiyle (AST okumasıyla) kilitlidir.
+#: V307/GÜVERTE-ISIL (kalem 4): ``chamber_temperature`` uçta zorunlu oldu
+#: (3000 K varsayılanı kalktı); bu küme de onu taşır. ÖLÇÜLDÜ
+#: (docs/scofield/raw/OH/V307/guverte-isil/k4_pdf_once.json): sıcaklıksız
+#: motor verisinde bölüm ``thermal_safety.chamber_temperature_k = 3000.0``
+#: ve 3000 K'den çıkan tutuşma hükmü (MEDIUM) yayımlıyordu.
 PDF_SAFETY_REQUIRED_FIELDS = (
-    'chamber_pressure', 'propellant_mass', 'chamber_diameter',
-    'wall_thickness',
+    'chamber_pressure', 'chamber_temperature', 'propellant_mass',
+    'chamber_diameter', 'wall_thickness',
 )
 
 #: Çözücünün bu alanı YAYIMLADIĞI yerler — ÖLÇÜLMÜŞ yollardır, tahmin
@@ -245,7 +252,7 @@ def _tablodan_coz(motor_data, analysis_results, alan):
 
 def resolve_safety_inputs(motor_data: Dict,
                           analysis_results: Dict) -> Tuple[Dict, list, Dict]:
-    """Zorunlu dörtlüyü çözer. Döner: ``(girdiler, eksik, kaynaklar)``.
+    """Zorunlu alanları çözer. Döner: ``(girdiler, eksik, kaynaklar)``.
 
     ``girdiler`` çözümleyicinin beklediği birimlerdedir (basınç bar, uzunluk
     metre, kütle kg). ``eksik`` çözülemeyen alan adlarıdır; boş değilse
@@ -285,6 +292,18 @@ def resolve_safety_inputs(motor_data: Dict,
         girdiler[alan] = deger
         kaynaklar[alan] = yol
 
+    # --- chamber_temperature (V307/GÜVERTE-ISIL kalem 4): ZORUNLU ---------
+    # Eskiden aşağıdaki isteğe bağlı alanlar arasındaydı; yoksa
+    # ``SafetyAnalyzer`` 3000 K uyduruyordu. Kaynak etiketi eskisiyle aynı.
+    tc = _sonlu_pozitif(md.get('chamber_temperature'))
+    if tc is None:
+        tc = _sonlu_pozitif(ar.get('chamber_temperature'))
+    if tc is None:
+        eksik.append('chamber_temperature')
+    else:
+        girdiler['chamber_temperature'] = tc
+        kaynaklar['chamber_temperature'] = 'chamber_temperature'
+
     return girdiler, eksik, kaynaklar
 
 
@@ -307,7 +326,7 @@ def build_pdf_safety(motor_data: Dict,
     sayının hangi alandan geldiğini söyleyebilsin diye.
 
     Analiz KOŞULMAZ (ve ``None`` döner) şu hâllerde:
-      * zorunlu dörtlüden biri çözülemedi (``eksik``),
+      * zorunlu alanlardan biri çözülemedi (``eksik``),
       * çözümleyici girdileri reddetti (fizik kapısı) — gerekçe künyede.
     """
     girdiler, eksik, kaynaklar = resolve_safety_inputs(
@@ -329,6 +348,7 @@ def build_pdf_safety(motor_data: Dict,
         'chamber_pressure': girdiler['chamber_pressure'],
         'chamber_diameter': girdiler['chamber_diameter'],
         'wall_thickness': girdiler['wall_thickness'],
+        'chamber_temperature': girdiler['chamber_temperature'],
     }
     # V301/K-C1 devri (KT-16): kasa boyu VARSA geçer — yoksa güvenlik
     # modülü kasa kütlesini "ASSUMED L/D = 5" ile kuruyordu (ölçüldü:
@@ -345,7 +365,8 @@ def build_pdf_safety(motor_data: Dict,
         analiz_motor_data['chamber_length'] = boy_m
         kaynaklar['chamber_length'] = boy_kaynak
     # İsteğe bağlı ama VARSA geçen alanlar: uydurulmaz, yalnız taşınır.
-    for alan in ('thrust', 'burn_time', 'chamber_temperature'):
+    # (Oda sıcaklığı V307'de zorunlu kümeye taşındı; yukarıda.)
+    for alan in ('thrust', 'burn_time'):
         deger = _sonlu_pozitif(md.get(alan))
         if deger is None:
             deger = _sonlu_pozitif(ar.get(alan))

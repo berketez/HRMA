@@ -15,7 +15,7 @@
   "tur_commit": "0a138ff6a",
   "tur_tarihi": "2026-11-02",
   "tur_durumu": "hedefe_ulasti",
-  "vaka_dosyasi_tarihi": "2026-11-04"
+  "vaka_dosyasi_tarihi": "2026-11-16"
  },
  "gercek_motor": true,
  "adimlar": [
@@ -246,7 +246,8 @@
     "of_max": 3.2,
     "combustion_efficiency": 97,
     "engine_cycle": "expander",
-    "thrust": 51719,
+    "design_ambient_mode": "vacuum",
+    "thrust": 73400,
     "chamber_pressure": 32.75,
     "turbopump_efficiency": 75,
     "generator_gas_temp": 1000,
@@ -273,15 +274,11 @@
     "engine_life_cycles": 10
    },
    "kaynak_istek_sirasi": 5,
-   "turetilmis": false,
+   "turetilmis": true,
    "beklenen": {
-    "http_durum": 422,
-    "gecersiz_alan": {
-     "field": "nozzle_expansion_ratio",
-     "reason": "fixed_nozzle_separated_at_design_ambient"
-    }
+    "http_durum": 200
    },
-   "girdi_notu": "motor adımı: tur gövdesi aynen. 3.0.6 (V306/SIVI-CEKET-B kalem 5, ana model kararı 9 Kas): sıvı sayfasının tasarım ortamı deniz seviyesi; ε 61 sabit nozul deniz seviyesinde ayrılır (Summerfield 0,40·P_a), tasarım yayımlanmaz, adlı ret beklenir (ayrılmayan en büyük ε 10,07). Vakum/irtifa tasarım ortamı girdisi yeni özellik: sonraki sürüm listesi. RL10 kaydı kayıt yolundan (resmî korelasyon koşucusu, motor API) kıyaslanmaya devam eder.",
+   "girdi_notu": "motor adımı: RL10A-3-3A vakum tasarımı (türetilmiş gövde, bkz. turetme_notu). 3.0.6'da bu adım adlı ret bekliyordu (sıvı sayfasının tasarım ortamı sabit deniz seviyesiydi; ε 61 orada ayrılır). 3.0.7'de vakum tasarım ortamıyla tasarım yayımlanır; deniz seviyesi durumu (ayrık, sayı yok, yapışık en büyük ε 10,07) design_ambient.sea_level bloğunda izlenir. Yayımlanmış RL10 değerleriyle kıyas: kayit_kiyasi.vaka_yolu (Isp_vak bandı tests/test_correlation_guards.py hücre tavanı).",
    "izlenen": [
     {
      "ad": "itki_N",
@@ -292,6 +289,11 @@
      "ad": "itki_vak_N",
      "yol": "thrust_vacuum",
      "birim": "N"
+    },
+    {
+     "ad": "isp_tasarim_ortami_s",
+     "yol": "isp_design_ambient",
+     "birim": "s"
     },
     {
      "ad": "isp_ds_s",
@@ -352,14 +354,50 @@
      "ad": "motor_kuru_kg",
      "yol": "design_summary.masses.engine_mass_kg",
      "birim": "kg"
+    },
+    {
+     "ad": "tasarim_ortami_basinci_bar",
+     "yol": "design_ambient.pressure_bar",
+     "birim": "bar"
+    },
+    {
+     "ad": "ds_durumu",
+     "yol": "design_ambient.sea_level.status",
+     "birim": "-"
+    },
+    {
+     "ad": "ds_cikis_basinci_bar",
+     "yol": "design_ambient.sea_level.exit_pressure_bar",
+     "birim": "bar"
+    },
+    {
+     "ad": "ds_yapisik_en_buyuk_eps",
+     "yol": "design_ambient.sea_level.max_attached_expansion_ratio_2dp",
+     "birim": "-"
     }
-   ]
+   ],
+   "turetme_notu": "3.0.7 (V307/SIVI-ORTAM, 16 Kas 2026): tur gövdesinden iki alan değişti. (1) design_ambient_mode = vacuum: sıvı sayfasına tasarım ortamı girdisi geldi; RL10 bir vakum motorudur. (2) thrust 51719 → 73400 N: turdaki 51 719 N, 3.0.5'te vakum itkisi girilemediği için deniz seviyesine GERİ ÇÖZÜLMÜŞ itkiydi (geçici çözüm); 73 400 N kaydın yayımlanmış vakum itkisidir (liq-rl10a33a-nominal-spec measured.thrust_vac_n; 16 500 lbf). Öteki alanlar (O/F 5, Pc 32,75 bar, ε 61, yanma verimi %97 turun varsayımı, rejeneratif CuCrZr) tur gövdesiyle aynı."
   }
  ],
  "kayit_kiyasi": [
   {
    "kayit": "liq-rl10a33a-nominal-spec",
-   "kayit_yolu": true
+   "kayit_yolu": true,
+   "vaka_yolu": {
+    "adim": "rl10_kiyas_motoru",
+    "eslesme": [
+     {
+      "kayit_anahtari": "thrust_vac_n",
+      "yanit_yolu": "thrust_vacuum",
+      "dongusel": true,
+      "dongusel_neden": "kaydın vakum itkisi motora tasarım itkisi olarak verildi (vakum tasarım ortamı)"
+     },
+     {
+      "kayit_anahtari": "isp_vac_s",
+      "yanit_yolu": "isp_vacuum"
+     }
+    ]
+   }
   }
  ],
  "disarida_birakilan": [

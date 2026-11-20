@@ -66,13 +66,16 @@ def analyzer():
     return CombustionAnalyzer(memoize=True)
 
 
+# V307/KÜÇÜKLER-2 (kalem 2): oda sıcaklığı figür modülünün ZORUNLU girdisi
+# oldu (eski gizli 3000 K varsayılanı kalktı). Bekçiler aynı sayıyı artık
+# AÇIKÇA verir: çizilen figürler önceki koşuyla bit-aynıdır.
 NOZZLE_INPUT = {'throat_area': 0.001, 'nozzle_length': 0.1,
-                'expansion_ratio': 16}
+                'expansion_ratio': 16, 'chamber_temperature': 3000.0}
 
 HEAT_INPUT = {'burn_time': 30, 'chamber_length': 0.5, 'nozzle_length': 0.1,
               'base_heat_flux': 2e6, 'critical_heat_flux': 4.0,
               'throat_area': 0.001, 'expansion_ratio': 16,
-              'chamber_pressure': 30.0}
+              'chamber_pressure': 30.0, 'chamber_temperature': 3000.0}
 
 
 # ---------------------------------------------------------------------------

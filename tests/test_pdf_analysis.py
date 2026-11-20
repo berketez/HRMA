@@ -134,12 +134,34 @@ class TestRealValuesInPdf:
         assert abs(structural['safety_factor_total'] - 4.0) > 0.05
         assert abs(structural['safety_factor_pressure'] - 4.0) > 0.05
 
-    def test_no_fixed_sf_4_remnant(self, complete_pdf):
+    def test_no_fixed_sf_4_remnant(self, complete_pdf, real_analyses):
         # Eski dürüstlük sorunu: rapor katmanı sabit SF 4.0 basıyordu.
         # Gerçek SF'ler 4.0'dan uzak seçildiği için PDF'te '4.00' string'i
         # hiç görünmemeli (sabit değer geri sızarsa bu test kırılır).
+        #
+        # V307/SEKME-MOTOR (NK3-H-2): PDF artık ekranın Performans Özeti
+        # kartını ('Structural Min SF' = ``safety_analysis.minimum_safety_
+        # factor``, künyesiyle) taşıyor. Bu fikstürde analizörün KENDİ
+        # sepet minimumu 4,0'dır: tasarım hedefi verilmedi, steel_4130
+        # kaydının hedefi (4,0) uygulandı ve beş istasyonun beşi de hedefi
+        # geri okuyor (stations_reading_back_target). Ekran kartı da aynı
+        # 4,00'ı basar. '4.00' YALNIZ o satırda ve analizörün sayısı olarak
+        # geçebilir; başka her yerde sabit 4.0 sızıntısı sayılır.
+        _, structural = real_analyses
         _, text = _pdf_text(complete_pdf)
-        assert '4.00' not in text
+        satirlar = text.splitlines()
+        safety = structural['safety_analysis']
+        assert f"{safety['minimum_safety_factor']:.2f}" == '4.00'
+        assert set(safety['stations_reading_back_target']) == set(
+            safety['safety_factors'])
+        manset = [i for i, s in enumerate(satirlar)
+                  if s.strip() == 'Structural Min SF']
+        assert len(manset) == 1 and satirlar[manset[0] + 1].strip() == '4.00'
+        kalan = '\n'.join(s for i, s in enumerate(satirlar)
+                          if i not in (manset[0], manset[0] + 1))
+        assert '4.00' not in kalan
+        assert 'Stations reading back the design target' in ' '.join(
+            text.split())
         assert 'Standard aerospace safety factor' not in text
 
     def test_real_structural_status_in_pdf(self, complete_pdf, real_analyses):

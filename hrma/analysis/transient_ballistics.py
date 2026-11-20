@@ -1441,7 +1441,7 @@ class TransientBallistics:
                     f"{artik_ox:.3f} kg of oxidiser is still in the tank; "
                     f"valued at the oxidiser-specific impulse of the last "
                     f"integrated step (F/mdot_ox) that is worth "
-                    f"{artik_i:.0f} N*s, "
+                    f"{artik_i:.0f} N·s, "
                     f"{(artik_oran or 0.0) * 100:.1f} % of the impulse "
                     f"reported above. It is NOT modelled here" +
                     (f": the adiabatic vapour path would fall below the N2O "

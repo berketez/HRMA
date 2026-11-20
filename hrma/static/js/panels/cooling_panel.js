@@ -649,12 +649,16 @@
         motorTypes: ['liquid'],
         long: true,
         fields: [
-            ['chamber_pressure', 'Chamber Pressure (bar)', 50, 1, 'common.f.chamberPressureBar', 'panel.regen.help.chamber_pressure'],
-            ['chamber_temperature', 'Chamber Temperature (K)', 3400, 10, 'common.f.chamberTemperatureK', 'panel.regen.help.chamber_temperature'],
-            ['throat_diameter', 'Throat Diameter (m)', 0.05, 0.001, 'common.f.throatDiameterM', 'panel.regen.help.throat_diameter'],
-            ['expansion_ratio', 'Expansion Ratio', 8, 0.1, 'common.f.expansionRatio', 'panel.regen.help.expansion_ratio'],
-            ['gamma', 'Gamma (frozen)', 1.2, 0.01, 'common.f.gammaFrozen', 'panel.regen.help.gamma'],
-            ['molecular_weight', 'Molecular Weight (g/mol)', 22, 0.5, 'common.f.molecularWeight', 'panel.regen.help.molecular_weight'],
+            // V307/SEKME-GÜVERTE (NK3-H-7 ailesi): motordan gelen büyüklüklerin
+            // tanım değeri BOŞ (eskiden gizli bir motor: 50 bar, 3400 K, boğaz Ø 0,05 m, ε 8, γ 1,2, M 22, soğutucu 2 kg/s). Son hesap
+            // başarısızken (sonuç düşürüldü) alanlar tanım değerine döner; boş
+            // zorunlu alan isteği durdurur ve adıyla söylenir (`required`).
+            ['chamber_pressure', 'Chamber Pressure (bar)', '', 1, 'common.f.chamberPressureBar', 'panel.regen.help.chamber_pressure'],
+            ['chamber_temperature', 'Chamber Temperature (K)', '', 10, 'common.f.chamberTemperatureK', 'panel.regen.help.chamber_temperature'],
+            ['throat_diameter', 'Throat Diameter (m)', '', 0.001, 'common.f.throatDiameterM', 'panel.regen.help.throat_diameter'],
+            ['expansion_ratio', 'Expansion Ratio', '', 0.1, 'common.f.expansionRatio', 'panel.regen.help.expansion_ratio'],
+            ['gamma', 'Gamma (frozen)', '', 0.01, 'common.f.gammaFrozen', 'panel.regen.help.gamma'],
+            ['molecular_weight', 'Molecular Weight (g/mol)', '', 0.5, 'common.f.molecularWeight', 'panel.regen.help.molecular_weight'],
             // ÖH A2 sivi-sogutma · 7. tur (F-17 ilkesi: kaynaksız ön-dolgu
             // yok): soğutucu 'water', giriş sıcaklığı 300 K, giriş basıncı
             // 60 bar, kanal genişliği 2,0 mm, derinliği 3,0 mm ve astar
@@ -664,7 +668,7 @@
             // alan boş kalır ve ZORUNLUDUR (spec.required): güverte isteği
             // göndermez, eksik alanı adıyla söyler.
             ['coolant', 'Coolant', '', COOLANTS, 'panel.regen.fCoolant', 'panel.regen.help.coolant'],
-            ['coolant_mdot', 'Coolant Mass Flow (kg/s)', 2.0, 0.05, 'panel.regen.fCoolantMdot', 'panel.regen.help.coolant_mdot'],
+            ['coolant_mdot', 'Coolant Mass Flow (kg/s)', '', 0.05, 'panel.regen.fCoolantMdot', 'panel.regen.help.coolant_mdot'],
             ['coolant_inlet_temp', 'Coolant Inlet T (K)', '', 5, 'panel.regen.fInletT', 'panel.regen.help.coolant_inlet_temp'],
             ['coolant_inlet_pressure', 'Coolant Inlet P (bar)', '', 1, 'panel.regen.fInletP', 'panel.regen.help.coolant_inlet_pressure'],
             // ÖH A2 sivi-sogutma · 6. tur (F-17 ilkesi: kaynaksız ön-dolgu
@@ -685,7 +689,11 @@
         // adıyla ister, kalanlar için güverte isteği durdurur.
         required: ['n_channels', 'coolant', 'coolant_inlet_temp',
                    'coolant_inlet_pressure', 'channel_width',
-                   'channel_height', 'wall_thickness'],
+                   'channel_height', 'wall_thickness',
+                   // V307/SEKME-GÜVERTE (NK3-H-7 ailesi): motor büyüklükleri.
+                   'chamber_pressure', 'chamber_temperature', 'throat_diameter',
+                   'expansion_ratio', 'gamma', 'molecular_weight',
+                   'coolant_mdot'],
         // Sıvı motor sonuçlarından otomatik dolum: soğutucu = yakıt akışı.
         fromResults: function (r) {
             const m = (r && r.motor) || r || {};

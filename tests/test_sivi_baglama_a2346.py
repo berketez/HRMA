@@ -39,6 +39,7 @@ import math
 
 import numpy as np
 import pytest
+from scipy.special import jnp_zeros
 
 from hrma.engines.liquid_rocket_engine import (
     BURN_TIME_DEFAULT_S,
@@ -85,8 +86,9 @@ BASE_CTOR = dict(thrust=25000, chamber_pressure=70, mixture_ratio=2.3,
                  fuel_type='rp1', oxidizer_type='lox',
                  propellant_data=OFFLINE_PROPELLANTS)
 
-#: SP-106 birinci antisimetrik mod kökü (J1'(x)=0) — el hesabı için.
-LAMBDA_1 = 1.8412
+#: Birinci antisimetrik mod kökü (J1'(x)=0; Dodge 2000 Denk. (1.41)) — el
+#: hesabı için. 3.0.7 (V307/K1): kesin kök (scipy); eskisi 1.8412.
+LAMBDA_1 = float(jnp_zeros(1, 1)[0])
 G0 = 9.80665
 
 

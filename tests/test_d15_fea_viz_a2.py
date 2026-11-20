@@ -504,9 +504,12 @@ class TestP8B411TekVakumItkisi:
         return create_cea_style_results(hibrit_motor)
 
     def _tablo_vakum(self, metin):
+        # V307/HİBRİT-ORTAM: tasarım ortamı deniz seviyesi değilse tablo üç
+        # sütunludur (tasarım ortamı · deniz seviyesi · vakum); vakum her
+        # iki düzende de birimden önceki son sayıdır.
         satir = [ln for ln in metin.splitlines()
                  if ln.startswith('Thrust') and 'N' in ln][0]
-        return float(satir.split()[2])
+        return float(satir.split()[-2])
 
     def test_kart_ve_tablo_ayni_sayi(self, metin):
         kart = float(re.search(r'Vacuum Thrust: ([\d.]+) N', metin).group(1))
@@ -515,12 +518,27 @@ class TestP8B411TekVakumItkisi:
 
     def test_kart_vacuum_column_ile_ayni_kaynaktan(self, hibrit_motor, metin):
         from hrma.visualization.advanced_results import _vacuum_column
-        sl_isp = hibrit_motor.get('sea_level_isp', hibrit_motor['isp'])
-        tv, _cf, basis = _vacuum_column(hibrit_motor, sl_isp,
-                                        hibrit_motor.get('vacuum_isp'))
+        # V307/HİBRİT-ORTAM: oran, itkiyle AYNI ortamın Isp'sine kurulur.
+        # Bu motorun tasarım ortamı uç varsayılanı 1,0 bar (ISA deniz
+        # seviyesi değil): eski beklenti F_tas·Isp_vak/Isp_ds idi, iki ortamı
+        # karıştırıyordu (ölçüldü: 3451,97 N ⟷ motorun kendi vakum itkisi
+        # ṁ·g0·Isp_vak 3445 N; fark Isp_tas/Isp_ds oranı kadar).
+        da = hibrit_motor.get('design_ambient') or {}
+        if da.get('is_sea_level') is False:
+            ref, ad = hibrit_motor['isp'], 'Isp at the design ambient'
+        else:
+            ref = hibrit_motor.get('sea_level_isp', hibrit_motor['isp'])
+            ad = 'Isp_sl'
+        tv, _cf, basis = _vacuum_column(hibrit_motor, ref,
+                                        hibrit_motor.get('vacuum_isp'),
+                                        ref_name=ad)
         kart = float(re.search(r'Vacuum Thrust: ([\d.]+) N', metin).group(1))
         assert kart == pytest.approx(tv, abs=0.5)
         assert f'Vacuum thrust basis: {basis}' in metin
+        # Fizik: sabit ṁ'de F_vak = ṁ·g0·Isp_vak — motorun kendi vakum itkisi.
+        f_vak = hibrit_motor['altitude_performance']['nozzle_loss_model'][
+            'thrust_vacuum_n']
+        assert kart == pytest.approx(f_vak, abs=0.5)
 
     def test_izgara_tavani_adiyla_ve_irtifasiyla(self, hibrit_motor, metin):
         """ÇEVRİLDİ — ÖH D17 / P8B4-11 ŞARTI + OH-D16-12.

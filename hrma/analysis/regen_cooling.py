@@ -1544,10 +1544,13 @@ class RegenCooling:
     @classmethod
     def from_motor_data(cls, motor_data: Dict, **kwargs) -> 'RegenCooling':
         """Build from a repo-style motor dictionary (chamber_pressure in bar)."""
+        # V307/KÜÇÜKLER-2 (kalem 2): oda sıcaklığı zorunlu (tek tanım
+        # nozzle_flow_1d'de; tembel ithal, döngüsel ithal yok).
+        from hrma.analysis.nozzle_flow_1d import _oda_sicakligi_zorunlu
         md = dict(motor_data or {})
         params = dict(
             chamber_pressure=float(md.get('chamber_pressure', 20.0)) * 1e5,
-            chamber_temperature=float(md.get('chamber_temperature', 3000.0)),
+            chamber_temperature=_oda_sicakligi_zorunlu(md, 'RegenCooling'),
             # ÖH D21 / B3-13(c) — SESSİZ 1,2 YEDEĞİ KALKTI, KÜNYE GELDİ.
             # Eski satır ``float(md.get('gamma', md.get('gamma_avg',
             # 1.2)))`` idi: γ hiç yokken 1,2 sessizce konuyor, üstelik

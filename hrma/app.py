@@ -35,6 +35,7 @@ if platform.system() == 'Windows':
 # Engines
 from hrma.engines.hybrid_rocket_engine import (
     HybridRocketEngine, CHAMBER_PRESSURE_PLACEHOLDER_BAR,
+    HYBRID_DEFAULT_AMBIENT_BAR,
     # ÖH D25 / P16B3-02: hibrit soğutma seçiminin TEK tanım noktası motor
     # modülüdür. Uç kapısı listeyi KOPYALAMAZ, buradan okur (doktrin 4).
     COOLING_CHANNEL_TO_TYPE,
@@ -93,6 +94,8 @@ from hrma.engines.solid_rocket_engine import (
 from hrma.engines.liquid_rocket_engine import (
     # V306/SIVI-CEKET-A (K5_KARAR EK7): ceket yayım kapısı (idempotent).
     apply_jacket_publication_gate,
+    # V307/SIVI-ORTAM: tasarım ortamı girdisinin adlı reddi.
+    DesignAmbientInputError,
     # ÖH D15 / P7B2-08: soğutma tipi beyaz listesinin TEK tanım noktası
     # motor modülüdür (``COOLING_TYPES_RECOGNISED = tuple(WALL_TEMP_DEFAULT_K)``).
     # Uç kapısı listeyi KOPYALAMAZ, oradan okur.
@@ -182,6 +185,8 @@ from hrma.analysis.safety_analysis import (
     NonPhysicalSafetyInput,
 )
 from hrma.analysis.structural_analysis import StructuralAnalyzer
+# V307/SEKME-MOTOR (DİL-HİBRİT §8.2): hibrit 'İrtifa Profili' sekmesi.
+from hrma.analysis import altitude_performance as _irtifa_profili
 from hrma.analysis.heat_transfer_analysis import (
     HeatTransferAnalyzer,
     # ÖH D30 a3 / P16B3-34: özgül ısı oranı bandının TEK KAYNAĞI bu
@@ -314,7 +319,7 @@ from hrma.export.motor_geometry import (
 # ve hiçbir test/araç onu ``hrma.app`` üzerinden yeniden dışa aktarılmış
 # gibi okumuyor (``git grep 'app.*R_UNIVERSAL' -- tests`` boş). Gaz sabitine
 # ihtiyaç duyan modüller onu ``hrma.constants``tan doğrudan alır.
-from hrma.constants import G_0, isa_pressure
+from hrma.constants import G_0, isa_pressure, isa_pressure_geometric
 # ÖH D37 A2 hibrit · F-10 (= CW-A5): delik çapı bandının TEK kaynağı;
 # künyesi hrma.constants.ORIFICE_D_BAND_SOURCE (Sutton & Biblarz 9. bs.
 # §8.9 s. 337; Mishra 2017 Böl. 10 s. 348). Eski 0,3/2,0 literalleri
@@ -1452,37 +1457,90 @@ def _injector_plate_report(material_name, data, motor_results,
         plan_kaynak = 'pintle_annulus_bore'
         t_plate_mm = None
 
-    report = injector_plate_structural(
-        delta_P_bar=dp,
-        plate_diameter_m=d_ch,
-        material_props=props,
-        material_name=props.get('name', key),
-        plate_thickness_m=(t_plate_mm / 1000.0) if t_plate_mm else None,
-        n_holes=int(n_holes or 0),
-        hole_diameter_m=(float(d_hole_mm) / 1000.0) if d_hole_mm else 0.0,
-        required_sf=data.get('safety_factor'),
-    )
-    if (pintle_bore_mm is not None and report.get('status') == 'sized'
-            and report.get('required_thickness_mm')):
-        _t_gerek = float(report['required_thickness_mm'])
-        report = injector_plate_structural(
-            delta_P_bar=dp, plate_diameter_m=d_ch, material_props=props,
+    # V307/ONARIM-İTKİ-B (M7-ITKI-9) — PLAKA, MOTORUN HEDEFİYLE. Hibrit
+    # sayfası ``safety_factor``'ü yalnız kullanıcı değiştirince gönderir;
+    # gönderilmediğinde motorun yapısal boyutlandırması (kamara, kapak,
+    # lüle, cıvata) seçili kamara malzemesi kaydının hedefini kullanır
+    # (``structural_analysis.chamber_analysis.design_safety_factor_target``),
+    # plaka ise modülün 2,0 varsayılanına düşüyordu. ÖLÇÜLDÜ (hibrit örnek,
+    # SS316 3 mm): motor hedefi 4,0, plaka hedefi 2,0 ``default``; gereken
+    # kalınlık 9,54 mm (4,0 hedefle 13,49 mm). Artık plaka, kullanıcı
+    # hedef vermediyse motorun yayımladığı hedefle denetlenir (kaynak
+    # ``motor_design_target``); yayımlanmamışsa modül varsayılanı, adıyla.
+    _sa = (motor_results.get('structural_analysis')
+           if isinstance(motor_results, dict) else None)
+    _ca = _sa.get('chamber_analysis') if isinstance(_sa, dict) else None
+    _motor_sf_hedefi = (input_guard.finite_number(
+        _ca.get('design_safety_factor_target'))
+        if isinstance(_ca, dict) else None)
+
+    # V307/PLAKA-MARŞ — iki yük durumu (çalışma + marş/kesme), sıvıyla AYNI
+    # yardımcı (``_enjektor_plaka_iki_durum``); hüküm en düşük SF. Hibritte
+    # kalınlık girdidir (boyutlandırma yok); pintle yüz plakası yöneten
+    # gereksinime boyutlanır (bugünkü kural, standart levhasız).
+    def _cagir(q_bar, t_m):
+        return injector_plate_structural(
+            delta_P_bar=q_bar,
+            plate_diameter_m=d_ch,
+            material_props=props,
             material_name=props.get('name', key),
-            plate_thickness_m=_t_gerek / 1000.0, n_holes=1,
-            hole_diameter_m=pintle_bore_mm / 1000.0,
-            required_sf=data.get('safety_factor'))
+            plate_thickness_m=t_m,
+            n_holes=int(n_holes or 0),
+            hole_diameter_m=(float(d_hole_mm) / 1000.0) if d_hole_mm else 0.0,
+            required_sf=data.get('safety_factor'),
+            motor_target_sf=_motor_sf_hedefi,
+        )
+
+    # P_besleme (mutlak, plakanın hemen önü): denetlenen çözümün KENDİ
+    # yayımladığı orifis üstü basıncı (``injector.injector_inlet_pressure_bar``
+    # = P_c + ΔP_inj; tank basıncı DEĞİL). ΔP başka basamaktan geldiyse
+    # (devre çözümü / istek yankısı) P_c + o ΔP, kaynağıyla.
+    _mr = motor_results if isinstance(motor_results, dict) else {}
+    _p_c = input_guard.finite_number(_mr.get('chamber_pressure'))
+    _p1 = (input_guard.finite_number(
+        injector_results.get('injector_inlet_pressure_bar'))
+        if isinstance(injector_results, dict) else None)
+    if dp_kaynak == 'injector_solution' and _p1 is not None:
+        _p_man, _p_man_kaynak = _p1, (
+            'injector.injector_inlet_pressure_bar: the pressure above the '
+            'orifices of the checked injector solution (P_c + dP_inj), not '
+            'the tank pressure')
+    elif _p_c is not None and input_guard.finite_number(dp) is not None:
+        _p_man, _p_man_kaynak = _p_c + float(dp), (
+            'chamber pressure + the injector pressure drop of this check '
+            f'({dp_kaynak}); not the tank pressure')
+    else:
+        _p_man, _p_man_kaynak = None, None
+    report = _enjektor_plaka_iki_durum(
+        _cagir, dp, _p_man, _p_man_kaynak,
+        plaka_m=((t_plate_mm / 1000.0) if t_plate_mm else None),
+        boyutla=('requirement' if pintle_bore_mm is not None else None))
+    if (pintle_bore_mm is not None and report.get('status') == 'analyzed'
+            and report.get('plate_thickness_source')
+            == 'governing_requirement'):
         report['plate_thickness_source'] = 'sized_to_target_safety_factor'
         report['plate_thickness_basis'] = (
             'pintle faceplate: the pintle page asks no plate thickness, so the '
-            'plate is SIZED to the target safety factor (required_thickness_mm '
-            'of this clamped-plate check, Roark Table 11.2 case 10b with the '
-            'single annulus bore as the hole plan) and verified at that '
-            'thickness; no extra manufacturing allowance is applied (none is '
-            'defined for injector plates)')
+            'plate is SIZED to the target safety factor (the larger '
+            'required_thickness_mm of the two load cases of this '
+            'clamped-plate check, Roark Table 11.2 case 10b with the single '
+            'annulus bore as the hole plan) and verified at that thickness in '
+            'both load cases; no extra manufacturing allowance is applied '
+            '(none is defined for injector plates)')
     report['material_key'] = key
     report['material_requested'] = material_name
+    if report.get('required_safety_factor_source') == 'motor_design_target':
+        report['required_safety_factor_basis'] = (
+            'no separate safety factor was entered, so the plate is checked '
+            'against the design safety-factor target of this motor\'s '
+            'structural sizing (chamber wall, closure, nozzle and fasteners '
+            'are sized to the same target)')
     # OH-D28-13: hangi ΔP ile hüküm kurulduğu makine-okur biçimde yayımlanır.
-    report['delta_P_bar'] = dp
+    # V307/PLAKA-MARŞ: iki durum kurulduysa üst düzey ``delta_P_bar`` YÖNETEN
+    # durumun yüküdür (SF/gerilme/gereksinimle aynı satır); enjektör basınç
+    # düşüşü ``injector_pressure_drop_bar``, kaynağı ``delta_P_source``.
+    if 'load_cases' not in report:
+        report['delta_P_bar'] = dp
     report['delta_P_source'] = dp_kaynak
     # OH-ON-01: hangi delik planının denetlendiği makine-okur biçimde durur.
     report['hole_plan_source'] = plan_kaynak
@@ -2299,6 +2357,8 @@ _NON_JSON_BODY_ENDPOINTS = frozenset({
     'importers_api.import_ork',
     'importers_api.import_motor_file',
     'step_import_api.import_step_file',
+    # 3.0.7 (V307/ÇALKANTI-ARAYÜZ): tank geometrisi multipart yükleme ucu.
+    'slosh_tank_geometry_upload',
     'validation_upload_csv',
     'update_download',
     'update_install',
@@ -3370,7 +3430,8 @@ def _ortam_basinci_cakismasi(data):
     if not (math.isfinite(alt_m) and math.isfinite(atm_kpa)) or atm_kpa <= 0:
         return None
     try:
-        isa_kpa = float(isa_pressure(alt_m)) / 1000.0
+        # V307/İRTİFA-TEK: motorun okumasıyla AYNI (test irtifası geometrik).
+        isa_kpa = float(isa_pressure_geometric(alt_m)) / 1000.0
     except Exception:
         return None
     if not math.isfinite(isa_kpa) or isa_kpa <= 0:
@@ -3393,7 +3454,10 @@ def _ortam_basinci_cakismasi(data):
                 'reason': 'conflicts_with_atm_pressure',
                 'value': alt_m,
                 'implies_ambient_pressure_kPa': isa_kpa,
-                'basis': 'US Standard Atmosphere 1976 (hrma.constants.isa_pressure)',
+                'basis': ('US Standard Atmosphere 1976 at the geometric '
+                          'test altitude, converted to geopotential height '
+                          '(hrma.constants.isa_pressure_geometric, the same '
+                          'reading as the solver)'),
             },
             {
                 'field': 'atm_pressure',
@@ -3773,6 +3837,15 @@ def inject_upload_limits():
         'csv': REQUEST_BODY_MAX_BYTES,
     }}
 
+@app.context_processor
+def inject_thermal_protection_contract():
+    """Isıl koruma panelinin kip başına zorunlu alan kümesi (V307/GÜVERTE-
+    ISIL kalem 3). Şablon ``<meta name="hrma-tp-mode-required">`` olarak
+    basar; ``protection_panel.js`` oradan okur. Küme ucun kendi kapısından
+    gelir (``thermal_protection_form_contract``), JS'e kopyalanmaz."""
+    return {'tp_mode_required': thermal_protection_form_contract()}
+
+
 @app.route('/favicon.ico')
 def favicon():
     """Tarayıcının kendiliğinden istediği /favicon.ico yolu.
@@ -4038,9 +4111,17 @@ def launch_site_page():
     # V306/UÇUŞ NR-12: "Örnek araç" tanımı da tek kaynaktan
     # (flight_vehicle.EXAMPLE_VEHICLE; motor + gövde, beyanlı).
     from hrma.analysis.flight_vehicle import EXAMPLE_VEHICLE
+    # V307/FS-UÇUŞ-2 (A3): dosyadan içe aktarmanın boy sınırı ve uzantı
+    # beyaz listesi deponun KENDİ sabitleri (sayfa ikinci bir sayı yazmaz;
+    # tarayıcı dosyayı okumadan önce aynı sınırla durdurur, uç yine denetler).
+    from hrma.utils import projects as _projeler
     return render_template('launch_site.html',
                            launch_site_presets=LAUNCH_SITE_PRESETS,
-                           example_vehicle=EXAMPLE_VEHICLE)
+                           example_vehicle=EXAMPLE_VEHICLE,
+                           project_file_import={
+                               'max_bytes': _projeler.MAX_PROJECT_BYTES,
+                               'extensions': list(
+                                   _projeler.IMPORT_FILE_EXTENSIONS)})
 
 @app.route('/test')
 def test():
@@ -4603,7 +4684,112 @@ _CALCULATE_PC_DEFAULT_BAR = CHAMBER_PRESSURE_PLACEHOLDER_BAR
 #: V306/HİBRİT-SAYI (M-HIBRIT-5): hibrit ``/calculate`` motorunun
 #: ``atmospheric_pressure`` gönderilmediğindeki ortam basıncı (bar). "Optimumu
 #: Bul" ucu aynı sayıyı kullanır (iki uç, tek tanım); düşüş künyelenir.
-_HYBRID_AMBIENT_DEFAULT_BAR = 1.0
+#: V307/TEK-TANIM kalem 6: kaynaksız 1,0 bar → ISA deniz seviyesi; sayı
+#: motor modülünün ``HYBRID_DEFAULT_AMBIENT_BAR`` adından (o da
+#: ``hrma.constants.P_SEA_LEVEL_PA``'dan) — ikinci sabit yok.
+_HYBRID_AMBIENT_DEFAULT_BAR = HYBRID_DEFAULT_AMBIENT_BAR
+
+
+def _hibrit_ortam_yoklugu_beyani(data, motor_results=None, kunye=None,
+                                 bos_dize_yoktur=False):
+    """Alanı göndermeyen hibrit istekte tasarım ortamının BEYANI — TEK METİN.
+
+    V307/ORTAM-TEK kalem 3. ``/calculate``, ``/api/quick-geometry`` ve
+    ``/api/transient-analysis`` ortam alanı yoksa aynı yedeği
+    (``_HYBRID_AMBIENT_DEFAULT_BAR``, ISA deniz seviyesi) kullanır. Motor
+    yalnız basıncı gördüğü için ``design_ambient.source`` bloğunu
+    "girilmiş basınç" diye yazar; bu yardımcı onu düzeltir (ölçüldü:
+    quick-geometry ortamsız istekte ``source: entered_pressure`` basıyordu)
+    ve istenirse ucun ``defaults_applied`` listesine adlı kaydı ekler.
+    Alan gönderildiyse hiçbir şey yapmaz. ``bos_dize_yoktur``: ucun okuyucusu
+    boş dizeyi de yok sayıyorsa (``input_guard.num``) True. Dönüş: yedek
+    uygulandı mı.
+    """
+    ham = (data or {}).get('atmospheric_pressure')
+    if ham is not None and not (bos_dize_yoktur and ham == ''):
+        # V307/ONARIM-İTKİ-A (M7-ITKI-13): basınç gönderildi; sayfa onu
+        # tasarım irtifasından kurduysa ortam irtifanın adıyla yazılır.
+        _hibrit_ortam_irtifasini_adlandir(data, motor_results)
+        return False
+    blok = (motor_results or {}).get('design_ambient')
+    if isinstance(blok, dict):
+        blok['source'] = 'not_supplied_isa_sea_level'
+        blok['source_basis'] = (
+            'atmospheric_pressure was not supplied, so this endpoint '
+            'used the ISA sea-level pressure '
+            f'{_HYBRID_AMBIENT_DEFAULT_BAR:g} bar (US Standard '
+            'Atmosphere 1976, hrma.constants). The hybrid page always '
+            'sends the pressure of its altitude field.')
+    if kunye is not None:
+        kunye.append({
+            'field': 'atmospheric_pressure',
+            'value': _HYBRID_AMBIENT_DEFAULT_BAR, 'unit': 'bar',
+            'reason': 'not_supplied',
+            'message': ('atmospheric_pressure was not supplied; the same '
+                        'default ambient pressure as the hybrid solver '
+                        '(/calculate) was used: the ISA sea-level pressure '
+                        '(US Standard Atmosphere 1976).')})
+    return True
+
+
+#: V307/ONARIM-İTKİ-A (M7-ITKI-13): hibrit sayfası tasarım irtifasının ISA
+#: basıncını Ortam Basıncı alanına altı ondalıkla yazar (``advanced.html``
+#: ``updateSinglePressure``: ``toFixed(6)``); gövdedeki basınç irtifanın ISA
+#: basıncından en çok yarım birim (5e-7 bar) ayrılır. HRMA seçimi: eşleşme
+#: toleransı bir birim (1e-6 bar). Daha büyük fark: basınç o irtifanın ISA
+#: basıncı değildir (saha basıncı), irtifa adı UYGULANMAZ ve nedeni yazılır.
+_HYBRID_ALTITUDE_PRESSURE_TOL_BAR = 1e-6
+
+
+def _hibrit_ortam_irtifasini_adlandir(data, motor_results):
+    """Hibrit tasarım ortamını kullanıcının girdiği İRTİFAYLA adlandırır.
+
+    V307/ONARIM-İTKİ-A (M7-ITKI-13). ÖLÇÜLDÜ (mühendis turu H6, İrtifa =
+    10 000 m): yanıt ``mode: pressure, source: entered_pressure,
+    altitude_m: null`` diyordu; ekran "Design ambient: 0.2650 bar ambient
+    pressure" yazıyor, kullanıcının girdiği irtifa adı kayboluyordu (sıvı
+    aynı durumda "20000 m irtifa, standart atmosfer basıncı 0,0553 bar"
+    diyor). Sayfa basıncı irtifadan kurduğunda ``design_ambient_altitude_m``
+    gönderir. Burada sayı TÜRETİLMEZ: motor gövdedeki basınçla çözüldü;
+    blok yalnız basınç o irtifanın ISA basıncıysa (US Std Atm 1976,
+    geometrik irtifa — ``isa_pressure_geometric``, motorların ortak tanımı)
+    sıvının adlarıyla (``mode: altitude``, ``source: altitude_isa``,
+    ``altitude_m``) yazılır. Alan bozuksa, bant dışıysa ya da basınç
+    eşleşmiyorsa irtifa adı uygulanmaz ve ``altitude_not_applied`` kaydı
+    nedeni adıyla taşır (sessiz yok sayma yok). Dönüş: ad uygulandı mı.
+    """
+    ham = (data or {}).get('design_ambient_altitude_m')
+    if ham is None:
+        return False
+    blok = (motor_results or {}).get('design_ambient')
+    if not isinstance(blok, dict):
+        return False
+    from hrma.constants import BAR_PER_PA
+    from hrma.engines.liquid_rocket_engine import (
+        DESIGN_AMBIENT_ALTITUDE_BAND_M)
+    alt, ust = DESIGN_AMBIENT_ALTITUDE_BAND_M
+    neden = _kanonik_gerekce(ham)
+    if neden is None and not (alt <= float(ham) <= ust):
+        neden = 'out_of_range'
+    if neden is None:
+        p_isa = float(isa_pressure_geometric(float(ham))) * BAR_PER_PA
+        p_blok = blok.get('pressure_bar')
+        if not (isinstance(p_blok, (int, float))
+                and abs(p_isa - float(p_blok))
+                <= _HYBRID_ALTITUDE_PRESSURE_TOL_BAR):
+            neden = 'pressure_is_not_the_isa_pressure_of_this_altitude'
+    if neden is not None:
+        kayit = {'field': 'design_ambient_altitude_m', 'reason': neden}
+        if isinstance(ham, (int, float)) and not isinstance(ham, bool):
+            kayit['value'] = ham
+        blok['altitude_not_applied'] = kayit
+        return False
+    if blok.get('is_sea_level') is True:
+        return False          # 0 m: deniz seviyesi kipi aynen kalır
+    blok['mode'] = 'altitude'
+    blok['source'] = 'altitude_isa'
+    blok['altitude_m'] = float(ham)
+    return True
 
 
 #: ÖH D21 / P15B1-05 — TERMODİNAMİK ALAN BİRİMLERİ, TEK KAYNAK.
@@ -4750,7 +4936,9 @@ _SIXDOF_KARARLILIK_GEOMETRISI = (
 #: varsayım değil, çözücüye devirdir.
 _PARAMETRIK_UC_VARSAYILANLARI = {
     'of_ratio': (1.0, 'dimensionless', 'not_supplied'),
-    'atmospheric_pressure': (1.0, 'bar', 'not_supplied'),
+    # V307/ORTAM-TEK (ana model, 19 Kas): tarama yalnız HybridRocketEngine
+    # kurar; ortam yedeği hibrit motorun TEK adı (eski kaynaksız 1,0 bar).
+    'atmospheric_pressure': (_HYBRID_AMBIENT_DEFAULT_BAR, 'bar', 'not_supplied'),
     'gamma': (1.25, 'dimensionless', 'not_supplied'),
     'l_star': (1.0, 'm', 'not_supplied'),
     'expansion_ratio': (0, 'dimensionless', 'not_supplied_solver_derives'),
@@ -6015,6 +6203,47 @@ def calculate():
         # Determine motor type (default to hybrid for this endpoint)
         motor_type = data.get('motor_type', 'hybrid')
 
+        # V307/SEKME-MOTOR (DİL-HİBRİT §8.2): "İrtifa Profili" sekmesinin
+        # ``altitude_profile`` alanı eskiden HİÇ okunmuyordu (yalnız
+        # başlangıç irtifası tasarım ortamı olarak hesaba giriyordu). Artık
+        # okunur, adlı kapıdan geçer ve motor çözüldükten sonra aynı lüle
+        # çözümünden irtifa tablosu kurulur (hrma/analysis/
+        # altitude_performance.py). Bant dışı / bozuk alan 422.
+        _irtifa_profil_girdisi = None
+        if motor_type == 'hybrid' and data.get('altitude_profile') is not None:
+            try:
+                _irtifa_profil_girdisi = (
+                    _irtifa_profili.parse_altitude_profile(
+                        data.get('altitude_profile')))
+            except _irtifa_profili.AltitudeProfileError as _ip_hata:
+                return jsonify({
+                    'error': VALIDATION_FAILED_ERROR,
+                    'details': [_ip_hata.message],
+                    'motor_type': motor_type,
+                    'status': 'invalid_input',
+                    'invalid_fields': [_ip_hata.as_dict()],
+                }), 422
+
+        # V307/HİBRİT-ORTAM kalem 4 (FS-KÜÇÜK DEVİR 5): paraşüt girdileri bu
+        # uçta da TEK kapıdan (``_parasut_girdi_kapisi``; düzlemsel yörünge
+        # ve Fırlatma Sahası 6-DOF ucuyla aynı işlev, aynı ret kayıtları).
+        # ÖLÇÜLDÜ (docs/scofield/raw/OH/V307/hibrit-ortam/olcum/
+        # parasut_once.json): ``parachute_area`` 0 / −1 / 'abc' ve
+        # ``parachute_cd`` 0 gövdesi kuralsız ``launch_params``a gidiyordu;
+        # çözücünün ``set_recovery_parameters``ı geçersizi sessizce
+        # "verilmedi" sayıyordu. Kapı motor çözülmeden ÖNCE koşar.
+        _parasut_deger_c, _parasut_kusur_c = _parasut_girdi_kapisi(data)
+        if _parasut_kusur_c:
+            return jsonify({
+                'status': 'error',
+                'error': 'invalid_launch_conditions',
+                'invalid_fields': _parasut_kusur_c,
+                'detail': (
+                    'A recovery (parachute) input was sent outside the range '
+                    'it is defined on. The value was NOT dropped back to a '
+                    'default and nothing was computed.'),
+            }), 422
+
         # Use comprehensive validator
         # ÖH Z5S / S3 (P16B1-37, P16B2-12): reddin GEREKÇESİ artık yalnız
         # insan metninde değil. ``details`` listesi BİREBİR eskisi gibi
@@ -7125,6 +7354,25 @@ def calculate():
             motor_results = engine.calculate()
         except _HibritZarfHatasi as _zarf_hatasi:
             return _grain_zarf_reddi(_zarf_hatasi)
+        if _irtifa_profil_girdisi is not None:
+            motor_results['altitude_profile_performance'] = (
+                _irtifa_profili.fixed_nozzle_profile(
+                    motor_results, _irtifa_profil_girdisi))
+            # V307/ORTAM-TEK kalem 4: profilin tasarım ortamı satırı da
+            # başlığın KENDİSİ (motorun iki irtifa tablosuyla aynı kural).
+            from hrma.engines.hybrid_rocket_engine import (
+                bind_design_row_isp_to_headline as _tasarim_satiri_baslik)
+            from hrma.constants import PA_PER_BAR as _PA_PER_BAR_PROFIL
+            _tasarim_satiri_baslik(
+                motor_results['altitude_profile_performance'].get('rows'),
+                'ambient_pressure_bar', _PA_PER_BAR_PROFIL, 'isp_s',
+                float(engine.P_a) * _PA_PER_BAR_PROFIL, motor_results.get('isp'))
+        # V307/HİBRİT-ORTAM kalem 2: tasarım ortamının kaynağı. Motor yalnız
+        # basıncı görür; alan gövdede yoksa basınç bu ucun beyanlı
+        # yedeğidir (``_HYBRID_AMBIENT_DEFAULT_BAR``), girilmiş değer değil.
+        # V307/ORTAM-TEK kalem 3: beyan metni üç hibrit ucun ortak
+        # yardımcısından (``_hibrit_ortam_yoklugu_beyani``; metin aynı).
+        _hibrit_ortam_yoklugu_beyani(data, motor_results)
         # V301/H-PANEL (NK-15/NK-20): c* veriminin künyesi motor sonucunda
         # (manşet, CEA paneli ve PDF aynı bloğu okur). Kuramsal c* ve
         # teslim c* ayrı adlarla; kaynaksız çiftte "ideal c*" beyanı.
@@ -8015,9 +8263,12 @@ def calculate():
             # parachute_area=9.0 gonderildiginde yanittaki 152 yapragin 0'i
             # degisiyordu. landing_velocity bir GUVENLIK metrigi olarak
             # okunuyor; kullanicinin onu duzeltememesi kabul edilemez.
-            'parachute_area': data.get('parachute_area'),
-            'parachute_cd': data.get('parachute_cd'),
-            'parachute_deploy_delay': data.get('parachute_deploy_delay'),
+            # V307/HİBRİT-ORTAM kalem 4: değerler yukarıdaki kapıdan geçmiş
+            # okumalardır (verilmeyen alan sözlükte yok).
+            'parachute_area': _parasut_deger_c.get('parachute_area'),
+            'parachute_cd': _parasut_deger_c.get('parachute_cd'),
+            'parachute_deploy_delay': _parasut_deger_c.get(
+                'parachute_deploy_delay'),
         }
         # Verilmeyen anahtar SOZLUKTEN CIKAR: disa aktarici "istekten geldi"
         # ile "verilmedi" ayrimini bu sayede yapip beyan edebiliyor.
@@ -8940,8 +9191,11 @@ def quick_geometry():
             of_ratio=data.get('of_ratio', 1.0),
             # ÖH D26 a3 (ŞART OH-D19-09): sayı künye üreticisinden.
             chamber_pressure=_pc_qg_basinc,
+            # V307/ORTAM-TEK (kalem 3): alan yoksa hibrit tasarım ortamının
+            # TEK tanımı (ISA deniz seviyesi; eski kaynaksız 1,0 bar).
             atmospheric_pressure=input_guard.num(
-                data, 'atmospheric_pressure', default=1.0, unit='bar'),
+                data, 'atmospheric_pressure',
+                default=_HYBRID_AMBIENT_DEFAULT_BAR, unit='bar'),
             chamber_temperature=data.get('chamber_temperature'),
             gamma=input_guard.num(data, 'gamma', default=1.25),
             gas_constant=data.get('gas_constant'),
@@ -9071,6 +9325,10 @@ def quick_geometry():
         _pc_kunye_qg.extend(_sogutma_kunye_qg)
         if _pc_kunye_qg:
             payload['defaults_applied'] = _pc_kunye_qg
+        # V307/ORTAM-TEK kalem 3: ortam alanı yoksa motorun ``design_ambient``
+        # bloğu "girilmiş basınç" demez; /calculate ile aynı beyan.
+        _hibrit_ortam_yoklugu_beyani(data, motor_results,
+                                     bos_dize_yoktur=True)
         return jsonify(sanitize_json_values(payload))
     except Exception as e:
         print(f"Quick geometry error: {e}")
@@ -9726,7 +9984,10 @@ def transient_analysis():
             of_ratio=data.get('of_ratio', 1.0),
             # ÖH D26 a3 (ŞART OH-D19-09): sayı künye üreticisinden.
             chamber_pressure=_pc_tr_basinc,
-            atmospheric_pressure=data.get('atmospheric_pressure', 1.0),
+            # V307/ORTAM-TEK (kalem 3): alan yoksa hibrit tasarım ortamının
+            # TEK tanımı (ISA deniz seviyesi; eski kaynaksız 1,0 bar).
+            atmospheric_pressure=data.get('atmospheric_pressure',
+                                          _HYBRID_AMBIENT_DEFAULT_BAR),
             chamber_temperature=data.get('chamber_temperature'),
             gamma=data.get('gamma', 1.25),
             gas_constant=data.get('gas_constant'),
@@ -9873,6 +10134,9 @@ def transient_analysis():
         # biçimde girer; yeni yanıt anahtarı doğmaz (birleşme: app-api a3 tek
         # çağrı + sivi a1 extend).
         _pc_kunye_tr.extend(_sogutma_kunye_tr)
+        # V307/ORTAM-TEK kalem 3: ortam alanı yoksa kullanılan ISA yedeği
+        # adıyla beyan edilir (bu yanıtta ``design_ambient`` bloğu yok).
+        _hibrit_ortam_yoklugu_beyani(data, kunye=_pc_kunye_tr)
         if _pc_kunye_tr:
             govde['defaults_applied'] = _pc_kunye_tr
         return jsonify(sanitize_json_values(govde))
@@ -10182,6 +10446,364 @@ def _toplam_impuls_ns(data):
     return kuvvet * sure
 
 
+#: 3.0.7 (V307/ÇALKANTI-ARAYÜZ) — 6-DOF ``calkanti`` bloğunun alanları.
+#: Gövde ölçüleri (boy, çap, burun, motor boyu) istemciden ALINMAZ: bu
+#: isteğin aracından eklenir (tek kaynak; uygunluk denetimi K4'te).
+_CALKANTI_6DOF_ALANLARI = ('motor_type', 'motor_sonucu', 'arac_duzeni',
+                           'tank_geometrileri', 'yontem')
+
+
+def _calkanti_6dof_tanklari(data, aero, aero_args):
+    """``(k4_sonucu, kullanilan_duzen, None)`` ya da ``(None, None, ret)``."""
+    from hrma.analysis import calkanti_arayuz as _ca
+    from hrma.analysis import slosh_motor_baglanti as _k4
+
+    def _ret(alan, kod, mesaj, durum=400):
+        return None, None, ({'status': 'error',
+                             'error': 'invalid_slosh_coupling_input',
+                             'message': mesaj,
+                             'invalid_fields': [{'field': alan,
+                                                 'reason': kod}]}, durum)
+    blok = data.get('calkanti')
+    if not isinstance(blok, dict):
+        return _ret('calkanti', 'TIP', "'calkanti' must be a JSON object")
+    fazla = sorted(str(k)[:64] for k in blok if k not in _CALKANTI_6DOF_ALANLARI)
+    if fazla:
+        return _ret('calkanti.' + fazla[0], 'ALAN_BILINMEYEN',
+                    'unknown field in the slosh block: ' + ', '.join(fazla))
+    duzen = blok.get('arac_duzeni')
+    if duzen is not None:
+        if not isinstance(duzen, dict):
+            return _ret('calkanti.arac_duzeni', 'TIP',
+                        "'arac_duzeni' must be a JSON object")
+        olcu = sorted(k for k in duzen if k in _k4.ARAC_OLCULERI)
+        if olcu:
+            return _ret('calkanti.arac_duzeni.' + olcu[0], 'ALAN_BILINMEYEN',
+                        'vehicle dimensions are taken from this request, not '
+                        'from the slosh block')
+        duzen = dict(duzen)
+        duzen['govde_boyu_m'] = float(aero.L)
+        duzen['govde_capi_m'] = float(aero.d)
+        duzen['burun_boyu_m'] = float(aero_args['nose_length'])
+        if data.get('engine_length_m') is not None:
+            duzen['motor_boyu_m'] = float(data['engine_length_m'])
+    try:
+        tg_k4, _ozet = _ca._geometri_kapisi(blok.get('tank_geometrileri'))
+        yontem = blok.get('yontem') or _ca._sa.YONTEM_SECIMI_OTOMATIK
+        k4 = _k4.slosh_tanklari(blok.get('motor_type'), blok.get('motor_sonucu'),
+                                arac_duzeni=duzen, tank_geometrileri=tg_k4,
+                                yontem=yontem)
+    except _ca.CalkantiArayuzHatasi as e:
+        return _ret('calkanti.' + str(e.alan or ''), e.kod, str(e))
+    except _k4.SloshMotorBaglantiHatasi as e:
+        return _ret('calkanti.' + str(e.alan or ''), e.kod, str(e), 422)
+    except (TypeError, ValueError, KeyError, AttributeError, IndexError) as e:
+        return _ret('calkanti.motor_sonucu', 'MOTOR_SONUCU_OKUNAMADI',
+                    'the motor result could not be read '
+                    f'({type(e).__name__}); nothing was integrated', 422)
+    return k4, duzen, None
+
+
+#: V307/ONARIM2-UÇUŞ-ARAÇ (M7-CALK-15): yüklenen tankı gövdeye sokmayan
+#: çalkantı bağlantısı sebepleri (``slosh_motor_baglanti._uygunluk``) ve
+#: ret cümlesindeki adları (EN; ekranda sözlükten).
+_YUKLENEN_TANK_SIGMAMA = {
+    'TANK_GOVDEDEN_GENIS': 'its outer diameter (inner diameter + 2 x the wall '
+                           'the engine publishes) is larger than the body '
+                           'diameter',
+    'TANK_BURUN_ICINDE': 'its top reaches into the nose cone',
+    'TANK_ARAC_DISI': 'it lies outside the body length',
+    'TANKLAR_CAKISIYOR': 'it overlaps another tank along the vehicle axis',
+}
+
+
+def _yuklenen_tank_sigmiyor(data, k4, duzen):
+    """Yüklenen geometrisi olan tank gövdeye sığmıyorsa ret gövdesi, yoksa None."""
+    blok = data.get('calkanti') if isinstance(data.get('calkanti'), dict) else {}
+    yuklu = blok.get('tank_geometrileri')
+    if not isinstance(yuklu, dict) or not yuklu or not isinstance(k4, dict):
+        return None
+    alanlar, cumleler = [], []
+    for t in k4.get('tanklar') or []:
+        tid = t.get('tank_id')
+        if tid not in yuklu:
+            continue
+        kodlar = [k for k in (t.get('sebep') or []) if k in _YUKLENEN_TANK_SIGMAMA]
+        if not kodlar:
+            continue
+        alanlar.append({'field': 'calkanti.tank_geometrileri.' + str(tid),
+                        'reason': kodlar[0], 'tank_id': tid,
+                        'body_diameter_m': (duzen or {}).get('govde_capi_m'),
+                        'body_length_m': (duzen or {}).get('govde_boyu_m'),
+                        'nose_length_m': (duzen or {}).get('burun_boyu_m')})
+        cumleler.append(f'the {tid} tank geometry you loaded does not fit '
+                        f'this airframe: {_YUKLENEN_TANK_SIGMAMA[kodlar[0]]}')
+    if not alanlar:
+        return None
+    return {'status': 'error', 'error': 'loaded_tank_does_not_fit_airframe',
+            'message': ('No flight was solved: ' + '; '.join(cumleler)
+                        + '. With the airframe derived from the engine the '
+                        'panel derives it for the loaded tank; enlarge the '
+                        'airframe you typed or clear it. Nothing was '
+                        'integrated.'),
+            'invalid_fields': alanlar}
+
+
+#: ÇALKANTI-KARARLILIK hüküm sözleşmesinin (``docs/scofield/raw/OH/V307/
+#: calkanti-kararlilik/HUKUM_SOZLESMESI.md`` §1) zorunlu üst düzey alanları.
+#: Çözücünün ``slosh_stability`` çıktısı YALNIZ bu biçimdeyse yayımlanır;
+#: eski dört an hükmü (K2 ilk sürümü: ``hukum`` + ``anlar``) yanıltıcı
+#: olduğu için (yanma içi kararsızlık pencerelerini kaçırıyordu, ÇALKANTI-
+#: MOTOR §5.2) yayımlanmaz.
+_CALKANTI_HUKUM_ALANLARI = ('genel_hukum', 'gerekce_kodu', 'sebep',
+                            'pencereler', 'rijit_pencereler', 'dort_an',
+                            'dogrusal_sinir', 'bafl_onerisi', 'beyanlar',
+                            'tarama')
+
+
+def _calkanti_hukum_blogu(res, idx):
+    """``(slosh_stability | None, doğrusal geçerlilik maskesi | None)``.
+
+    Maske (``slosh_linear_valid``, sözleşme §5, §9) ``series`` ile AYNI
+    seyreltme indeksleriyle; boyu tutmazsa yayımlanmaz.
+    """
+    st = res.get('slosh_stability')
+    if not isinstance(st, dict) or any(k not in st
+                                       for k in _CALKANTI_HUKUM_ALANLARI):
+        return None, None
+    maske = None
+    lv = res.get('slosh_linear_valid')
+    if lv is not None and 'time' in res:
+        lv = np.asarray(lv, dtype=bool)
+        if lv.shape == (len(res['time']),):
+            maske = lv[idx].tolist()
+    return st, maske
+
+
+def _calkanti_6dof_ciktisi(k4, duzen, res, idx):
+    """6-DOF yanıtının ``calkanti`` bloğu (CALKANTI §B.5 zaman alanı).
+
+    Yayımlananlar: K4 tank raporu (durum, sebep, beyan, yer ve kaynağı),
+    kütle denetimi, künye, kapsam dışı metni, uçuş boyunca tank durum kodları
+    ve zaman alanı (çalkantı yer değiştirmesi, açısı, çeper genliği/R, kuvvet,
+    moment, g_eff, parametreler, bağlaşık − rijit tutum farkı; seri ``series``
+    ile AYNI seyreltme indeksleriyle). Hüküm (dört an), özdeğerler ve pencere
+    tablosu YAYIMLANMAZ: ÇALKANTI-KARARLILIK hüküm sözleşmesi bekleniyor.
+    """
+    from hrma.analysis import six_dof_slosh as _k2
+    from hrma.analysis import slosh_motor_baglanti as _k4
+    from hrma.analysis import slosh_tablo as _tablo
+    oz = _k4.json_ozeti(k4)
+    out = {
+        'durum': oz['durum'], 'sebep': oz['sebep'],
+        # ``tablo`` (eşdeğer model tablosu) motor/tank görünümünün işidir
+        # (Besleme → Çalkantı); 6-DOF yanıtına girmez (V307/UÇUŞ-GÖVDE: K4
+        # raporu tabloyu artık her tankta taşıyor).
+        # 6-DOF'ta ``beyan`` yalnız BAĞLANAN tankın varsayımlarıdır
+        # (bağlanmayan tank uçuşa girmedi; sebebi ``sebep``te).
+        'tanklar': [dict({k: v for k, v in t.items()
+                          if k not in ('m_t', 'tablo', 'oneri_yontem',
+                                       'satir_durumlari')},
+                         beyan=(t['beyan'] if t['durum'] == _k4.DURUM_BAGLANDI
+                                else []))
+                    for t in oz['tanklar']],
+        'kutle_denetimi': oz['kutle_denetimi'], 'kunye': oz['kunye'],
+        'kapsam_disi': {'kod': _k2.KAPSAM_DISI_KODU,
+                        'gerekce': _k2.KAPSAM_DISI_GEREKCE},
+        'arac_duzeni': duzen, 'zaman': None, 'tank_durum_kodlari': {},
+        'rijit_karsilastirma': None,
+    }
+    # Hüküm (ÇALKANTI-KARARLILIK sözleşmesi): yalnız sözleşme biçimindeyse.
+    _hukum, _maske = _calkanti_hukum_blogu(res, idx)
+    if _hukum is not None:
+        # 3.0.7 ONARIM-ÇALK (M7-CALK-15): bağlanmayan tank varken (K4'ün
+        # bağlamadığı ya da çözücünün bağlamadığı) hüküm yalnız bağlanan
+        # tankları kapsar; KARARLI verilmez, bağlanmayan tanklar adıyla
+        # taşınır. ÖLÇÜLDÜ (mühendis turu): örnek sıvı motora geniş LOX
+        # tankı yüklenince tank gövdeye sığmayıp düşüyor, hüküm KARARSIZ'dan
+        # KARARLI'ya dönüyordu.
+        _baglanmayan = [t['tank_id'] for t in oz['tanklar']
+                        if t.get('durum') != _k4.DURUM_BAGLANDI]
+        for _b in (res.get('slosh_tanks_not_coupled') or []):
+            if _b.get('tank_id') not in _baglanmayan:
+                _baglanmayan.append(_b.get('tank_id'))
+        _k2.kismi_baglama_hukmu(_hukum, _baglanmayan)
+        out['slosh_stability'] = _hukum
+    if 'slosh_eta' not in res:
+        return out
+    N = len(res['time'])
+    ids = list(res.get('slosh_tank_ids') or [])
+    st = res.get('slosh_stability') or {}
+    out['tank_durum_kodlari'] = {t['tank_id']: list(t.get('kodlar') or [])
+                                 for t in (st.get('tanklar') or [])}
+    eta = np.asarray(res['slosh_eta'])
+    if eta.shape != (len(ids), 2, N):
+        out['zaman_sebep'] = 'SERI_BOYUTU_TUTARSIZ'
+        return out
+    prm = res.get('slosh_params_t') or {}
+    tanklar = []
+    for k, tid in enumerate(ids):
+        tanklar.append({
+            'tank_id': tid,
+            'eta_y_m': eta[k, 0][idx].tolist(), 'eta_z_m': eta[k, 1][idx].tolist(),
+            'aci_deg': np.asarray(res['slosh_angle_deg'])[k][idx].tolist(),
+            'ceper_genlik_orani': np.asarray(
+                res['slosh_wall_amplitude_ratio'])[k][idx].tolist(),
+            'kuvvet_y_N': np.asarray(res['slosh_force_body'])[k, 0][idx].tolist(),
+            'kuvvet_z_N': np.asarray(res['slosh_force_body'])[k, 1][idx].tolist(),
+            'moment_y_Nm': np.asarray(res['slosh_moment_body'])[k, 0][idx].tolist(),
+            'moment_z_Nm': np.asarray(res['slosh_moment_body'])[k, 1][idx].tolist(),
+            'acik': np.asarray(res['slosh_active'])[k][idx].tolist(),
+            'doluluk': np.asarray(prm.get('doluluk'))[k][idx].tolist(),
+            'm1_kg': np.asarray(prm.get('m1_kg'))[k][idx].tolist(),
+            'L1_m': np.asarray(prm.get('L1_m'))[k][idx].tolist(),
+            'omega1_rad_s': np.asarray(prm.get('omega1_rad_s'))[k][idx].tolist(),
+            'zeta': np.asarray(prm.get('zeta'))[k][idx].tolist(),
+        })
+    rc = res.get('slosh_rigid_comparison') or {}
+    out['zaman'] = {
+        'time_s': np.asarray(res['time'])[idx].tolist(),
+        'g_eff_m_s2': np.asarray(res['g_eff'])[idx].tolist(),
+        'delta_theta_deg': np.asarray(rc.get('delta_theta_deg'))[idx].tolist(),
+        'delta_alpha_deg': np.asarray(rc.get('delta_alpha_deg'))[idx].tolist(),
+        'tanklar': tanklar,
+        'genlik_dogrusal_sinir_orani': _tablo.GENLIK_DOGRUSAL_SINIR_ORANI,
+        # Sözleşme §5: ilk doğrusal sınır aşımından sonra False; arayüz o
+        # örneklerdeki genlik/kuvvet/momenti gerçek değer gibi basmaz.
+        'dogrusal_gecerli': _maske,
+    }
+    out['rijit_karsilastirma'] = {
+        'apogee': rc.get('apogee'), 'max_alpha_deg': rc.get('max_alpha_deg'),
+        'flight_verdict': rc.get('flight_verdict'),
+        # V307/UÇUŞ-GÖVDE (kalem 6): referans koşunun öbür tüm-uçuş sayıları.
+        'apogee_time': rc.get('apogee_time'), 'max_speed': rc.get('max_speed'),
+        'max_mach': rc.get('max_mach'),
+        'lateral_drift_at_end': rc.get('lateral_drift_at_end'),
+        # ONARIM-ÇALK (ONARIM-UÇUŞ DEVİR, M7-UCUS-16): apoje yayımlanmadıysa
+        # nedeni (çözücünün alanı; yoksa None).
+        'apogee_withheld_because': rc.get('apogee_withheld_because')}
+    return out
+
+
+#: V307/UÇUŞ-GÖVDE (kalem 6; tasarım §E-1, ana model kararı 17 Kas) — bağlaşık
+#: koşu doğrusal geçerlilik sınırını aştıysa ``summary``de YAYIMLANMAYAN
+#: tüm-uçuş alanları: ilk aşımdan sonraki örnekler kullanılarak hesaplanan
+#: apoje, tüm-uçuş en büyükleri, sürüklenme ve kararlılık hükmü. Statik marj,
+#: ağırlık merkezi, CP ve ray bilgisi geometridir; kalır.
+_CALKANTI_TUM_UCUS_ALANLARI = (
+    'apogee', 'apogee_time', 'apogee_msl_m', 'max_speed', 'max_mach',
+    'max_alpha_deg', 'max_alpha_low_q_deg', 'lateral_drift_at_end', 'stable')
+
+#: Yayım kaydının kodları (ekran metni arayüz sözlüğünde, EN + TR).
+CALKANTI_KOSU_BAGLASIK = 'BAGLASIK'
+CALKANTI_KOSU_RIJIT = 'RIJIT'
+CALKANTI_YAYIM_GECERLI = 'GECERLI'
+CALKANTI_YAYIM_NEDENI = 'BAGLASIK_KOSU_DOGRUSAL_SINIRI_ASTI'
+#: 3.0.7 (M7-UCUS-4, seçenek a — KARAR: Berke 19 Kas "çözülsün", ana model
+#: 20 Kas uyguladı): tarama çalkantı kaynaklı kararsızlık penceresi bulduysa
+#: bağlaşık koşunun genliği başlangıç bozucusunun (tohumun) büyüklüğüne
+#: bağlıdır (pencerede e^x kat büyür); sınırın aşılıp aşılmadığı tohuma bağlı
+#: olmasın diye bağlaşık tüm-uçuş sayıları yayımlanmaz, rijit koşu referans
+#: etiketiyle durur.
+CALKANTI_YAYIM_NEDENI_PENCERE = 'BAGLASIK_KOSU_KARARSIZ_PENCERE'
+CALKANTI_YAYIM_PENCERE_KODU = 'KARARSIZ_PENCERE_GENLIK_TOHUMA_BAGLI'
+#: Bağlaşık koşuyu yayımlatmayan iki neden; geçerlilik sınırı ikisinde de tek
+#: alanda (``yayim['t_gecersiz_bas_s']``): bağlaşık koşunun bu andan SONRAKİ
+#: bölümü geçerlilik dışıdır. Sınır aşıldıysa ilk aşım anı; kararsızlık
+#: penceresi varsa ilk çalkantı penceresinin başı (genlik o andan sonra
+#: tohuma bağlı büyür). Bilinmiyorsa ``None``: istemciler FAIL-CLOSED,
+#: koşunun tamamı geçerlilik dışı sayılır.
+CALKANTI_YAYIM_NEDENLERI = (CALKANTI_YAYIM_NEDENI, CALKANTI_YAYIM_NEDENI_PENCERE)
+#: Rijit koşunun etiketi: sınır aşılmadıysa "çalkantısız karşılaştırma";
+#: aşıldıysa "çalkantısız referans koşu — çalkantılı aracın performans
+#: tahmini değildir, güvenli uçuş ya da tutucu sınır göstermez".
+CALKANTI_RIJIT_KARSILASTIRMA = 'CALKANTISIZ_KARSILASTIRMA'
+CALKANTI_RIJIT_REFERANS = 'CALKANTISIZ_REFERANS_KOSU'
+#: 3.0.7 ONARIM-ÇALK (M7-CALK-15): bağlaşık koşunun tank kapsamı.
+CALKANTI_KOSU_TUM_TANKLAR = 'TUM_TANKLAR'
+CALKANTI_KOSU_KISMI = 'KISMI_BAGLASIK'
+
+
+def _calkanti_yayim_kurali(summary, blok):
+    """Bağlaşık koşunun yayım kuralı: ``summary``yi YERİNDE düzenler ve
+    ``blok['yayim']`` kaydını yazar (blok hüküm taşımıyorsa dokunmaz).
+
+    Sınır aşılmadıysa yayımlanan 6-DOF sonucu bağlaşık koşudur; rijit koşu
+    "çalkantısız karşılaştırma" diye yanında durur. Aşıldıysa bağlaşık
+    koşunun tüm-uçuş sayıları (:data:`_CALKANTI_TUM_UCUS_ALANLARI`) ``None``
+    olur — koşulsuz tek "apoje" alanı rijit sayıyla DOLDURULMAZ — ve neden
+    ile ilk aşım zamanı kayda yazılır; rijit koşu referans etiketiyle
+    ``rijit_karsilastirma``da kalır. Koşu türü ve geçerlilik her durumda
+    sayıyla birlikte taşınır.
+
+    3.0.7 (M7-UCUS-4 a): sınır aşılmasa da genel hüküm çalkantı kaynaklı
+    kararsızlıksa ve pencere varsa aynı kural uygulanır (neden kodu
+    :data:`CALKANTI_YAYIM_NEDENI_PENCERE`): pencerede genlik başlangıç
+    bozucusuna bağlı büyür, "sınırın içinde kaldı" bir fizik sonucu değil
+    tohumun çıktısıdır. Geçerlilik sınırı ``t_gecersiz_bas_s`` alanında.
+    """
+    from hrma.analysis.six_dof_trajectory import stability_verdict_code
+    from hrma.analysis.six_dof_slosh import HUKUM_CALKANTI_KARARSIZ
+    st = blok.get('slosh_stability')
+    ds = st.get('dogrusal_sinir') if isinstance(st, dict) else None
+    if not isinstance(ds, dict):
+        return
+    asildi = bool(ds.get('asildi'))
+    pencere = (not asildi and st.get('genel_hukum') == HUKUM_CALKANTI_KARARSIZ
+               and bool(st.get('pencereler')))
+    if asildi:
+        t_gecersiz = ds.get('t_ilk_asim_s')
+    elif pencere:
+        baslar = [float(p['t1']) for p in st.get('pencereler') or []
+                  if isinstance(p, dict) and p.get('mod') == 'calkanti'
+                  and isinstance(p.get('t1'), (int, float))
+                  and not isinstance(p.get('t1'), bool)
+                  and math.isfinite(float(p['t1']))]
+        t_gecersiz = min(baslar) if baslar else None
+    else:
+        t_gecersiz = None
+    yayimlanmayan = []
+    if asildi or pencere:
+        for alan in _CALKANTI_TUM_UCUS_ALANLARI:
+            if alan in summary and summary[alan] is not None:
+                summary[alan] = None
+                yayimlanmayan.append(alan)
+        if isinstance(summary.get('flight_verdict'), dict):
+            # Uçuşun nasıl bittiği entegrasyonun kaydıdır (kalır); kararlılık
+            # hükmü geçerlilik dışı koşudan verilmez.
+            summary['flight_verdict'] = dict(
+                summary['flight_verdict'],
+                stability=stability_verdict_code(
+                    None, summary.get('static_margin_full'),
+                    summary.get('static_margin_empty'), None))
+            yayimlanmayan.append('flight_verdict.stability')
+    # 3.0.7 ONARIM-ÇALK (M7-CALK-15): bağlanmayan tank varken yayımlanan
+    # bağlaşık koşu KISMİDİR; bağlanmayan tanklar kayıtta adıyla durur.
+    baglanmayan = list(st.get('baglanmayan_tanklar') or [])
+    blok['yayim'] = {
+        'kosu_turu': CALKANTI_KOSU_BAGLASIK,
+        'kapsam': (CALKANTI_KOSU_KISMI if baglanmayan
+                   else CALKANTI_KOSU_TUM_TANKLAR),
+        'baglanmayan_tanklar': baglanmayan,
+        'gecerlilik': (ds.get('asim_sonrasi_kod') if asildi
+                       else CALKANTI_YAYIM_PENCERE_KODU if pencere
+                       else CALKANTI_YAYIM_GECERLI),
+        'neden_kodu': (CALKANTI_YAYIM_NEDENI if asildi
+                       else CALKANTI_YAYIM_NEDENI_PENCERE if pencere
+                       else None),
+        't_ilk_asim_s': ds.get('t_ilk_asim_s'),
+        't_gecersiz_bas_s': t_gecersiz,
+        'tank_id_ilk_asim': ds.get('tank_id_ilk_asim'),
+        'yayimlanmayan_alanlar': yayimlanmayan,
+        'referans_kosu': {
+            'kosu_turu': CALKANTI_KOSU_RIJIT,
+            'etiket_kodu': (CALKANTI_RIJIT_REFERANS if (asildi or pencere)
+                            else CALKANTI_RIJIT_KARSILASTIRMA),
+            'alan': 'calkanti.rijit_karsilastirma',
+        },
+    }
+
+
 @app.route('/api/six-dof-analysis', methods=['POST'])
 def six_dof_analysis():
     """6-DOF rijit gövde uçuş analizi (Barrowman stabilite + weathercock).
@@ -10272,6 +10894,86 @@ def six_dof_analysis():
                             'physically impossible inputs. Nothing was '
                             'integrated.'),
                 'invalid_fields': invalid,
+            }), 422
+
+        # --- V307/FS-UÇUŞ — FIRLATMA SAHASI UÇUŞ İZİ (isteğe bağlı) -------
+        # ``descent_model`` verilirse yanıta ``track`` bloğu eklenir
+        # (launch_site_flight.flight_track: yükseliş + iniş, enlem/boylam,
+        # olaylar). Verilmezse yanıt DEĞİŞMEZ (motor sayfalarının 6-DOF
+        # paneli bu alanı göndermez). Tanınmayan değer adıyla reddedilir.
+        from hrma.analysis import launch_site_flight as _lsf
+        _FS_INIS = _lsf.DESCENT_MODELS
+        _fs_inis = data.get('descent_model')
+        if _fs_inis is not None and _fs_inis not in _FS_INIS:
+            return jsonify({
+                'status': 'error',
+                'error': 'invalid_six_dof_input',
+                'message': ('descent_model must be one of '
+                            + ', '.join(_FS_INIS) + '. Nothing was integrated.'),
+                'invalid_fields': [{'field': 'descent_model',
+                                    'reason': 'not_in_allowed_set'}],
+            }), 422
+
+        # --- V307/FS-UÇUŞ-2 (A4) — PARAŞÜT GİRDİLERİ ----------------------
+        # Kural düzlemsel çözücünün ``/api/trajectory-analysis`` kapısıyla
+        # AYNI: alan ve Cd pozitif, açılma gecikmesi negatif değil; ihlal
+        # adıyla reddedilir (varsayılana DÜŞÜRÜLMEZ). Paraşütlü iniş alanı
+        # ZORUNLU ister (düzlemsel çözücü de alanı varsaymaz). Paraşüt alanı
+        # gelip iniş modeli 'parachute' değilse sessizce yok sayılmaz.
+        # V307/FS-KÜÇÜK (kalem 3): kural düzlemsel uçla TEK yardımcıda
+        # (``_parasut_girdi_kapisi`` → ``launch_site_flight.
+        # parachute_input_defect``); ret kayıtları ve sırası aynı.
+        _fs_kurtarma = None
+        _parasut_gelen = [a for a, _p in _lsf.PARACHUTE_INPUT_FIELDS
+                          if data.get(a) is not None and data.get(a) != '']
+        if _parasut_gelen and _fs_inis != 'parachute':
+            return jsonify({
+                'status': 'error',
+                'error': 'invalid_six_dof_input',
+                'message': ('Parachute inputs were sent but descent_model is '
+                            'not parachute, so they would be ignored. Send '
+                            "descent_model 'parachute' or leave the parachute "
+                            'fields empty. Nothing was integrated.'),
+                'invalid_fields': [{'field': a,
+                                    'reason': 'requires_parachute_descent_model'}
+                                   for a in _parasut_gelen],
+            }), 422
+        if _fs_inis == 'parachute':
+            _parasut_deger, _parasut_kusur = _parasut_girdi_kapisi(
+                data, alan_zorunlu=True)
+            if _parasut_kusur:
+                return jsonify({
+                    'status': 'error',
+                    'error': 'invalid_six_dof_input',
+                    'message': ('The parachute descent needs the parachute '
+                                'projected area (m2, above 0); Cd must be above '
+                                '0 and the deploy delay must not be negative. '
+                                'A value outside its definition was NOT '
+                                'dropped back to a default. Nothing was '
+                                'integrated.'),
+                    'invalid_fields': _parasut_kusur,
+                }), 422
+            _fs_kurtarma = _lsf.recovery_inputs(
+                _parasut_deger['parachute_area'],
+                _parasut_deger.get('parachute_cd'),
+                _parasut_deger.get('parachute_deploy_delay'))
+
+        # --- V307/FS-UÇUŞ-2 (A1) — KANAT GEOMETRİSİ KURALI (isteğe bağlı) --
+        # ``fin_geometry_rule`` verilirse BOŞ kanat alanları (kök/uç veteri,
+        # ok, açıklık) kaynaklı kuraldan gelir (launch_site_flight: planform
+        # HRMA seçimi + açıklık statik marj ölçütü); verilen alan aynen
+        # kalır. Verilmezse davranış DEĞİŞMEZ (motor sayfası 6-DOF paneli).
+        _fs_kanat_kurali = data.get('fin_geometry_rule')
+        if _fs_kanat_kurali is not None and \
+                _fs_kanat_kurali not in _lsf.FIN_GEOMETRY_RULES:
+            return jsonify({
+                'status': 'error',
+                'error': 'invalid_six_dof_input',
+                'message': ('fin_geometry_rule must be one of '
+                            + ', '.join(_lsf.FIN_GEOMETRY_RULES)
+                            + '. Nothing was integrated.'),
+                'invalid_fields': [{'field': 'fin_geometry_rule',
+                                    'reason': 'not_in_allowed_set'}],
             }), 422
 
         # --- ÖH D29 / app-api-uc a2 · P16B3-33 · KANAT SAYISI TAMSAYIDIR --
@@ -10406,18 +11108,77 @@ def six_dof_analysis():
             return _yedek_kunyesi(_SIXDOF_UC_VARSAYILANLARI, data, alan,
                                   _6dof_kunye)
 
-        aero = BarrowmanAero(
+        # V307/FS-UÇUŞ-2 (A1): kural istenmişse BOŞ kanat alanları beyanlı
+        # uç varsayılanına (``_6d``) DÜŞMEZ; kuraldan gelir ve ``fin_geometry``
+        # bloğunda kaynağıyla yazılır (``defaults_applied``a girmez: uç
+        # yer tutucusu değil, aracın kuralla kurulan kanadıdır).
+        def _bos_alan(alan):
+            ham = data.get(alan)
+            return ham is None or (isinstance(ham, str) and ham.strip() == '')
+        _kural_alanlari = (
+            [a for a in ('fin_root_chord', 'fin_tip_chord', 'fin_sweep',
+                         'fin_span') if _bos_alan(a)]
+            if _fs_kanat_kurali is not None else [])
+
+        def _kanat(alan):
+            return None if alan in _kural_alanlari else float(_6d(alan))
+
+        # V307/FS-UÇUŞ: kurucu argümanları adlı sözlükte (kanat öneri
+        # araması aynı argümanlarla yalnız fin_span değiştirerek kurar).
+        _aero_args = dict(
             body_diameter=float(_6d('body_diameter')),
             nose_length=float(_6d('nose_length')),
             body_length=float(_6d('body_length')),
             nose_type=_6d('nose_type'),
             fin_count=int(_6d('fin_count')),
-            fin_root_chord=float(_6d('fin_root_chord')),
-            fin_tip_chord=float(_6d('fin_tip_chord')),
-            fin_span=float(_6d('fin_span')),
-            fin_sweep=float(_6d('fin_sweep')),
+            fin_root_chord=_kanat('fin_root_chord'),
+            fin_tip_chord=_kanat('fin_tip_chord'),
+            fin_span=_kanat('fin_span'),
+            fin_sweep=_kanat('fin_sweep'),
             fin_position=data.get('fin_position'),
         )
+        _kanat_kaynagi = {}
+        if _fs_kanat_kurali is not None:
+            _planform = _lsf.fin_planform_by_rule(
+                _aero_args['body_diameter'], _aero_args['fin_root_chord'],
+                _aero_args['fin_tip_chord'], _aero_args['fin_sweep'])
+            for _alan, (_deger, _kaynak) in _planform.items():
+                _aero_args[_alan] = _deger
+                _kanat_kaynagi[_alan] = _kaynak
+            _kanat_kaynagi['fin_count'] = (
+                _lsf.FIN_SOURCE_SOLVER_DEFAULT
+                if any(k['field'] == 'fin_count' for k in _6dof_kunye)
+                else _lsf.FIN_SOURCE_SUPPLIED)
+            _kanat_kaynagi['fin_span'] = (
+                _lsf.FIN_SOURCE_SPAN_RULE if 'fin_span' in _kural_alanlari
+                else _lsf.FIN_SOURCE_SUPPLIED)
+            if _aero_args['fin_span'] is None:
+                _aero_args['fin_span'] = 0.0     # boyutlandırma uçuşta
+            # Kuralın kök veteri gövdenin burun arkasındaki boyuna sığmalı
+            # (kanat kuyruğa dayalı: fin_position = L − kök). Sığmıyorsa
+            # kanat kurulamaz — adıyla ret (kırpma yok).
+            if (_kanat_kaynagi['fin_root_chord'] == _lsf.FIN_SOURCE_PLANFORM_RULE
+                    and data.get('fin_position') is None
+                    and _aero_args['fin_root_chord']
+                    > _aero_args['body_length'] - _aero_args['nose_length']):
+                return jsonify({
+                    'status': 'error',
+                    'error': 'fin_rule_root_chord_does_not_fit',
+                    'message': (
+                        'The fin root chord from the fin rule '
+                        f"({_aero_args['fin_root_chord']:.3f} m) is longer than "
+                        'the body behind the nose '
+                        f"({_aero_args['body_length'] - _aero_args['nose_length']:.3f} m), "
+                        'so the fins cannot be placed. Enter the fin root chord '
+                        'or lengthen the body. Nothing was integrated.'),
+                    'invalid_fields': [{
+                        'field': 'fin_root_chord',
+                        'reason': 'rule_value_longer_than_body',
+                        'root_chord_m': float(_aero_args['fin_root_chord']),
+                        'available_m': float(_aero_args['body_length']
+                                             - _aero_args['nose_length'])}],
+                }), 422
+        aero = BarrowmanAero(**_aero_args)
         # --- V301/UÇUŞ NK-47 · GÖVDE MOTORU TAŞIYABİLİR Mİ (TEK HÜKÜM) ----
         # İstek motor zarfını taşıyorsa (Fırlatma Sahası: seçili aracın
         # ``engine_od_m``/``engine_length_m``i; motor sayfalarının 6-DOF
@@ -10428,7 +11189,7 @@ def six_dof_analysis():
         from hrma.analysis.flight_vehicle import airframe_fit_conflicts
         _govde_celiskisi = airframe_fit_conflicts(
             data.get('engine_od_m'), data.get('engine_length_m'),
-            aero.d, aero.L)
+            aero.d, aero.L, _aero_args.get('nose_length'))
         if _govde_celiskisi:
             return jsonify({
                 'status': 'error',
@@ -10441,8 +11202,9 @@ def six_dof_analysis():
                 **({'defaults_applied': list(_6dof_kunye)}
                    if _6dof_kunye else {}),
             }), 422
-        solver = SixDOFTrajectory(
-            aero=aero,
+        # V307/FS-UÇUŞ: çözücü argümanları adlı sözlükte (kanat önerisini
+        # doğrulayan yeniden uçuş aynı argümanlarla, yalnız aero değişerek).
+        _solver_args = dict(
             dry_mass=float(_6d('dry_mass')),
             propellant_mass=float(_6d('propellant_mass')),
             thrust_curve=data.get('thrust_curve'),
@@ -10475,6 +11237,87 @@ def six_dof_analysis():
             nozzle_exit_area=_ae_6d,
             thrust_reference_pressure=_pref_6d,
         )
+        # --- V307/AĞIRLIK-MERKEZİ — BİLEŞENLERDEN AĞIRLIK MERKEZİ ----------
+        # İstek türetilmiş gövdenin kütle yerleşimini taşıyorsa
+        # (``airframe_resolved.mass_layout``; motor sayfası 6-DOF paneli ve
+        # Fırlatma Sahası) ağırlık merkezi TEK tanımdan, bu isteğin gövde boyu
+        # ve kütleleriyle kurulur (``flight_vehicle.component_cg``); sabit boy
+        # kesri bu yolda kullanılmaz. Kullanıcının verdiği x_cg_full /
+        # x_cg_empty ÖNCELİKLİDİR: biri bile verildiyse yerleşim kullanılmaz
+        # ve yol eskisiyle bit-aynıdır. Kurulamazsa adıyla ret.
+        _cg_bilesen = None
+        # V307/AĞIRLIK-MERKEZİ-2: faydalı yük (kütle + burundan istasyon)
+        # yalnız bileşen ağırlık merkezinde bir yere konabilir; yerleşimsiz
+        # ya da elle x_cg'li istekte sessizce yok sayılmaz, adıyla reddedilir.
+        if (data.get('payload_mass') is not None
+                or data.get('payload_station') is not None) and (
+                data.get('mass_layout') is None
+                or data.get('x_cg_full') or data.get('x_cg_empty')):
+            return jsonify({
+                'status': 'error', 'error': 'payload_needs_component_cg',
+                'message': ('The payload mass and station are placed only in '
+                            'the centre of gravity built from the engine '
+                            'components (derived airframe, simple mass mode). '
+                            'With your own airframe or centre of gravity, put '
+                            'the payload in your mass budget. Nothing was '
+                            'integrated.'),
+                'invalid_fields': [{'field': 'payload_mass',
+                                    'reason': 'PAYLOAD_NEEDS_COMPONENT_CG'}],
+            }), 422
+        if data.get('mass_layout') is not None and not (
+                data.get('x_cg_full') or data.get('x_cg_empty')):
+            from hrma.analysis import flight_vehicle as _fv_cg
+            try:
+                _cg_bilesen = _fv_cg.component_cg(
+                    data.get('mass_layout'), aero.L, _solver_args['dry_mass'],
+                    _solver_args['propellant_mass'],
+                    payload_mass_kg=data.get('payload_mass'),
+                    payload_station_m=data.get('payload_station'))
+            except _fv_cg.CgLayoutRejected as e:
+                return jsonify({
+                    'status': 'error',
+                    'error': 'centre_of_gravity_not_built',
+                    'message': str(e) + ' Nothing was integrated.',
+                    'invalid_fields': [{'field': e.field, 'reason': e.code}],
+                }), 422
+            _solver_args['x_cg_table'] = _cg_bilesen['table']
+        # --- 3.0.7 (V307/ÇALKANTI-ARAYÜZ, K5 B) — İSTEĞE BAĞLI ÇALKANTI ----
+        # ``calkanti`` bloğu verilirse motorun tankları K4 bağlantısıyla
+        # (``slosh_motor_baglanti.slosh_tanklari``) kurulur ve çözücüye
+        # ``slosh_tanks`` olarak geçer; gövde ölçüleri (boy, çap, burun)
+        # BU isteğin aracından eklenir (uygunluk denetimi). Blok yoksa uç
+        # bugünküyle bit-aynı. Hüküm (dört an) ve pencere tablosu
+        # YAYIMLANMAZ (ÇALKANTI-KARARLILIK sözleşmesi bekleniyor).
+        _calkanti_k4 = _calkanti_duzen = None
+        if data.get('calkanti') is not None:
+            _calkanti_k4, _calkanti_duzen, _calkanti_red = \
+                _calkanti_6dof_tanklari(data, aero, _aero_args)
+            if _calkanti_red is not None:
+                return jsonify(_calkanti_red[0]), _calkanti_red[1]
+            # V307/ONARIM2-UÇUŞ-ARAÇ (M7-CALK-15): kullanıcı bir tankın
+            # geometrisini yükledi ve o tank bu gövdeye SIĞMIYOR → adlı ret
+            # (eskiden tank sessizce düşüyor, koşu kalan tankla sürüyordu).
+            # Gövde alanları türetilmişse panel gövdeyi yüklenen tankla
+            # yeniden türetir (``flight_vehicle.vehicle_with_loaded_tanks``);
+            # buraya yalnız elle yazılan (ya da dar) gövde gelir.
+            _yt_reddi = _yuklenen_tank_sigmiyor(data, _calkanti_k4,
+                                                _calkanti_duzen)
+            if _yt_reddi is not None:
+                return jsonify(_yt_reddi), 422
+        from hrma.analysis.six_dof_slosh import SloshBaglamaHatasi
+        try:
+            solver = SixDOFTrajectory(
+                aero=aero, **_solver_args,
+                **({'slosh_tanks': _calkanti_k4['slosh_tanks']}
+                   if _calkanti_k4 is not None else {}))
+        except SloshBaglamaHatasi as e:
+            # V307/ONARIM2-UÇUŞ-ARAÇ (M7-UCUS-18): ret sayıları adlı alanlarda.
+            return jsonify({
+                'status': 'error', 'error': 'slosh_coupling_rejected',
+                'message': str(e),
+                'invalid_fields': [dict({'field': 'calkanti.' + str(e.alan or ''),
+                                         'reason': e.kod},
+                                        **(getattr(e, 'degerler', None) or {}))]}), 422
         # ÖH D27 / P16S1-02 — RAY BOYU BEYANI ÇÖZÜCÜ SABİTİNDEN OKUNUR.
         # Eski beyan tablosu ``('rail_length', 5.0)`` yazıyordu; oysa okuma
         # yeri (yukarıda) o alanı bilerek çözücüye bırakıyor. Yani beyan,
@@ -10516,10 +11359,42 @@ def six_dof_analysis():
         # tetiklenmez — bir gerileme olursa arayüz kilitlenmesin diye vardır.
         import time as _time
         _outcome = {}
+        # V307/FS-UÇUŞ-2: kanat açıklığı kuralla boyutlanıyorsa uçuş(lar) ve
+        # Fırlatma Sahası inişi de AYNI bütçenin içinde koşar.
+        # Kanat sayısı 0 (kullanıcının seçimi: kanatsız gövde) ise
+        # boyutlandırılacak kanat yoktur; araç kanatsız uçar, hüküm çözücünün.
+        _aciklik_kurali = ('fin_span' in _kural_alanlari
+                           and _aero_args['fin_count'] > 0)
+        if 'fin_span' in _kural_alanlari and not _aciklik_kurali:
+            _kanat_kaynagi['fin_span'] = 'no_fins'
 
         def _run_solver():
             try:
-                _outcome['res'] = solver.solve(t_max=t_max)
+                if _aciklik_kurali:
+                    # V307/FS-KÜÇÜK (kalem 5): çalkantı bloğu verildiyse
+                    # açıklık rijit uçuşlarla boyutlanır, yayımlanan uçuş
+                    # AYNI tanklarla bağlaşık son uçuştur (eskiden kural
+                    # yolu tankları düşürüyordu: Fırlatma Sahası bloğu
+                    # gönderse de uçuş rijit kalırdı).
+                    (_outcome['aero'], _outcome['solver'], _outcome['res'],
+                     _outcome['span_sizing']) = _lsf.fly_with_span_rule(
+                        _aero_args, _solver_args, t_max,
+                        solver.x_cg_full, solver.x_cg_empty,
+                        coupled_solver_args=(
+                            dict(_solver_args,
+                                 slosh_tanks=_calkanti_k4['slosh_tanks'])
+                            if (_calkanti_k4 is not None
+                                and _calkanti_k4['slosh_tanks']) else None))
+                else:
+                    _outcome['res'] = solver.solve(t_max=t_max)
+                if _fs_inis is not None and _outcome.get('res') is not None:
+                    _cozucu = _outcome.get('solver', solver)
+                    _outcome['descent'] = (
+                        _lsf.descent_flight(_cozucu, _outcome['res'],
+                                            _fs_kurtarma)
+                        if _fs_inis in ('ballistic', 'parachute') else
+                        {'model': 'none', 'status': 'not_solved',
+                         'reason': 'descent_not_requested'})
             except BaseException as exc:      # noqa: BLE001 - yeniden atılır
                 _outcome['exc'] = exc
 
@@ -10541,7 +11416,40 @@ def six_dof_analysis():
                 't_max_s': t_max,
             }), 503
         if 'exc' in _outcome:
+            if isinstance(_outcome['exc'], SloshBaglamaHatasi):
+                e = _outcome['exc']
+                return jsonify({
+                    'status': 'error', 'error': 'slosh_coupling_rejected',
+                    'message': str(e),
+                    'invalid_fields': [dict({'field': 'calkanti.' + str(e.alan or ''),
+                                             'reason': e.kod},
+                                            **(getattr(e, 'degerler', None) or {}))]}), 422
             raise _outcome['exc']
+        _aciklik_kaydi = _outcome.get('span_sizing')
+        if _aciklik_kurali and _outcome.get('res') is None:
+            # Kural ölçütü sağlayan bir açıklık bulamadı: KURALLA kurulmuş bir
+            # araç yok — başka bir kanatla uçurulmaz, adıyla ret.
+            _neden = _aciklik_kaydi['reason']
+            return jsonify({
+                'status': 'error',
+                'error': 'fin_rule_not_met',
+                'message': (
+                    'No fin span up to '
+                    f"{_aciklik_kaydi['search_max_span_m']:.3f} m "
+                    'keeps the static margin above the stability threshold '
+                    'with these fin chords and this body'
+                    + (' (no fins to size: the fin count or root chord is 0)'
+                       if _neden == 'no_fins_to_size' else '')
+                    + '. Enter the fin geometry, lengthen the fin chords or '
+                      'the body, or move mass forward. Nothing was flown.'),
+                'invalid_fields': [{'field': 'fin_span',
+                                    'reason': _neden or 'fin_rule_not_met'}],
+                'fin_rule': _aciklik_kaydi,
+            }), 422
+        if _aciklik_kurali:
+            aero, solver = _outcome['aero'], _outcome['solver']
+            _aero_args['fin_span'] = float(
+                _aciklik_kaydi['flights'][-1]['fin_span_m'])
         res = _outcome['res']
 
         # Zaman serilerini en fazla SIXDOF_SERIES_MAX_POINTS noktaya seyrelt
@@ -10663,7 +11571,12 @@ def six_dof_analysis():
         # sayının bir ÖLÇÜ mü yoksa depo VARSAYILANI mı olduğunu göremiyordu.
         # Sayı İCAT EDİLMEZ: yalnız çözücünün gerçekten döndürdüğü alanlar
         # taşınır (``in res`` kapısı).
-        for _ray in ('rail_length_m', 'rail_length_source'):
+        # V307/ONARIM2-UÇUŞ-PANEL (M7-UCUS-10): ray çıkış anı/hızı, o andaki
+        # hücum açısı ve ateşlemedeki itki/ağırlık (çözücünün kendi çözümü;
+        # panelin kararlılık bölümü okur). ``thrust_to_weight_at_ignition``
+        # aşağıdaki dürüstlük döngüsünde taşınır (tek yer).
+        for _ray in ('rail_length_m', 'rail_length_source', 'rail_exit_time_s',
+                     'rail_exit_speed_m_s', 'rail_exit_alpha_deg'):
             if _ray in res:
                 summary[_ray] = res[_ray]
 
@@ -10784,7 +11697,25 @@ def six_dof_analysis():
                 'diameter, so the verdict is only as good as the centre of '
                 'gravity it was built on.'),
         }
-        if res.get('x_cg_is_estimate'):
+        if _cg_bilesen is not None:
+            # V307/AĞIRLIK-MERKEZİ: bileşen ağırlık merkezinin künyesi
+            # (yerleşim seçimleri adıyla; motordan gelmeyen kuru kütle).
+            stability_basis['x_cg_components'] = {
+                'airframe_dry_mass_not_from_engine_kg':
+                    _cg_bilesen['airframe_dry_mass_not_from_engine_kg'],
+                'basis': _cg_bilesen['basis'],
+            }
+            if _cg_bilesen.get('payload') is not None:
+                stability_basis['x_cg_components']['payload'] = \
+                    _cg_bilesen['payload']
+            stability_basis['static_margin_basis'] = (
+                'The static margin and the stability verdict are computed '
+                'from a centre of gravity built from the engine mass items '
+                'and the airframe stack (x_cg_source = components; placement '
+                'is an HRMA choice, see x_cg_components.basis), not from a '
+                'mass budget you supplied. Send x_cg_full and x_cg_empty to '
+                'make this a verification.')
+        elif res.get('x_cg_is_estimate'):
             stability_basis['static_margin_basis'] = (
                 'The static margin and the stability verdict are computed '
                 'from an ESTIMATED centre of gravity (x_cg_source = '
@@ -10884,6 +11815,54 @@ def six_dof_analysis():
             aero.d, aero.L, data.get('nose_length'))
         if _hacim_celiskisi:
             _govde_6dof['airframe_volume_conflicts'] = _hacim_celiskisi
+        # V307/FS-UÇUŞ-2 (A1): kanat geometrisinin her alanı değeri ve
+        # kaynağıyla (girdi / kural / uç varsayılanı) + ölçütün durumu.
+        if _fs_kanat_kurali is not None:
+            _alan_kaynak = {}
+            for _alan in ('fin_count', 'fin_root_chord', 'fin_tip_chord',
+                          'fin_sweep', 'fin_span'):
+                _alan_kaynak[_alan] = {
+                    'value': (int(_aero_args[_alan]) if _alan == 'fin_count'
+                              else float(_aero_args[_alan])),
+                    'unit': 'count' if _alan == 'fin_count' else 'm',
+                    'source': _kanat_kaynagi.get(_alan,
+                                                 _lsf.FIN_SOURCE_SUPPLIED)}
+            _govde_6dof['fin_geometry'] = _lsf.fin_geometry_block(
+                aero, solver.x_cg_full, solver.x_cg_empty, _alan_kaynak,
+                _aciklik_kaydi, res.get('max_mach'))
+        # 3.0.7 (K5 B): çalkantı bloğu — tank durumu, beyanlar, zaman alanı
+        # (hüküm YOK; bkz. ``_calkanti_6dof_ciktisi``).
+        if _calkanti_k4 is not None:
+            _govde_6dof['calkanti'] = _calkanti_6dof_ciktisi(
+                _calkanti_k4, _calkanti_duzen, res, idx)
+            # V307/UÇUŞ-GÖVDE (kalem 6): doğrusal sınır aşıldıysa bağlaşık
+            # koşunun tüm-uçuş sayıları yayımlanmaz (``calkanti.yayim``).
+            _calkanti_yayim_kurali(summary, _govde_6dof['calkanti'])
+        # V307/FS-UÇUŞ — Fırlatma Sahası uçuş izi (yalnız istenirse).
+        if _fs_inis is not None:
+            # İniş çözücü iş parçacığında, aynı bütçede çözüldü (balistik ya
+            # da paraşütlü; iniş penceresi düzlemsel çözücününki).
+            _inis = _outcome['descent']
+            _iz = _lsf.flight_track(
+                solver, res, _inis,
+                lat0=(float(data['latitude_deg'])
+                      if data.get('latitude_deg') is not None else None),
+                lon0=(float(data['longitude_deg'])
+                      if data.get('longitude_deg') is not None else None),
+                max_points=SIXDOF_SERIES_MAX_POINTS)
+            _iz['descent'] = {k: v for k, v in _inis.items()
+                              if k not in ('time', 'position', 'velocity',
+                                           'altitude', 'speed', 'mach',
+                                           'dynamic_pressure')}
+            _govde_6dof['track'] = _iz
+            # Araç kararlı değilse (statik marj ya da takla) aynı modelle
+            # ölçütü uçuşun Mach aralığında sağlayan en küçük kanat açıklığı
+            # ÖNERİSİ + öneriyle aynı girdilerde yeniden uçuşun hükmü.
+            if (res.get('end_reason') in ('apogee', 'tumble_detected')
+                    and res.get('stable') is not True):
+                _govde_6dof['fin_sizing'] = _lsf.fin_sizing_flown(
+                    _aero_args, _solver_args, t_max, solver.x_cg_full,
+                    solver.x_cg_empty, res.get('max_mach'))
         return jsonify(sanitize_json_values(_govde_6dof))
     except ValueError as e:
         return jsonify({'status': 'error', 'error': str(e)}), 400
@@ -11417,6 +12396,51 @@ _TP_MODE_REQUIRED = {
     'radiation_equilibrium': ('h_gas_W_m2K', 'T_recovery_K'),
 }
 
+#: V307/GÜVERTE-ISIL (kalem 3) — KOŞULLU zorunlu alanlar: ``(alan, yerine
+#: geçen alan)``. Ablatif kipte skaler akının süresi imzada varsayılanlıdır
+#: (``burn_time_s=None``) ama çekirdek onsuz hesap yapmaz; süre yalnız zamana
+#: bağlı akı dizisinin zaman ekseni (``time_s``) verildiğinde diziden gelir.
+#: ÖLÇÜLDÜ (taban c2c455b4c): ``{mode: ablative, q_net_W_m2: 2e6}`` -> HTTP
+#: 400 + çekirdeğin ham cümlesi ("burn_time_s must be positive"); öbür
+#: zorunlu alanların eksikliği 422 + ``missing_fields`` veriyordu.
+_TP_MODE_REQUIRED_UNLESS = {
+    'ablative': (('burn_time_s', 'time_s'),),
+}
+
+
+#: V307/KÜÇÜKLER (kalem 5) — İMZADA VARSAYILANI OLAN AMA O VARSAYILANIN
+#: KAYNAĞI OLMAYAN alanlar: uçta zorunlu. ``heat_sink_transient(T_initial_K=
+#: 300.0)`` kaynaksız bir sabittir ve panel onu tanım değeri olarak
+#: gönderiyordu (motorun ortam / başlangıç sıcaklığından tohumlanmıyordu).
+#: Panel motorun yayımladığı cidar başlangıç sıcaklığını tohumlar; motor
+#: yayımlamıyorsa (katı) alan boş kalır ve uç adıyla 422 döner.
+_TP_MODE_REQUIRED_SOURCELESS_DEFAULT = {
+    'heat_sink': ('T_initial_K',),
+}
+
+
+def _tp_missing_fields(mode, params):
+    """``mode`` için eksik zorunlu alanlar (ucun kapısı; tek tanım)."""
+    eksik = [key for key in _TP_MODE_REQUIRED[mode] if key not in params]
+    eksik += [key for key in _TP_MODE_REQUIRED_SOURCELESS_DEFAULT.get(mode, ())
+              if key not in params]
+    eksik += [alan for alan, yerine in _TP_MODE_REQUIRED_UNLESS.get(mode, ())
+              if alan not in params and yerine not in params]
+    return eksik
+
+
+def thermal_protection_form_contract():
+    """Isıl koruma panelinin kip başına zorunlu alan kümesi.
+
+    Panel bu kümeyi KENDİ dosyasında tutmaz: şablon ``<meta name="hrma-tp-
+    mode-required">`` olarak basar (``inject_thermal_protection_contract``),
+    panel oradan okur. Küme ucun kapısının (``_tp_missing_fields``) BOŞ
+    gövdeye verdiği yanıttır: panel formu zamana bağlı akı dizisi
+    göndermediği için koşullu alanlar da zorunludur. Sunucu ⟷ panel tek
+    kaynak; ikinci liste yok.
+    """
+    return {mode: _tp_missing_fields(mode, {}) for mode in _TP_MODE_KEYS}
+
 
 # ÖH D30 / app-api-uc a1 · OH-D29-13 (+ P7B1-22) — ``/api/analysis/
 # thermal-protection`` TAKMA YOLU SİLİNDİ. ÖLÇÜLDÜ (``a1/once.json`` K9,
@@ -11480,8 +12504,7 @@ def thermal_protection_analysis():
         # eliyor; zorunlu argüman böylece kayboluyordu. Panel ``data.error``
         # değerini ekrana bastığı için kullanıcı ham Python metnini görüyordu.
         # Bu bir istemci hatasıdır (500 değil) ve makine-okur olmalıdır.
-        missing = [key for key in _TP_MODE_REQUIRED[mode]
-                   if key not in params]
+        missing = _tp_missing_fields(mode, params)
         if missing:
             return jsonify({
                 'status': 'error',
@@ -12067,7 +13090,7 @@ def _combustion_stability_chug(data):
             skipped.append({'dp_ratio_j': j, 'reason': (
                 'the continued root did not meet the residual check '
                 '(chug_rightmost_root returned None); no number is '
-                'fabricated for this point.')})
+                'published for this point.')})
             continue
         locus_j.append(j)
         locus_sigma.append(float(root.real))
@@ -12092,7 +13115,7 @@ def _combustion_stability_chug(data):
                 f'[{_CS_NEUTRAL_J_MIN:g}, {_CS_NEUTRAL_J_MAX:g}]), with tau, '
                 'tau_c and tau_f held at their operating values. Points the '
                 'core rejects or cannot resolve are listed in '
-                'skipped_points, never fabricated.'),
+                'skipped_points and receive no number.'),
         },
         'operating_point': {
             'dp_ratio_j': assessment['dp_ratio_j'],
@@ -12190,7 +13213,7 @@ def combustion_stability_analysis():
                 'message': ("'mode' was not supplied and has no default: "
                             'chug and damping are two different physics '
                             'questions, so choosing one silently would be a '
-                            'fabricated answer. Nothing was analysed.'),
+                            'guess at the question. Nothing was analysed.'),
                 'mode': None,
                 'missing_fields': ['mode'],
                 'supported_modes': sorted(_CS_MODE_REQUIRED),
@@ -12525,21 +13548,83 @@ def regen_cooling_analysis():
       istasyon dizileri (x_mm, T_wall_hot_K, T_wall_cold_K, T_coolant_K,
       P_coolant_bar, q_MW_m2, velocity_m_s), summary (peak wall T, malzeme
       limiti, dP, çıkış T, koklaşma durumu, uyarılar) ve model_note.
-    Hata 400: {'status':'error','error': mesaj} — tüm girdi hataları ValueError.
+    Hata 400: {'status':'error','error': mesaj} — öteki girdi hataları ValueError.
+    Hata 422: ``invalid_regen_input`` + ``invalid_fields`` — oda sıcaklığı
+      sonlu ve 0 K'den büyük değil (V307/KÜÇÜKLER-2 kalem 1);
+      ``incomplete_regen_input`` + ``missing_fields`` — oda basıncı, oda
+      sıcaklığı ya da boğaz çapı verilmedi (V307/ORTAM-TEK kalem 2).
     """
     try:
         data = request.json or {}
         from hrma.analysis.regen_cooling import RegenCooling
 
         chamber_pressure_bar = _json_float(data, 'chamber_pressure')
-        chamber_temperature = _json_float(data, 'chamber_temperature')
+        # V307/KÜÇÜKLER-2 (kalem 1; KÜÇÜKLER kalem 7 DEVİR): sıcaklık
+        # okunamazsa (sayı değil / sonlu değil) çözücüye inilmeden aşağıda
+        # adlı 422 döner; okuma hatası burada yutulmaz, işaretlenir.
+        try:
+            chamber_temperature = _json_float(data, 'chamber_temperature')
+            _regen_t_okunamadi = None
+        except ValueError as _t_hata:
+            chamber_temperature = None
+            _regen_t_okunamadi = str(_t_hata)
         throat_diameter = _json_float(data, 'throat_diameter')
-        if chamber_pressure_bar is None:
-            raise ValueError("'chamber_pressure' is required (bar)")
-        if chamber_temperature is None:
-            raise ValueError("'chamber_temperature' is required (K)")
-        if throat_diameter is None:
-            raise ValueError("'throat_diameter' is required (m)")
+        # V307/ORTAM-TEK (kalem 2; KÜÇÜKLER-2 AÇIK 1) — EKSİK ZORUNLU ALAN
+        # ADIYLA 422. ÖLÇÜLDÜ (docs/scofield/raw/OH/V307/ortam-tek/olcum/
+        # k2_once.json): oda basıncı / sıcaklığı / boğaz çapı verilmeyince
+        # 400 + ham cümle ("'chamber_temperature' is required (K)") dönüyor,
+        # yalnız İLK eksik alan cümlede adlanıyordu. Fizik dışı sıcaklık
+        # dalıyla (aşağıda) aynı aile: makine-okur kod + eksiklerin TAMAMI
+        # (``missing_fields``); hiçbir şey çözülmez, hiçbir değer varsayılmaz.
+        # Okunamayan sıcaklık eksik SAYILMAZ (aşağıda kendi adlı reddi var).
+        _regen_eksik = [ad for ad, deger in (
+            ('chamber_pressure', chamber_pressure_bar),
+            ('chamber_temperature',
+             chamber_temperature if _regen_t_okunamadi is None else 0.0),
+            ('throat_diameter', throat_diameter)) if deger is None]
+        if _regen_eksik:
+            return jsonify({
+                'status': 'error',
+                'error': 'incomplete_regen_input',
+                'message': ('The regenerative cooling march needs: '
+                            + ', '.join(_regen_eksik)
+                            + '. No value is assumed. Nothing was solved.'),
+                'missing_fields': _regen_eksik,
+            }), 422
+
+        # V307/KÜÇÜKLER-2 (kalem 1) — FİZİK DIŞI ODA SICAKLIĞI ADIYLA 422.
+        # ÖLÇÜLDÜ (taban b3221d092, docs/scofield/raw/OH/V307/kucukler-2/
+        # olcum/k1_once.json): −3000 K ve 0 K gövde çözücüye kadar iniyor ve
+        # HTTP 400 + çözücünün ham cümlesi ("chamber_temperature must be
+        # positive [K].") dönüyordu; 'NaN' / 'Infinity' / metin / true da
+        # 400 + okuyucunun ham cümlesi. Alan makine-okur biçimde
+        # adlandırılmıyordu ve güverte kodu tanımıyordu. Kardeş uçtaki
+        # (``/api/flow-analysis``, V307/KÜÇÜKLER kalem 7) desen: mutlak
+        # sıcaklık > 0 K ve sonlu olmak zorundadır; kod
+        # ``invalid_regen_input`` (güverte: ``dock.err.invalidRegenInput``).
+        # Hiçbir şey çözülmeden dönülür; sağlıklı gövdenin yanıtı bit-aynı.
+        if _regen_t_okunamadi is not None or not chamber_temperature > 0.0:
+            return jsonify({
+                'status': 'error',
+                'error': 'invalid_regen_input',
+                'message': ('chamber_temperature must be a finite absolute '
+                            'temperature above 0 K. Nothing was solved.'),
+                'invalid_fields': [{
+                    'field': 'chamber_temperature',
+                    # V307/ORTAM-TEK (kalem 2): okunamayan değerin nedeni
+                    # gerekçe KANONUNDAN (``_kanonik_gerekce``; emekli
+                    # ``not_a_finite_number`` adı yerine bool / JSON sayısı
+                    # değil / sonlu değil ayrımı).
+                    'reason': (_kanonik_gerekce(
+                                   data.get('chamber_temperature'),
+                                   sayi_ise='out_of_range')
+                               if _regen_t_okunamadi is not None
+                               else 'out_of_range'),
+                    'unit': 'K',
+                    'value': chamber_temperature,
+                    'basis': ('absolute temperature: must be a finite '
+                              'number greater than 0 K')}],
+            }), 422
 
         gamma = _json_float(data, 'gamma')
         molecular_weight = _json_float(data, 'molecular_weight')
@@ -12721,6 +13806,12 @@ def slosh_analysis_api():
         shape_error = _json_body.json_object_error(data)
         if shape_error is not None:
             return jsonify(shape_error[0]), shape_error[1]
+        # 3.0.7 (V307/ÇALKANTI-ARAYÜZ, K5): ``tank_modeli`` bloğu verilirse
+        # motorun tanklarının doluluk tablosu / frekans haritası / yükleri
+        # (``_calkanti_tank_modeli_yaniti``); verilmezse uç bugünküyle
+        # BİT-AYNI çalışır (tek derinlikli silindir analizi).
+        if 'tank_modeli' in data:
+            return _calkanti_tank_modeli_yaniti(data)
         from hrma.analysis.slosh_analysis import (analyze_slosh,
                                                   SloshGirdiHatasi)
 
@@ -12849,6 +13940,325 @@ def slosh_analysis_api():
                         'invalid_fields': [e.kunye()]}), 400
     except (ValueError, KeyError) as e:
         return jsonify({'status': 'error', 'error': str(e)}), 400
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({'status': 'error', 'error': str(e)}), 500
+
+
+# ---------------------------------------------------------------------------
+# 3.0.7 (V307/ÇALKANTI-ARAYÜZ, KARTLAR K5) — çalkantı tank modeli, araç
+# ekibine aktarım tablosu ve tank geometrisi yükleme uçları.
+#
+# Hesap bu uçlarda YAPILMAZ: ``hrma.analysis.calkanti_arayuz`` tabloyu tek
+# girişten (K6), motorun tank kaydını ve m(t) serisini K4 bağlantısından,
+# haritayı/yükleri/bafl önerisini K1'den bileştirir. Uç yalnız istek
+# biçimini, hata sınıflarını ve HTTP kodlarını taşır:
+#   400  istek girdisi bozuk (adlı alan + sebep kodu)
+#   413  dosya boyut sınırını aşıyor (adlı kod BOYUT_SINIRI)
+#   422  girdi biçimce doğru ama ürün onu çözmüyor (motor sonucu okunamadı,
+#        K4 bağlantısı reddetti, geometri kapısı reddetti — ör. eksenel
+#        simetrik olmayan tank: "bu sürümde çözülmez", yaklaşık sonuç YOK)
+# 500 yok: bilinen bütün ret yolları adlıdır.
+# ---------------------------------------------------------------------------
+#: ``tank_modeli`` kipinde istek gövdesinin izinli üst düzey alanları.
+_CALKANTI_TANK_MODELI_ALANLARI = ('tank_modeli',)
+_CALKANTI_DISA_AKTARIM_ALANLARI = ('tank_modeli', 'disa_aktarim')
+#: Tank geometrisi yükleme ucunun izinli form alanları.
+_CALKANTI_YUKLEME_FORM_ALANLARI = ('birim', 'ust_yon')
+_CALKANTI_YUKLEME_DOSYA_ALANI = 'file'
+#: Akış okuma parça boyutu (bayt; ``step_api.READ_CHUNK_BYTES`` ile aynı
+#: kalıp, ayrı uç).
+_CALKANTI_YUKLEME_PARCA = 1024 * 1024
+
+
+def _calkanti_fazla_alan_reddi(data, izinli):
+    fazla = sorted(str(k)[:64] for k in data if k not in izinli)
+    if not fazla:
+        return None
+    return jsonify({
+        'status': 'error', 'error': 'invalid_tank_model_input',
+        'message': ('These fields are not accepted together with the tank '
+                    'model block; nothing was computed: ' + ', '.join(fazla)),
+        'invalid_fields': [{'field': k, 'reason': 'unknown_field'}
+                           for k in fazla],
+    }), 400
+
+
+def _calkanti_hesapla(data):
+    """``(gorunum, tablolar)`` ya da ``(None, (gövde, kod))`` ret yanıtı."""
+    from hrma.analysis import calkanti_arayuz as _ca
+    from hrma.analysis.slosh_analysis import SloshGirdiHatasi
+    from hrma.analysis.slosh_motor_baglanti import SloshMotorBaglantiHatasi
+    try:
+        return _ca.tank_modeli(data['tank_modeli']), None
+    except _ca.CalkantiArayuzHatasi as e:
+        return None, ({'status': 'error', 'error': 'invalid_tank_model_input',
+                       'message': str(e), 'invalid_fields': [e.kunye()]},
+                      400)
+    except _ca.MotorSonucuOkunamadi as e:
+        return None, ({'status': 'error', 'error': 'motor_result_unreadable',
+                       'message': str(e),
+                       'invalid_fields': [{'field': e.alan,
+                                           'reason': e.kod}]}, 422)
+    except SloshMotorBaglantiHatasi as e:
+        return None, ({'status': 'error', 'error': 'slosh_motor_link_rejected',
+                       'message': str(e),
+                       'invalid_fields': [{'field': e.alan,
+                                           'reason': e.kod}]}, 422)
+    except SloshGirdiHatasi as e:
+        return None, ({'status': 'error', 'error': 'slosh_model_rejected',
+                       'message': str(e),
+                       'invalid_fields': [e.kunye()]}, 422)
+
+
+def _calkanti_tank_modeli_yaniti(data):
+    """``/api/slosh-analysis`` + ``tank_modeli`` (CALKANTI §A.3–A.5)."""
+    red = _calkanti_fazla_alan_reddi(data, _CALKANTI_TANK_MODELI_ALANLARI)
+    if red is not None:
+        return red
+    sonuc, hata = _calkanti_hesapla(data)
+    if hata is not None:
+        return jsonify(hata[0]), hata[1]
+    gorunum, _tablolar = sonuc
+    return jsonify(sanitize_json_values({'status': 'success',
+                                         'tank_modeli': gorunum}))
+
+
+@app.route('/api/slosh-analysis/export', methods=['POST'])
+def slosh_analysis_export():
+    """Araç ekibine aktarım tablosu (CALKANTI §A.6) — dosya indirme.
+
+    Gövde: ``{'tank_modeli': {...}, 'disa_aktarim': {'tank_id', 'bicim'}}``;
+    ``bicim`` ∈ {json, csv_doluluk, csv_zaman}. Tablo istekten YENİDEN
+    kurulur (istemcinin tablosuna güvenilmez); JSON'daki eşdeğer model
+    tablosu ``slosh_tablo.dogrula``dan, doluluk CSV'si ``csv_oku``dan geçer.
+    """
+    from hrma.analysis import calkanti_arayuz as _ca
+    try:
+        data = request.get_json(silent=True)
+        shape_error = _json_body.json_object_error(data)
+        if shape_error is not None:
+            return jsonify(shape_error[0]), shape_error[1]
+        red = _calkanti_fazla_alan_reddi(data, _CALKANTI_DISA_AKTARIM_ALANLARI)
+        if red is not None:
+            return red
+        for k in _CALKANTI_DISA_AKTARIM_ALANLARI:
+            if k not in data:
+                return jsonify({
+                    'status': 'error', 'error': 'invalid_tank_model_input',
+                    'message': f"'{k}' is required; nothing was exported",
+                    'invalid_fields': [{'field': k, 'reason': 'required'}],
+                }), 400
+        da = data['disa_aktarim']
+        # 3.0.7 ONARIM2-ÇALK-SEKME (M7-CALK-7): isteğe bağlı 'dil' (arayüz
+        # dili; künye ve tanımlar o dilde, makine okur adlar iki dilde aynı).
+        if (not isinstance(da, dict)
+                or set(da) - {'dil'} != {'tank_id', 'bicim'}):
+            return jsonify({
+                'status': 'error', 'error': 'invalid_tank_model_input',
+                'message': ("'disa_aktarim' must be {'tank_id', 'bicim'} "
+                            "(optional 'dil'); nothing was exported"),
+                'invalid_fields': [{'field': 'disa_aktarim',
+                                    'reason': 'malformed'}],
+            }), 400
+        # Değer kapısı (input_guard): tank kimliği ve biçim sabit listeden.
+        from hrma.analysis.slosh_tablo import TANK_KIMLIKLERI
+        for _alan, _liste in (('tank_id', TANK_KIMLIKLERI),
+                              ('bicim', _ca.DISA_AKTARIM_BICIMLERI)):
+            try:
+                input_guard.choice(da, _alan, _liste, required=True)
+            except input_guard.InputError as e:
+                return jsonify({
+                    'status': 'error', 'error': 'invalid_tank_model_input',
+                    'message': str(e) + '; nothing was exported',
+                    'invalid_fields': [{'field': 'disa_aktarim.' + _alan,
+                                        'reason': 'not_in_allowed_set'}],
+                }), 400
+        dil = da.get('dil', _ca.AKTARIM_DILI_VARSAYILAN)
+        if not isinstance(dil, str) or dil not in _ca.AKTARIM_DILLERI:
+            return jsonify({
+                'status': 'error', 'error': 'invalid_tank_model_input',
+                'message': (f"'disa_aktarim.dil' must be one of "
+                            f'{_ca.AKTARIM_DILLERI}; nothing was exported'),
+                'invalid_fields': [{'field': 'disa_aktarim.dil',
+                                    'reason': 'not_in_allowed_set'}],
+            }), 400
+        sonuc, hata = _calkanti_hesapla(data)
+        if hata is not None:
+            return jsonify(hata[0]), hata[1]
+        gorunum, tablolar = sonuc
+        try:
+            ad, mime, metin = _ca.disa_aktarim(gorunum, tablolar,
+                                               da['tank_id'], da['bicim'],
+                                               dil)
+        except _ca.CalkantiArayuzHatasi as e:
+            return jsonify({'status': 'error',
+                            'error': 'invalid_tank_model_input',
+                            'message': str(e),
+                            'invalid_fields': [e.kunye()]}), 400
+        # Flask metin türlerine (text/csv) charset'i kendisi ekler; JSON
+        # tanımı gereği UTF-8'dir (RFC 8259 §8.1).
+        return send_file(io.BytesIO(metin.encode('utf-8')), as_attachment=True,
+                         download_name=ad, mimetype=mime)
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({'status': 'error', 'error': str(e)}), 500
+
+
+def _calkanti_yukleme_reddi(kod, alan, mesaj, durum, **ek):
+    govde = {'status': 'error', 'error': 'tank_geometry_rejected',
+             'kod': kod, 'alan': alan, 'message': mesaj}
+    govde.update(ek)
+    return jsonify(sanitize_json_values(govde)), durum
+
+
+@app.route('/api/slosh-analysis/tank-geometry', methods=['POST'])
+def slosh_tank_geometry_upload():
+    """Tank iç geometrisi yükleme (TANK_GEOMETRI_TASARIM §0, §A, §B).
+
+    ``multipart/form-data``: ``file`` (CSV / .xyz / PLY / STL / STEP; biçim
+    uzantıdan, beyaz liste ``tank_geometry_import.UZANTI_BICIMLERI``),
+    ``birim`` (m | mm | in, ZORUNLU), ``ust_yon`` (3B girdide burun yönü
+    "x,y,z"). Okuma ve kapılar YALNIZ K3'ün içe aktarıcısıyla
+    (``tank_geometrisi_oku``); ikinci okuyucu yok, ``eval``/``pickle`` yok.
+
+    Güvenlik: istemci dosya adı yol olarak KULLANILMAZ (``secure_filename``
+    + yeni ``mkdtemp`` dizini; yol geçişi yok); boyut sınırı hem
+    Content-Length'te hem akışta (biçimin sınırı ile genel gövde tavanının
+    küçüğü); dizin her istekte silinir.
+
+    200: kabul (GECERLI/BEYANLI) — profil, geometri, ölçümler, beyanlar,
+    künye (dosya adı + sha256). 400: istek/biçim/okuma hatası; 413: boyut;
+    422: geometri kapısı reddi (simetrik olmayan, açık yüzey, eksik bölge,
+    tek değerli olmayan profil...). Her retde makine-okur ``kod``.
+    """
+    from werkzeug.utils import secure_filename
+    from hrma.analysis.calkanti_arayuz import DOSYA_ADI_BOY_SINIRI
+    from hrma.analysis.slosh_tablo import DURUM_RET
+    from hrma.importers import tank_geometry_import as _tg
+    try:
+        sinir_genel = app.config.get('MAX_CONTENT_LENGTH')
+        clen = request.content_length
+        if clen is not None and sinir_genel and clen > sinir_genel:
+            return _calkanti_yukleme_reddi(
+                'BOYUT_SINIRI', 'file', 'The upload exceeds the request body '
+                f'limit ({sinir_genel} bytes); nothing was read.', 413,
+                sinir_bayt=sinir_genel)
+        bilinmeyen = sorted(set(request.form) - set(_CALKANTI_YUKLEME_FORM_ALANLARI))
+        bilinmeyen += sorted(set(request.files) - {_CALKANTI_YUKLEME_DOSYA_ALANI})
+        if bilinmeyen:
+            return _calkanti_yukleme_reddi(
+                'ALAN_BILINMEYEN', str(bilinmeyen[0])[:64],
+                'Unknown form field(s): '
+                + ', '.join(str(b)[:64] for b in bilinmeyen), 400)
+        upload = request.files.get(_CALKANTI_YUKLEME_DOSYA_ALANI)
+        if upload is None or not (upload.filename or '').strip():
+            return _calkanti_yukleme_reddi(
+                'ALAN_EKSIK', 'file', "A file is required in the 'file' "
+                'field (multipart/form-data).', 400)
+        istemci_adi = os.path.basename(
+            upload.filename.replace('\\', '/'))[:DOSYA_ADI_BOY_SINIRI]
+        uzanti = os.path.splitext(istemci_adi)[1].lower()
+        bicim = _tg.UZANTI_BICIMLERI.get(uzanti)
+        if bicim is None:
+            return _calkanti_yukleme_reddi(
+                'BICIM_HATASI', 'file', 'Unsupported file type; accepted: '
+                + ', '.join(sorted(_tg.UZANTI_BICIMLERI)), 400,
+                mesaj_anahtari='tank_geometry.bicim_hatasi.bicim_desteklenmiyor',
+                mesaj_parametreleri={'uzanti': uzanti[:16]})
+        # Değer kapısı (input_guard): birim beyaz listeden, burun yönü
+        # sınırlı metin; ret adlı ve makine-okur.
+        try:
+            birim = input_guard.choice(request.form, 'birim',
+                                       tuple(_tg.BIRIM_CARPANLARI),
+                                       required=True)
+        except input_guard.InputError:
+            birim = (request.form.get('birim') or '').strip()
+            return _calkanti_yukleme_reddi(
+                'BIRIM_YOK', 'birim', 'The length unit is required: one of '
+                + ', '.join(_tg.BIRIM_CARPANLARI) + '.', 400,
+                mesaj_anahtari=('tank_geometry.birim_yok.yok' if not birim
+                                else 'tank_geometry.birim_yok.desteklenmiyor'),
+                mesaj_parametreleri={'birim': birim[:32]})
+        try:
+            ust_ham = input_guard.text(request.form, 'ust_yon', maxlen=200)
+        except input_guard.InputError:
+            ust_ham = None
+        ust_yon = None
+        if ust_ham is None:
+            return _calkanti_yukleme_reddi(
+                'DEGER_GECERSIZ', 'ust_yon', 'The nose direction must be '
+                'three finite numbers "x,y,z", not all zero.', 400,
+                mesaj_anahtari='tank_geometry.deger_gecersiz.ust_yon_gecersiz',
+                mesaj_parametreleri={})
+        if ust_ham:
+            parca = [p.strip() for p in ust_ham.split(',')]
+            try:
+                ust_yon = [float(p) for p in parca]
+            except ValueError:
+                ust_yon = None
+            if (ust_yon is None or len(ust_yon) != 3
+                    or not all(math.isfinite(v) for v in ust_yon)
+                    or not any(v != 0.0 for v in ust_yon)):
+                return _calkanti_yukleme_reddi(
+                    'DEGER_GECERSIZ', 'ust_yon', 'The nose direction must be '
+                    'three finite numbers "x,y,z", not all zero.', 400,
+                    mesaj_anahtari='tank_geometry.deger_gecersiz.ust_yon_gecersiz',
+                    mesaj_parametreleri={})
+        sinir = min(sinir_genel or _tg.TANK_DOSYA_BOYUT_SINIRI,
+                    _tg.TANK_STEP_BOYUT_SINIRI if bicim == 'step'
+                    else _tg.TANK_DOSYA_BOYUT_SINIRI)
+        if clen is not None and clen > sinir + _CALKANTI_YUKLEME_PARCA:
+            return _calkanti_yukleme_reddi(
+                'BOYUT_SINIRI', 'file', f'The file exceeds the {sinir}-byte '
+                'limit for this format; nothing was read.', 413,
+                sinir_bayt=sinir,
+                mesaj_anahtari='tank_geometry.boyut_siniri.dosya_boyutu',
+                mesaj_parametreleri={'bayt': clen, 'sinir': sinir})
+        guvenli = secure_filename(istemci_adi)
+        if not guvenli.lower().endswith(uzanti) or guvenli == uzanti.lstrip('.'):
+            guvenli = 'tank' + uzanti
+        gecici_onek = 'hrma_tank_geo_'   # mkdtemp + silme kapısı: tek yer
+        dizin = tempfile.mkdtemp(prefix=gecici_onek)
+        yol = os.path.join(dizin, guvenli)
+        try:
+            toplam = 0
+            with open(yol, 'wb') as out:
+                while True:
+                    parca = upload.stream.read(_CALKANTI_YUKLEME_PARCA)
+                    if not parca:
+                        break
+                    toplam += len(parca)
+                    if toplam > sinir:
+                        return _calkanti_yukleme_reddi(
+                            'BOYUT_SINIRI', 'file', f'The file exceeds the '
+                            f'{sinir}-byte limit for this format; nothing was '
+                            'read.', 413, sinir_bayt=sinir,
+                            mesaj_anahtari='tank_geometry.boyut_siniri.dosya_boyutu',
+                            mesaj_parametreleri={'bayt': toplam, 'sinir': sinir})
+                    out.write(parca)
+            sonuc = _tg.tank_geometrisi_oku(yol, birim, ust_yon=ust_yon)
+        finally:
+            # GÜVENLİK KAPISI (STL kardeşleriyle aynı desen; 31 Tem 2026:
+            # korumasız rmtree göreli yolda ÇALIŞMA DİZİNİNİ siliyordu):
+            # yalnız bu ucun kendi mkdtemp dizini silinir — geçici kökün
+            # altında olmalı ve 'hrma_tank_geo_' önekini taşımalı.
+            _tmp_kok = os.path.realpath(tempfile.gettempdir())
+            if (os.path.realpath(dizin).startswith(_tmp_kok + os.sep)
+                    and os.path.basename(dizin).startswith(gecici_onek)):
+                shutil.rmtree(dizin, ignore_errors=True)
+        if sonuc['durum'] != DURUM_RET:
+            return jsonify(sanitize_json_values({'status': 'success',
+                                                 'geometri': sonuc}))
+        okuma = sonuc.get('okuma_hatasi')
+        kod = (okuma or {}).get('kod') or (sonuc.get('sebep') or ['RET'])[0]
+        durum = (413 if kod == 'BOYUT_SINIRI' else 400 if okuma else 422)
+        return _calkanti_yukleme_reddi(
+            kod, (okuma or {}).get('alan') or 'file', sonuc.get('mesaj_en'),
+            durum, kapi=sonuc.get('kapi'), ayrinti=sonuc.get('ayrinti'),
+            mesaj_anahtari=sonuc.get('mesaj_anahtari'),
+            mesaj_parametreleri=sonuc.get('mesaj_parametreleri'),
+            kunye=sonuc.get('kunye'))
     except Exception as e:
         traceback.print_exc()
         return jsonify({'status': 'error', 'error': str(e)}), 500
@@ -15155,21 +16565,221 @@ SIVI_PLAKA_TIP_DISI_NEDEN = {
         'drilled hole plan for this model'),
 }
 SIVI_PLAKA_BASIS = (
-    'Injector face plate, clamped circular plate under the injector pressure '
-    'drop (Roark Table 11.2 case 10b) with ASME PG-52 ligament efficiency - '
-    'the same function the hybrid page uses (hrma.utils.injector_design.'
-    'injector_plate_structural). Load: the larger of the fuel and oxidizer '
-    'injector pressure drops (manifold pressure minus chamber pressure). '
-    'Plate diameter: the chamber diameter. Holes: the fuel + oxidizer '
-    'orifice plans of the injector circuit, all taken at the LARGER of the '
-    'two orifice diameters (conservative: lower ligament efficiency). The '
-    'liquid page has no plate thickness input, so the check SIZES the '
-    'thickness that meets the target safety factor (structural safety factor '
-    'field; empty -> the module default).')
+    'Injector face plate, clamped circular plate (Roark Table 11.2 case 10b) '
+    'with ASME PG-52 ligament efficiency - the same function the hybrid page '
+    'uses (hrma.utils.injector_design.injector_plate_structural), evaluated '
+    'for TWO load cases: operating (the larger of the fuel and oxidizer '
+    'injector pressure drops, manifold pressure minus chamber pressure) and '
+    'start/shutdown (absolute manifold pressure minus the minimum ambient '
+    'pressure, vacuum; see load_cases_basis). Plate diameter: the chamber '
+    'diameter. Holes: '
+    'the fuel + oxidizer orifice plans of the injector circuit, all taken '
+    'at the LARGER of the two orifice diameters (conservative: lower '
+    'ligament efficiency). The liquid page has no plate thickness input, so '
+    'the plate is SIZED: the larger of the two required thicknesses for the '
+    'target safety factor (structural safety factor field; empty -> the '
+    'module default), raised to the next standard plate of the chamber wall '
+    'table, then checked at that thickness in both load cases. The verdict '
+    'is the lower of the two safety factors.')
+
+#: V307/PLAKA-MARŞ — enjektör plakasının iki yük durumu (sıvı + hibrit TEK
+#: tanım). Model kararı: ana model, 19 Kas 2026, Astra danışmasıyla (soru ve
+#: yanıt ``docs/scofield/raw/OH/V307/plaka-mars/astra_*``). Kaynaklar yerel
+#: kopyadan doğrulandı: Huzel & Huang, NASA SP-125 (NTRS 19710019929),
+#: Böl. IV "Structural Loads", basılı s. 129 (PDF s. 138), Denk.
+#: (4-43)–(4-45) — ``~/HRMA-kaynaklar/metin-nasa/NASA_SP-125_1967_Huzel_
+#: Huang_design_of_LPRE.txt`` satır 8777–8807; NASA SP-8089 §2.2.1.6–7
+#: s. 62, §2.2.2 s. 63 (aynı dizindeki SP-8089 metni, satır 2534–2600).
+#: Huzel & Huang 1992 Böl. 2 s. 47–48 (aynı çarpan) yerelde YOK: sayfa
+#: doğrulanmadı.
+INJECTOR_PLATE_LOAD_OPERATING = 'operating'
+INJECTOR_PLATE_LOAD_STARTUP = 'startup_shutdown'
+#: Marş/kesme sınır durumunda en düşük ortam basıncı [bar, mutlak]: vakum.
+#: HRMA SEÇİMİ (ana model kararı 19 Kas): kesme irtifada olabilir, vakum
+#: ateşlemesi de mümkündür; en büyük farkı veren ortam budur. Deniz
+#: seviyesi tasarımında fark 1,01325 bar'dır ve ihtiyatlı yöndedir.
+INJECTOR_PLATE_AMBIENT_MIN_BAR = 0.0
+INJECTOR_PLATE_AMBIENT_MIN_BASIS = (
+    'minimum ambient pressure of the use envelope taken as vacuum (0 bar '
+    'absolute): shutdown can happen at altitude and an ignition can happen '
+    'in vacuum, which gives the largest pressure difference. HRMA choice; '
+    'for a sea-level design it is 1.01325 bar more conservative.')
+INJECTOR_PLATE_LOAD_CASES_BASIS = (
+    'Two load cases on the injector face plate, the same clamped-plate '
+    'check for both. Operating (steady main stage): the face load is the '
+    'injector pressure drop, P_f = dP_inj (Huzel & Huang, NASA SP-125, Ch. '
+    'IV "Structural Loads", p. 129, Eq. 4-43). Start/shutdown, a quasi-'
+    'static upper bound that EXCLUDES pressure surges: the manifold is at '
+    'its operating pressure P_m = P_c + dP_inj (SP-125 Eq. 4-44; the '
+    'nominal manifold pressure of this design point, absolute) while the '
+    'chamber is not yet (start) or no longer (shutdown) pressurised, so the '
+    'face carries P_m - P_amb,min with P_amb,min = 0 bar (vacuum; see '
+    'ambient_pressure_basis). The plate is sized to the larger required '
+    'thickness of the two cases and the verdict is the lower of the two '
+    'safety factors. Safety factor = yield strength / bending stress (on '
+    'yield, not ultimate); the SAME target applies to both cases with no '
+    'reduction for the short duration of the transient (Huzel & Huang 1992, '
+    'Ch. 2, pp. 47-48, Eqs. 2-4 to 2-7 apply the same factors to normal '
+    'steady and normal transient loads; page not verified against a local '
+    'copy). The target value itself (structural safety factor field, or the '
+    'module default) is not a value the sources prescribe: it is the '
+    'user\'s or HRMA\'s choice. NOT modelled: manifold pressure above the '
+    'nominal design value (surges, throttling); hydraulic ram of a rapid '
+    'valve opening into empty passages (SP-125 p. 129 gives the empirical '
+    'P_f = 4 P_p for that fill, not a universal factor); dynamic '
+    'amplification; thermal stress; fatigue; reverse pressure difference '
+    'during shutdown; the two-phase pressure history of N2O (NASA SP-8089 '
+    'sec. 2.2.1.6-7 p. 62, sec. 2.2.2 p. 63). The clamped edge, the '
+    'unsupported diameter (= chamber diameter) and the equivalent-pitch '
+    'ligament efficiency remain the stated approximations of this check.')
+INJECTOR_PLATE_LOAD_DEFINITIONS = {
+    INJECTOR_PLATE_LOAD_OPERATING: (
+        'operating: injector pressure drop dP_inj (SP-125 Eq. 4-43)'),
+    INJECTOR_PLATE_LOAD_STARTUP: (
+        'start/shutdown: manifold pressure P_c + dP_inj, absolute (SP-125 '
+        'Eq. 4-44), minus the minimum ambient pressure 0 bar (vacuum); '
+        'pressure surges excluded'),
+}
+#: Hedefi tutturan kalınlık aranırken en çok adım (standart tablo 22
+#: satır; tablonun üstünde 1 µm adım).
+INJECTOR_PLATE_SIZING_MAX_STEPS = 64
+#: Tablonun üstündeki gereksinimde adım: ``required_thickness_mm`` 3
+#: ondalıkla (1 µm) yayımlanır; yuvarlanmış gereksinim hedefin hemen
+#: altında kalırsa bir çözünürlük adımı eklenir (sabit pay değil).
+INJECTOR_PLATE_THICKNESS_RESOLUTION_M = 1e-6
+
+
+def _enjektor_plaka_durum_ozeti(sizing, check, ad):
+    """Bir yük durumunun yanıt satırı (aynı işlevin iki çağrısından)."""
+    kayit = {'delta_P_bar': sizing.get('delta_P_bar'),
+             'load_definition': INJECTOR_PLATE_LOAD_DEFINITIONS[ad],
+             'required_thickness_mm': sizing.get('required_thickness_mm')}
+    if isinstance(check, dict) and 'safety_factor' in check:
+        kayit['safety_factor'] = check['safety_factor']
+        kayit['bending_stress_MPa'] = check['bending_stress_MPa']
+        kayit['meets_target'] = bool(
+            check['safety_factor'] >= check['required_safety_factor'])
+    return kayit
+
+
+def _enjektor_plaka_iki_durum(cagir, dp_inj_bar, p_man_bar, p_man_kaynak,
+                              plaka_m=None, boyutla=None):
+    """V307/PLAKA-MARŞ — enjektör plakası, iki yük durumu, tek işlev.
+
+    ``cagir(q_bar, t_m)`` aynı geometri/malzeme/hedef SF ile
+    ``injector_plate_structural`` çağırır (ikinci formül yok). Yükler
+    ``INJECTOR_PLATE_LOAD_CASES_BASIS``: çalışma q = ΔP_inj; marş/kesme
+    q = P_man − P_amb,min (P_man mutlak, tasarım noktasının manifold/besleme
+    basıncı; P_amb,min = ``INJECTOR_PLATE_AMBIENT_MIN_BAR``).
+
+    Kalınlık: ``plaka_m`` verilmişse o (hibrit girdisi); ``boyutla ==
+    'standard'`` ise iki gereksinimin büyüğünün üstündeki ilk standart
+    levha (sıvı; ``LiquidRocketEngine._next_standard_plate_m``, kamara
+    cidarıyla aynı tablo); ``'requirement'`` ise gereksinimin kendisi
+    (pintle yüz plakası, bugünkü kural). Boyutlandırılan plaka iki durumda
+    da hedefi tutana kadar bir üst levhaya (tablonun üstünde bir µm'ye)
+    geçer. Hüküm (üst düzey alanlar) iki durumun en düşük SF'sidir.
+
+    P_man yayımlanmamışsa marş/kesme durumu kurulamaz: plaka yarım yükle
+    "denetlendi" denmez, ``not_analyzed`` + neden.
+    """
+    b_cal = cagir(dp_inj_bar, None)
+    if b_cal.get('status') != 'sized':
+        # Yük ya da geometri/malzeme yok, ya da ligament sınırı: yükten
+        # bağımsız ret (bugünkü davranış, bit-aynı).
+        return b_cal
+    if p_man_bar is None:
+        return {'status': 'not_analyzed', 'material': b_cal.get('material'),
+                'reason': ('the start/shutdown load case of the injector '
+                           'plate cannot be formed: the manifold pressure '
+                           'is not published on this run, and the plate is '
+                           'not checked against half of its loads'),
+                'load_cases_basis': INJECTOR_PLATE_LOAD_CASES_BASIS}
+    # Yük, raporun yuvarlanmış yaprağından değil girdinin kendisinden
+    # (sizing raporu 'sized' döndüyse sonlu sayıya çevrilebilir).
+    dp_inj = float(dp_inj_bar)
+    p_man = float(p_man_bar)
+    q_mars = p_man - INJECTOR_PLATE_AMBIENT_MIN_BAR
+    b_mars = cagir(q_mars, None)
+    boyut = {INJECTOR_PLATE_LOAD_OPERATING: b_cal,
+             INJECTOR_PLATE_LOAD_STARTUP: b_mars}
+    yukler = {INJECTOR_PLATE_LOAD_OPERATING: dp_inj,
+              INJECTOR_PLATE_LOAD_STARTUP: q_mars}
+    t_gerek_m = max(float(b['required_thickness_mm']) for b in
+                    boyut.values() if b.get('status') == 'sized') / 1000.0
+    standart = None
+    if plaka_m is not None:
+        t_m = float(plaka_m)
+    elif boyutla == 'standard':
+        t_m, standart = LiquidRocketEngine._next_standard_plate_m(t_gerek_m)
+    elif boyutla == 'requirement':
+        t_m = t_gerek_m
+    else:
+        t_m = None
+    denet = {}
+    for _adim in range(INJECTOR_PLATE_SIZING_MAX_STEPS):
+        if t_m is None:
+            break
+        denet = {ad: cagir(yukler[ad], t_m) for ad in yukler}
+        if plaka_m is not None or all(
+                d.get('safety_factor', 0.0) >= d['required_safety_factor']
+                for d in denet.values()):
+            break
+        if standart:
+            t_m, standart = LiquidRocketEngine._next_standard_plate_m(
+                float(np.nextafter(t_m, np.inf)))
+        else:
+            t_m = t_m + INJECTOR_PLATE_THICKNESS_RESOLUTION_M
+    if denet:
+        yonetici = min(denet, key=lambda ad: (denet[ad]['safety_factor'],
+                                              -yukler[ad]))
+        rapor = dict(denet[yonetici])
+    else:
+        yonetici = max(boyut, key=lambda ad: (
+            boyut[ad].get('required_thickness_mm') or 0.0, yukler[ad]))
+        rapor = dict(boyut[yonetici])
+    rapor['load_cases'] = {
+        ad: _enjektor_plaka_durum_ozeti(boyut[ad], denet.get(ad), ad)
+        for ad in (INJECTOR_PLATE_LOAD_OPERATING,
+                   INJECTOR_PLATE_LOAD_STARTUP)}
+    rapor['governing_load_case'] = yonetici
+    rapor['load_cases_basis'] = INJECTOR_PLATE_LOAD_CASES_BASIS
+    # Girdinin kendisi (yuvarlanmaz): yanıtın enjektör/devre ΔP'siyle bit-aynı.
+    rapor['injector_pressure_drop_bar'] = dp_inj
+    rapor['manifold_pressure_bar'] = p_man
+    rapor['manifold_pressure_source'] = p_man_kaynak
+    rapor['ambient_pressure_bar'] = INJECTOR_PLATE_AMBIENT_MIN_BAR
+    rapor['ambient_pressure_basis'] = INJECTOR_PLATE_AMBIENT_MIN_BASIS
+    if denet:
+        hedef = rapor['required_safety_factor']
+        adlar = {INJECTOR_PLATE_LOAD_OPERATING: 'operating',
+                 INJECTOR_PLATE_LOAD_STARTUP: 'start/shutdown'}
+        rapor['warnings'] = [
+            (f"Injector plate safety factor {d['safety_factor']:.2f} is "
+             f"below the target {hedef:.2f} in the {adlar[ad]} load case "
+             f"(face load {yukler[ad]:.2f} bar): "
+             f"{d['required_thickness_mm']:.2f} mm required, "
+             f"{d['plate_thickness_mm']:.2f} mm given.")
+            for ad, d in denet.items()
+            if d['safety_factor'] < d['required_safety_factor']]
+    else:
+        rapor['warnings'] = list(boyut[yonetici].get('warnings') or [])
+    if plaka_m is None and t_m is not None:
+        rapor['plate_thickness_source'] = (
+            'next_standard_plate' if boyutla == 'standard' and standart
+            else 'governing_requirement')
+    return rapor
 
 
 def _sivi_enjektor_plaka_raporu(data, results):
-    """Sıvı enjektör plakası yapısal denetimi (V301/L-C, SV-12)."""
+    """Sıvı enjektör plakası yapısal denetimi (V301/L-C, SV-12).
+
+    V307/PLAKA-MARŞ: iki yük durumu (``_enjektor_plaka_iki_durum``); plaka
+    yöneten durumun gereksinimine göre standart levhaya boyutlanır, hüküm
+    iki durumun en düşük SF'si. Motor kuru kütlesi
+    (``apply_injector_plate_mass``) ve CAD (``_injector_plate_design``)
+    ``plate_thickness_mm``'yi okur: tek kalınlık.
+    """
     ham = (data or {}).get('injector_material')
     if not _malzeme_verildi_mi(ham):
         return {'status': 'not_requested',
@@ -15203,16 +16813,45 @@ def _sivi_enjektor_plaka_raporu(data, results):
     d_adaylar = [x for x in d_adaylar if x is not None]
     d_mm = max(d_adaylar) if d_adaylar else 0.0
     d_ch_mm = input_guard.finite_number(results.get('chamber_diameter_mm'))
-    rapor = injector_plate_structural(
-        delta_P_bar=dp,
-        plate_diameter_m=(d_ch_mm / 1000.0 if d_ch_mm else None),
-        material_props=props, material_name=props.get('name', key),
-        plate_thickness_m=None, n_holes=n,
-        hole_diameter_m=d_mm / 1000.0,
-        required_sf=data.get('safety_factor'))
+
+    def _cagir(q_bar, t_m):
+        return injector_plate_structural(
+            delta_P_bar=q_bar,
+            plate_diameter_m=(d_ch_mm / 1000.0 if d_ch_mm else None),
+            material_props=props, material_name=props.get('name', key),
+            plate_thickness_m=t_m, n_holes=n,
+            hole_diameter_m=d_mm / 1000.0,
+            required_sf=data.get('safety_factor'))
+
+    # P_man: yanıtta manifold basıncı alanı YOK (ölçüldü, kalem 1); SP-125
+    # Denk. 4-44: P_m = P_c + ΔP_inj, ΔP iki devrenin büyüğü (çalışma
+    # yüküyle aynı seçim).
+    p_c = input_guard.finite_number(results.get('chamber_pressure'))
+    rapor = _enjektor_plaka_iki_durum(
+        _cagir, dp, (p_c + dp) if (p_c is not None and dp is not None)
+        else None,
+        ('chamber pressure + the larger circuit injector pressure drop '
+         '(SP-125 Eq. 4-44); the injector circuit publishes no manifold '
+         'pressure field'),
+        boyutla='standard')
+    if p_c is not None and 'load_cases' in rapor:
+        rapor['chamber_pressure_bar'] = round(p_c, 4)
     rapor.update(temel)
-    rapor['delta_P_source'] = ('injector circuit pressure drop, larger of '
-                               'the fuel and oxidizer circuits')
+    rapor['delta_P_source'] = (
+        'governing load case of the two (load_cases); the injector pressure '
+        'drop is the larger of the fuel and oxidizer circuits')
+    if rapor.get('plate_thickness_source') == 'next_standard_plate':
+        rapor['plate_thickness_basis'] = (
+            'the larger of the two required thicknesses (load_cases) raised '
+            'to the next standard plate of the chamber wall table '
+            '(STANDARD_WALL_THICKNESS_MM) and checked at that thickness in '
+            'both load cases; the engine dry mass and the CAD weigh and '
+            'draw this plate')
+    elif rapor.get('plate_thickness_source') == 'governing_requirement':
+        rapor['plate_thickness_basis'] = (
+            'the governing required thickness is above the standard plate '
+            'table, so the requirement itself is used (raised in 1 um steps '
+            'until both load cases meet the target safety factor)')
     rapor['hole_plan_source'] = (
         f"injector circuit plans: oxidizer {int(oxc.get('n_orifices') or 0)} "
         f"+ fuel {int(fc.get('n_orifices') or 0)} holes, taken at the larger "
@@ -15664,7 +17303,44 @@ def _sivi_ayrilan_lule_reddi(kayit):
         'pc_bar': kayit.get('chamber_pressure_bar'),
         'eps_max': eps_max,
     }
-    if eps_max is not None:
+    if kayit.get('design_ambient_mode') is not None:
+        # V307/SIVI-ORTAM: tasarım ortamı deniz seviyesi değil (irtifa ya da
+        # girilen basınç); ret o ortamın basıncıyla ve adıyla kurulur.
+        # Basınçlar dört anlamlı basamakla yazılır (irtifada eşik küçüktür).
+        def _dort(x):
+            return float(f'{float(x):.4g}')
+        params.update(
+            pe_bar=_dort(kayit['exit_pressure_bar']),
+            sep_bar=_dort(kayit['separation_pressure_bar']),
+            pa_bar=_dort(kayit['ambient_pressure_bar']))
+        if eps_max is not None:
+            anahtar = 'err.liquid.fixed_nozzle_separated_design_ambient'
+            mesaj = (
+                f'Expansion ratio {eps:g} gives an exit pressure of '
+                f"{params['pe_bar']:g} bar, below the separation pressure "
+                f"{params['sep_bar']:g} bar at the design ambient pressure "
+                f"{params['pa_bar']:g} bar ({params['ratio']:g} x ambient, "
+                'Summerfield criterion): the flow separates in this nozzle '
+                'at the design ambient, so the engine cannot be sized there '
+                'with attached-flow relations. At P_c = '
+                f"{params['pc_bar']:g} bar the largest expansion ratio that "
+                f'does not separate at this design ambient is {eps_max:g}. '
+                'Enter at most that value, or choose a lower design ambient '
+                'pressure (higher altitude or vacuum). No design was '
+                'computed.')
+        else:
+            anahtar = (
+                'err.liquid.fixed_nozzle_separated_design_ambient_no_max')
+            mesaj = (
+                f'Expansion ratio {eps:g} gives an exit pressure of '
+                f"{params['pe_bar']:g} bar, below the separation pressure "
+                f"{params['sep_bar']:g} bar at the design ambient pressure "
+                f"{params['pa_bar']:g} bar ({params['ratio']:g} x ambient, "
+                'Summerfield criterion): the flow separates in this nozzle '
+                'at the design ambient. No attached expansion ratio could '
+                'be solved at this chamber pressure. No design was '
+                'computed.')
+    elif eps_max is not None:
         anahtar = 'err.liquid.fixed_nozzle_separated'
         mesaj = (
             f'Expansion ratio {eps:g} gives an exit pressure of '
@@ -15674,9 +17350,10 @@ def _sivi_ayrilan_lule_reddi(kayit):
             'nozzle, so the engine cannot be sized at this design point with '
             f"attached-flow relations. At P_c = {params['pc_bar']:g} bar the "
             f'largest expansion ratio that does not separate at sea level is '
-            f'{eps_max:g}. Enter at most that value, or leave the expansion '
-            'ratio empty to size the nozzle ambient-matched. No design was '
-            'computed.')
+            f'{eps_max:g}. Enter at most that value, leave the expansion '
+            'ratio empty to size the nozzle ambient-matched, or design this '
+            'nozzle for altitude or vacuum with the Design Ambient field. '
+            'No design was computed.')
     else:
         anahtar = 'err.liquid.fixed_nozzle_separated_no_max'
         mesaj = (
@@ -15702,6 +17379,23 @@ def _sivi_ayrilan_lule_reddi(kayit):
             'motor_form': 'liquid',
         }],
         'nozzle_separation': kayit,
+    })), 422
+
+
+def _sivi_tasarim_ortami_reddi(hata):
+    """V307/SIVI-ORTAM — tasarım ortamı girdisinin adlı ret gövdesi (422).
+
+    Kod, cümle ve alan künyesi motorun ``DesignAmbientInputError``
+    kaydındandır; ekran metni ``message_key`` + ``message_params`` (EN/TR).
+    """
+    return jsonify(sanitize_json_values({
+        'status': 'error',
+        'error': hata.reason_code,
+        'error_code': hata.reason_code,
+        'message': str(hata),
+        'message_key': hata.message_key,
+        'message_params': hata.message_params,
+        'invalid_fields': hata.invalid_fields,
     })), 422
 
 
@@ -16322,16 +18016,25 @@ def calculate_liquid():
         # Süzgeç yalnız motor hesabı + figür üretimini sarar; rotanın kendi
         # [trace_id] satırları kapsam dışında kalır.
         with _dedup_engine_stdout(trace_id, 'calculate_liquid'):
-            engine = LiquidRocketEngine(
-                thrust=thrust,
-                chamber_pressure=chamber_pressure,
-                mixture_ratio=mixture_ratio,
-                fuel_type=data.get('fuel_type', 'rp1'),
-                oxidizer_type=data.get('oxidizer_type', 'lox'),
-                cooling_type=cooling_type,
-                injector_type=injector_type,
-                overrides=data
-            )
+            try:
+                engine = LiquidRocketEngine(
+                    thrust=thrust,
+                    chamber_pressure=chamber_pressure,
+                    mixture_ratio=mixture_ratio,
+                    fuel_type=data.get('fuel_type', 'rp1'),
+                    oxidizer_type=data.get('oxidizer_type', 'lox'),
+                    cooling_type=cooling_type,
+                    injector_type=injector_type,
+                    overrides=data
+                )
+            except DesignAmbientInputError as _ortam_hata:
+                # V307/SIVI-ORTAM: tasarım ortamı girdisi kabul edilmedi
+                # (tanınmayan kip, eksik/bant dışı irtifa ya da basınç, deniz
+                # seviyesi dışındaki ortamda eksik genişleme oranı). Motor
+                # kurulmaz; adlı ret, sessiz deniz seviyesi yedeği yok.
+                print(f"[{trace_id}] calculate_liquid.design_rejected "
+                      f'{_ortam_hata.reason_code}')
+                return _sivi_tasarim_ortami_reddi(_ortam_hata)
 
             # Calculate engine performance
             # V301/L-C: enjektör ölçü planı akışla tutmuyorsa (pintle ölçüleri,
@@ -16703,9 +18406,9 @@ def solid_monte_carlo():
                 'error': 'solid_monte_carlo_missing_inputs',
                 'message': ('A reliability figure cannot be produced from '
                             'inputs that were not supplied. No defaults were '
-                            'applied and no samples were drawn; the sibling '
-                            'endpoint /calculate_solid refuses the same '
-                            'body.'),
+                            'applied and no samples were drawn; the solid '
+                            'motor calculation refuses the same '
+                            'request.'),
                 'missing_fields': _mc_eksik,
                 'required_fields': (['chamber_pressure', 'propellant_type']
                                     + list(_MC_GEOMETRI)),
@@ -18385,6 +20088,76 @@ def create_parametric_plot(results, sweep_param, sweep_values=None):
     # _fig_json: bdata'sız düz JSON (vendor plotly.js 1.58.5 uyumu, v2.5.5)
     return _fig_json(fig)
 
+def _tasarim_ortami_kaydi_oku(ham, hata_kodu='invalid_comparative_input'):
+    """V307/KÜÇÜKLER-2 (kalem 3, 4) — tasarım ortamı kaydı kapısı
+    (``/api/comparative-analysis`` ve ``/api/advanced-performance-analysis``
+    3B yüzey kolu; ret kodu ucun kendi kodu).
+
+    Döner: ``(ortam, None)`` ya da ``(None, ret_yanıtı)``. ``ham`` yoksa
+    ``(None, None)``. Kayıt ``{mode, pressure_bar?, altitude_m?}``; kipler
+    ``visualization.DESIGN_AMBIENT_RECORD_MODES``. Sayı türetilmez: basınç
+    kipi basınç, irtifa kipi irtifa İSTER; yoksa adıyla ret.
+    """
+    from hrma.visualization.visualization import DESIGN_AMBIENT_RECORD_MODES
+    if ham is None:
+        return None, None
+    hatalar = []
+
+    def _ret():
+        return None, (jsonify({
+            'status': 'error',
+            'error': hata_kodu,
+            'message': ('design_ambient must be an object {mode, '
+                        'pressure_bar, altitude_m} with mode one of: '
+                        + ', '.join(DESIGN_AMBIENT_RECORD_MODES)
+                        + '. Nothing was plotted.'),
+            'invalid_fields': hatalar,
+        }), 422)
+
+    if not isinstance(ham, dict):
+        hatalar.append({'field': 'design_ambient', 'reason': 'not_an_object'})
+        return _ret()
+    fazla = sorted(str(k)[:40] for k in ham
+                   if k not in ('mode', 'pressure_bar', 'altitude_m'))[:5]
+    for ad in fazla:
+        hatalar.append({'field': 'design_ambient.' + ad,
+                        'reason': 'unknown_field'})
+    kip = ham.get('mode')
+    if kip not in DESIGN_AMBIENT_RECORD_MODES:
+        hatalar.append({'field': 'design_ambient.mode',
+                        'reason': 'not_in_allowed_set'})
+    sayilar = {}
+    for ad, alt in (('pressure_bar', 0.0), ('altitude_m', None)):
+        v = ham.get(ad)
+        if v is None:
+            sayilar[ad] = None
+            continue
+        # V307/ORTAM-TEK (kalem 2): nedeni gerekçe KANONU verir
+        # (``_kanonik_gerekce``: bool / JSON sayısı değil / sonlu değil);
+        # emekli ``not_a_finite_number`` adı ret gövdesine yazılmaz.
+        _neden = _kanonik_gerekce(v)
+        if _neden is not None:
+            hatalar.append({'field': 'design_ambient.' + ad,
+                            'reason': _neden})
+            continue
+        if alt is not None and float(v) < alt:
+            hatalar.append({'field': 'design_ambient.' + ad,
+                            'reason': 'out_of_range'})
+            continue
+        sayilar[ad] = float(v)
+    if not hatalar:
+        if kip == 'pressure' and sayilar.get('pressure_bar') is None:
+            hatalar.append({'field': 'design_ambient.pressure_bar',
+                            'reason': 'required_not_supplied'})
+        if kip == 'altitude' and sayilar.get('altitude_m') is None:
+            hatalar.append({'field': 'design_ambient.altitude_m',
+                            'reason': 'required_not_supplied'})
+    if hatalar:
+        return _ret()
+    return {'mode': kip, 'pressure_bar': sayilar.get('pressure_bar'),
+            'altitude_m': sayilar.get('altitude_m')}, None
+
+
 @app.route('/api/comparative-analysis', methods=['POST'])
 def comparative_analysis():
     """Create comparative analysis between multiple motor configurations.
@@ -18417,10 +20190,21 @@ def comparative_analysis():
         if _budget:
             return jsonify(_budget[0]), _budget[1]
 
+        # V307/KÜÇÜKLER-2 (kalem 3): İSTEĞE BAĞLI ortam kaydı. Panel ortama
+        # bağlı metrikleri (itki, Isp, toplam impuls) yalnız ortamları aynıysa
+        # gönderir; o ortamı burada adıyla verir, figür Isp eksenine ve
+        # başlığına yazar. Kayıt yoksa figür bugünküyle aynı (sunucu ortam
+        # VARSAYMAZ). Beyaz liste: bilinmeyen anahtar / kip, sonlu olmayan ya
+        # da negatif basınç adıyla 422.
+        ortam, ortam_ret = _tasarim_ortami_kaydi_oku(data.get('design_ambient'))
+        if ortam_ret is not None:
+            return ortam_ret
+
         # Onarılmış plot fonksiyonu: eksik anahtar tolere edilir, yapısal
         # bozukluk ValueError ile net mesaj verir (visualization.py).
         try:
-            comparative_plot = create_comparative_analysis_plot(motor_configs)
+            comparative_plot = create_comparative_analysis_plot(
+                motor_configs, design_ambient=ortam)
         except ValueError as exc:
             return jsonify({'status': 'error', 'error': str(exc)}), 400
 
@@ -19943,8 +21727,13 @@ def tile_proxy(layer_key, z, x, y):
         return jsonify(payload), res.get('code', 500)
 
     resp = send_file(res['path'], mimetype=res['mimetype'])
-    # Karolar içerik-adresli (layer/date/z/x/y) — değişmezler.
-    resp.headers['Cache-Control'] = 'public, max-age=31536000, immutable'
+    # Karolar içerik-adresli (layer/date/z/x/y) — değişmezler. İSTİSNA: indirilen
+    # harita paketi katmanı (3.0.7): paket silinip yeniden kurulabilir; yerel
+    # sunucudan geldiği için yeniden doğrulama ucuzdur (FS-HARİTA-KÜRE önerisi).
+    if layer_key == tile_cache.PACK_LAYER_KEY:
+        resp.headers['Cache-Control'] = 'no-cache'
+    else:
+        resp.headers['Cache-Control'] = 'public, max-age=31536000, immutable'
     resp.headers['X-Tile-Cached'] = '1' if res.get('cached') else '0'
     # 2026-08-03 (Faz 6, T54-ek): burada bir ``X-Tile-Attribution`` başlığı vardı
     # ve atıf metnini olduğu gibi yazıyordu. Metin em-dash içeriyor
@@ -19995,6 +21784,130 @@ def tile_cache_clear():
     """Karo önbelleğini boşaltır (kullanıcı isteğiyle)."""
     from hrma.analysis import tile_cache
     return jsonify({'status': 'success', **tile_cache.cache_clear()})
+
+
+# ---------------------------------------------------------------------------
+# V307 / FS-HARİTA-VERİ faz 2 — İNDİRİLEBİLİR HARİTA PAKETLERİ (uç sözleşmesi:
+# docs/scofield/raw/OH/V307/ana-model/brif_16kas/FS_HARITA_VERI_FAZ2.md). Mantığın
+# tamamı hrma/analysis/map_packs.py'de; uçlar ince. Hata kodları makine-okur
+# (``error_code``); kullanıcı metni istemcide i18n'den. İndirme adresi İSTEMCİDEN
+# ALINMAZ: yalnız uygulamayla gelen paket listesindeki dosya, HRMA release'inden.
+# Rıza: indirme gövdesi tam ``{"consent": true}`` değilse tek bayt ağa çıkmaz.
+# ---------------------------------------------------------------------------
+
+#: PaketHatasi kodu -> HTTP durum (listede olmayan kod 503: paket/sunucu tarafı).
+_MAP_PACK_HTTP = {
+    'consent_required': 400, 'bad_bbox': 400, 'bad_zoom': 400, 'bad_lang': 400,
+    'bbox_too_large': 400, 'unknown_pack': 404,
+    'already_downloading': 409, 'already_installed': 409, 'not_downloading': 409,
+    'downloading': 409, 'disk_full': 507, 'url_not_allowed': 403,
+}
+
+
+def _map_pack_hata(hata):
+    kod = getattr(hata, 'kod', 'invalid_input')
+    return jsonify({'status': 'error', 'error_code': kod}), _MAP_PACK_HTTP.get(kod, 503)
+
+
+@app.route('/api/map-packs', methods=['GET'])
+def map_packs_list():
+    """Uygulamayla gelen paket listesi + her paketin gerçek durumu."""
+    from hrma.analysis import map_packs
+    try:
+        return jsonify({'packs': map_packs.paketler_ozeti()})
+    except map_packs.PaketHatasi as hata:
+        return _map_pack_hata(hata)
+
+
+@app.route('/api/map-packs/<pack_id>/download', methods=['POST'])
+def map_packs_download(pack_id):
+    """Kullanıcı onayıyla paketi indirmeye başlar (202). Gövde: {"consent": true}."""
+    from hrma.analysis import map_packs
+    govde = request.get_json(silent=True)
+    onay = govde.get('consent') if isinstance(govde, dict) else None
+    try:
+        d = map_packs.indirme_baslat(pack_id, consent=onay)
+    except map_packs.PaketHatasi as hata:
+        return _map_pack_hata(hata)
+    return jsonify({'state': d.get('state'), 'bytes_done': d.get('bytes_done'),
+                    'bytes_total': d.get('bytes_total'),
+                    'error_code': d.get('error_code')}), 202
+
+
+@app.route('/api/map-packs/<pack_id>/progress', methods=['GET'])
+def map_packs_progress(pack_id):
+    """İndirme ilerlemesi (gerçek bayt; sahte ilerleme yok)."""
+    from hrma.analysis import map_packs
+    try:
+        p = map_packs.paket_bul(pack_id)
+        d = map_packs.paket_durumu(p)
+    except map_packs.PaketHatasi as hata:
+        return _map_pack_hata(hata)
+    ilerleme = d['progress'] or {}
+    return jsonify({'state': d['status'], 'bytes_done': ilerleme.get('bytes_done'),
+                    'bytes_total': ilerleme.get('bytes_total'),
+                    'error_code': d['error_code']})
+
+
+@app.route('/api/map-packs/<pack_id>/cancel', methods=['POST'])
+def map_packs_cancel(pack_id):
+    """Süren indirmeyi iptal eder (yarım dosya silinir)."""
+    from hrma.analysis import map_packs
+    try:
+        d = map_packs.indirme_iptal(pack_id)
+    except map_packs.PaketHatasi as hata:
+        return _map_pack_hata(hata)
+    return jsonify({'state': d.get('state'), 'error_code': d.get('error_code')})
+
+
+@app.route('/api/map-packs/<pack_id>', methods=['DELETE'])
+def map_packs_delete(pack_id):
+    """Kurulu paketi (ve yarım indirmesini) siler."""
+    from hrma.analysis import map_packs
+    try:
+        return jsonify(map_packs.paket_sil(pack_id))
+    except map_packs.PaketHatasi as hata:
+        return _map_pack_hata(hata)
+
+
+@app.route('/api/map-packs/labels', methods=['GET'])
+def map_packs_labels():
+    """Kutudaki yer adları + fırlatma kompleksi adları (ad politikası K6 sunucuda).
+
+    Sorgu: bbox=w,s,e,n (derece), z (Web Mercator düzeyi 0-15), lang=tr|en.
+    """
+    from hrma.analysis import map_packs
+    try:
+        dil = input_guard.choice(request.args, 'lang', map_packs.LABEL_LANGS, required=True)
+        z = input_guard.integer(request.args, 'z', lo=0, hi=map_packs.PACK_MAX_ZOOM,
+                                required=True)
+        parcalar = str(request.args.get('bbox') or '').split(',')
+        if len(parcalar) != 4:
+            raise map_packs.PaketHatasi('bad_bbox')
+        kutu = dict(zip(('w', 's', 'e', 'n'), parcalar))
+        w = input_guard.num(kutu, 'w', lo=-180.0, hi=180.0, required=True)
+        s = input_guard.num(kutu, 's', lo=-90.0, hi=90.0, required=True)
+        e = input_guard.num(kutu, 'e', lo=-180.0, hi=180.0, required=True)
+        n = input_guard.num(kutu, 'n', lo=-90.0, hi=90.0, required=True)
+        return jsonify(map_packs.etiketler((w, s, e, n), z, dil))
+    except input_guard.InputError as hata:
+        return jsonify({'status': 'error', 'error_code': 'invalid_input',
+                        'error': str(hata)}), 400
+    except map_packs.PaketHatasi as hata:
+        return _map_pack_hata(hata)
+
+
+# V307 / FS-HARİTA-GÖRÜNTÜ — harita paketinin GÖRÜNTÜ bileşeni (Copernicus Sentinel-2
+# bulutsuz mozaiği) 'pack_detail' karolarının zemini olarak TEK yerde, açık çağrıyla
+# bağlanır. Kurulu görüntü bileşeni yoksa sağlayıcı None döner ve karo bugünkü (saydam
+# vektör) yoldan bit-aynı çizilir. Ağa çıkmaz; okunan dosya kullanıcının onayıyla inen ve
+# sha256'sı doğrulanan bileşendir.
+def _harita_goruntu_zeminini_bagla():
+    from hrma.analysis import map_packs
+    map_packs.goruntu_zemini_kaydet()
+
+
+_harita_goruntu_zeminini_bagla()
 
 
 # ---------------------------------------------------------------------------
@@ -20064,6 +21977,72 @@ def _reject_unflyable_vehicle(vehicle):
     }), 422
 
 
+# ---------------------------------------------------------------------------
+# V307/FS-KÜÇÜK (kalem 4; SIVI-ORTAM DEVİR 3) — VAKUM / İRTİFA TASARIMLI MOTOR
+#
+# ÖLÇÜLDÜ (fs-kucuk/olcum/api_once_vakum.json; örnek sıvı, tasarım ortamı
+# vakum, ε 40): lüle deniz seviyesinde ayrılıyor (P_e 0,0975 bar < 0,4053
+# bar), motor deniz seviyesi itkisini yayımlamıyor ve araç itkisiz kalıyor.
+# Köprü bu aracı GENEL retle döndürüyordu ('unflyable_vehicle': "itki kaynağı
+# çözülemedi"); kayıtlı proje ve dosya kolu ise aracı HTTP 200 + itki None
+# ile yayımlıyordu, Fırlatma Sahası "araç itkiyi vermiyor — motor sayfasında
+# yanma süresi girin" diyordu (yanlış neden). Neden artık adıyla: kod
+# ``sea_level_thrust_not_published`` + motorun kendi tasarım ortamı ve deniz
+# seviyesi blokları (sayılar motorundur; ikinci gerekçe yazılmaz). Üç kol da
+# aynı işlevi sorar; sayfa metni EN + TR ``flight_handoff.refusalText``.
+# Üst kademe uçuşu (irtifada ateşleme) köprünün kapsamı dışıdır.
+# ---------------------------------------------------------------------------
+_UCUS_RET_DENIZ_SEVIYESI_ITKISI = 'sea_level_thrust_not_published'
+_UCUS_RET_DENIZ_SEVIYESI_NEDENI = {
+    'separated': 'nozzle_flow_separated_at_sea_level',
+    'not_evaluated': 'sea_level_state_not_evaluated',
+}
+
+
+def _deniz_seviyesi_itki_reddi(motor_type, results, vehicle):
+    """Deniz seviyesi dışı tasarımda yerden kalkış itkisi yoksa adlı ret.
+
+    Koşul: sıvı motor, ``design_ambient.is_sea_level`` False ve aracın
+    itkisi (aynı lülenin deniz seviyesi itkisi) da itki eğrisi de yok.
+    Dönüş: ret gövdesi ya da ``None``.
+    """
+    if motor_type != 'liquid' or not isinstance(results, dict) \
+            or not isinstance(vehicle, dict):
+        return None
+    da = results.get('design_ambient')
+    if not isinstance(da, dict) or da.get('is_sea_level') is not False:
+        return None
+    itki = vehicle.get('thrust')
+    if (input_guard.is_json_number(itki)
+            and input_guard.finite_positive(itki) is not None) \
+            or vehicle.get('thrust_curve'):
+        return None
+    ds = da.get('sea_level') if isinstance(da.get('sea_level'), dict) else {}
+    neden = _UCUS_RET_DENIZ_SEVIYESI_NEDENI.get(
+        ds.get('status'), 'sea_level_thrust_not_published_for_design')
+    govde = {
+        'status': 'error',
+        'error': _UCUS_RET_DENIZ_SEVIYESI_ITKISI,
+        'cause': neden,
+        'design_ambient': {k: da.get(k) for k in (
+            'mode', 'pressure_bar', 'altitude_m')},
+        'sea_level': {k: ds.get(k) for k in (
+            'status', 'exit_pressure_bar', 'separation_pressure_bar',
+            'separation_pressure_ratio', 'max_attached_expansion_ratio_2dp',
+            'not_published_reason')},
+        'message': (
+            'No flight vehicle is built: this engine is designed for a '
+            'non-sea-level ambient and its sea-level (lift-off) thrust is '
+            'not published'
+            + (' because the nozzle flow separates at sea level (exit '
+               'pressure below the separation pressure)'
+               if neden == 'nozzle_flow_separated_at_sea_level' else '')
+            + ', so nothing is flown from the ground. A flight that ignites '
+              'at altitude (upper stage) is not part of the flight vehicle.'),
+    }
+    return govde
+
+
 @app.route('/api/flight-vehicle', methods=['POST'])
 def flight_vehicle():
     """Motor sonucunu ya da kayıtlı projeyi tek araç şemasına çevirir."""
@@ -20071,6 +22050,30 @@ def flight_vehicle():
 
     data = request.get_json(silent=True) or {}
     source = str(data.get('source') or 'results').lower()
+    # V307/FS-KÜÇÜK (kalem 5): Fırlatma Sahası proje / dosya kaynağında motor
+    # sonucunu da ister: 6-DOF çalkantı bloğunun ``motor_sonucu``dur (sayfanın
+    # hesap ucunun gövdesi; motor sayfasının window.currentResults'ıyla aynı
+    # şey). Verilmezse yanıt DEĞİŞMEZ. Bool değilse ya da sonuç zaten
+    # istemcide olan 'results' kaynağında istenirse adıyla 400 (yok sayılmaz).
+    _motor_sonucu_iste = data.get('include_motor_result', False)
+    if not isinstance(_motor_sonucu_iste, bool):
+        return jsonify({'status': 'error',
+                        'error': "'include_motor_result' must be true or false",
+                        'field': 'include_motor_result'}), 400
+    if _motor_sonucu_iste and source not in ('project', 'file'):
+        return jsonify({'status': 'error',
+                        'error': ("'include_motor_result' applies to source "
+                                  "'project' or 'file' (with 'results' the "
+                                  'motor result is already in the request)'),
+                        'field': 'include_motor_result'}), 400
+    # V307/ONARIM2-UÇUŞ-ARAÇ (M7-CALK-15): yüklenen tank geometrisi yalnız
+    # oturumdaki motor sonucuyla ('results') anlamlıdır; başka kaynakta
+    # sessizce yok sayılmaz.
+    if data.get('tank_geometrileri') is not None and source != 'results':
+        return jsonify({'status': 'error',
+                        'error': ("'tank_geometrileri' applies to source "
+                                  "'results' only"),
+                        'field': 'tank_geometrileri'}), 400
     try:
         if source == 'results':
             motor_type = str(data.get('motor_type') or '').lower()
@@ -20112,9 +22115,31 @@ def flight_vehicle():
             _kutle_reddi = fv.vehicle_build_refusal(motor_type, results, vehicle)
             if _kutle_reddi is not None:
                 return jsonify(sanitize_json_values(_kutle_reddi)), 422
+            # V307/FS-KÜÇÜK (kalem 4): vakum/irtifa tasarımında yerden kalkış
+            # itkisi yoksa adlı ret (genel 'unflyable_vehicle'dan ÖNCE).
+            _ds_reddi = _deniz_seviyesi_itki_reddi(motor_type, results, vehicle)
+            if _ds_reddi is not None:
+                return jsonify(sanitize_json_values(_ds_reddi)), 422
             red = _reject_unflyable_vehicle(vehicle)
             if red is not None:
                 return red
+            # V307/ONARIM2-UÇUŞ-ARAÇ (M7-CALK-15): istek Besleme Sistemi
+            # çalkantı sekmesinde yüklenen tank geometrisini taşıyorsa
+            # (6-DOF çalkantı bloğunun ``tank_geometrileri``si, aynı biçim)
+            # türetilmiş gövde ve kütle yerleşimi o tankla kurulur
+            # (``flight_vehicle.vehicle_with_loaded_tanks``, TEK kural).
+            # Verilmezse yanıt DEĞİŞMEZ. Bozuksa adıyla 400 (yok sayılmaz).
+            if data.get('tank_geometrileri') is not None:
+                try:
+                    vehicle = fv.vehicle_with_loaded_tanks(
+                        motor_type, results, vehicle,
+                        data.get('tank_geometrileri'))
+                except fv.LoadedTankRejected as _yt_exc:
+                    return jsonify({
+                        'status': 'error', 'error': 'loaded_tank_rejected',
+                        'message': str(_yt_exc),
+                        'invalid_fields': [{'field': _yt_exc.field,
+                                            'reason': _yt_exc.code}]}), 400
 
         elif source == 'project':
             name = data.get('name')
@@ -20159,6 +22184,10 @@ def flight_vehicle():
             if _kutle_reddi is not None:
                 _kutle_reddi.update(source='project', project=name)
                 return jsonify(sanitize_json_values(_kutle_reddi)), 422
+            _ds_reddi = _deniz_seviyesi_itki_reddi(motor_type, results, vehicle)
+            if _ds_reddi is not None:
+                _ds_reddi.update(source='project', project=name)
+                return jsonify(sanitize_json_values(_ds_reddi)), 422
             if load_warnings:
                 vehicle['load_warnings'] = list(load_warnings)
             # Proje airframe taşıyorsa geri ver — panel alanları doldurulsun.
@@ -20171,13 +22200,105 @@ def flight_vehicle():
                 _proje_govdesi = fv.project_airframe(airframe)
                 if _proje_govdesi is not None:
                     vehicle['airframe_resolved'] = _proje_govdesi
+            # V307/FS-YÜK: projenin 6-DOF kurulumundaki faydalı yük (motor
+            # sayfası paneliyle aynı değerler; Fırlatma Sahası alanları dolar).
+            _proje_yuku = fv.project_payload(doc, 'project')
+            if _proje_yuku is not None:
+                vehicle['payload'] = _proje_yuku
+            # V307/ONARIM-UÇUŞ (M7-FS-14): projenin 6-DOF Cd₀'ı ve ortamı.
+            _proje_kurulumu = fv.project_sixdof_setup(doc, 'project')
+            if _proje_kurulumu is not None:
+                vehicle['sixdof_setup'] = _proje_kurulumu
+
+        elif source == 'file':
+            # --- V307/FS-UÇUŞ-2 (A3 + D3) — .hrma DOSYASINDAN İÇE AKTARMA ---
+            # ÖLÇÜLDÜ (FS-UÇUŞ RAPOR A3): Fırlatma Sahası yalnız proje
+            # deposundaki (/api/projects) dosyaları uçurabiliyordu; diskteki
+            # bir .hrma dosyasının yolu yoktu. Belge istek gövdesinde METİN
+            # olarak gelir; diske YAZILMAZ, adı yol kurmak için KULLANILMAZ.
+            # Kapılar (sırayla, hepsi adlı ret, 500 yok): ad beyaz listesi
+            # (.hrma, yol parçası yok), metin boyu (projects.MAX_PROJECT_BYTES,
+            # deponun kaydetme sınırıyla aynı), standart JSON ayrıştırıcı
+            # (eval/pickle yok; NaN/Infinity ve aşırı iç içelik reddedilir),
+            # deponun yükleme şeması + sürüm göçleri
+            # (projects.load_project_document). Sonra kayıtlı proje koluyla
+            # AYNI yol: motor sayfanın hesap ucuyla yeniden hesaplanır.
+            from hrma.utils import projects
+            try:
+                file_name = projects.validate_import_file_name(
+                    data.get('file_name'))
+            except projects.ProjectNameError as _ad_exc:
+                return jsonify({'status': 'error',
+                                'error': 'invalid_project_file_name',
+                                'message': str(_ad_exc),
+                                'field': 'file_name'}), 422
+            try:
+                doc = projects.parse_project_text(data.get('document_text'))
+                doc, _kayitlar = projects.load_project_document(doc)
+            except projects.ProjectTooLargeError as _boy_exc:
+                return jsonify({'status': 'error',
+                                'error': 'project_file_too_large',
+                                'message': str(_boy_exc),
+                                'limit_bytes': projects.MAX_PROJECT_BYTES,
+                                'field': 'document_text'}), 413
+            except projects.ProjectValidationError as _sema_exc:
+                return jsonify({'status': 'error',
+                                'error': 'invalid_project_file',
+                                'message': str(_sema_exc),
+                                'field': 'document_text'}), 422
+            load_warnings = [projects.load_warning_text(r) for r in _kayitlar]
+            try:
+                motor_type, results = fv.recompute_from_project(doc)
+            except fv.ProjectCalculationRejected as red_exc:
+                red_govde = dict(red_exc.body)
+                red_govde.setdefault('status', 'error')
+                red_govde.setdefault('error', str(red_exc))
+                red_govde['source'] = 'file'
+                red_govde['file_name'] = file_name
+                red_govde['calculation_endpoint'] = red_exc.endpoint
+                durum = red_exc.status if 400 <= red_exc.status < 600 else 422
+                return jsonify(sanitize_json_values(red_govde)), durum
+            _ad = doc.get('name') if isinstance(doc.get('name'), str) else None
+            vehicle = fv.normalize(
+                motor_type, results,
+                motor_name=(_ad or file_name[:-len(projects.FILE_EXT)]),
+                source='file')
+            _kutle_reddi = fv.vehicle_build_refusal(motor_type, results, vehicle)
+            if _kutle_reddi is not None:
+                _kutle_reddi.update(source='file', file_name=file_name)
+                return jsonify(sanitize_json_values(_kutle_reddi)), 422
+            _ds_reddi = _deniz_seviyesi_itki_reddi(motor_type, results, vehicle)
+            if _ds_reddi is not None:
+                _ds_reddi.update(source='file', file_name=file_name)
+                return jsonify(sanitize_json_values(_ds_reddi)), 422
+            if load_warnings:
+                vehicle['load_warnings'] = list(load_warnings)
+            vehicle['file_name'] = file_name
+            airframe = (doc.get('inputs') or {}).get('airframe')
+            if airframe:
+                vehicle['airframe'] = airframe
+                _dosya_govdesi = fv.project_airframe(airframe)
+                if _dosya_govdesi is not None:
+                    _dosya_govdesi['source'] = 'file'
+                    _dosya_govdesi['basis'] = (
+                        'airframe stored in the imported project file '
+                        '(inputs.airframe)')
+                    vehicle['airframe_resolved'] = _dosya_govdesi
+            _dosya_yuku = fv.project_payload(doc, 'file')
+            if _dosya_yuku is not None:
+                vehicle['payload'] = _dosya_yuku
+            _dosya_kurulumu = fv.project_sixdof_setup(doc, 'file')
+            if _dosya_kurulumu is not None:
+                vehicle['sixdof_setup'] = _dosya_kurulumu
 
         else:
             return jsonify({'status': 'error',
                             'error': f"unknown source '{source}'"}), 400
 
-        return jsonify(sanitize_json_values(
-            {'status': 'success', 'vehicle': vehicle}))
+        _govde = {'status': 'success', 'vehicle': vehicle}
+        if _motor_sonucu_iste:
+            _govde['motor_result'] = results
+        return jsonify(sanitize_json_values(_govde))
 
     except SolidDesignRejected as exc:
         # V301/K-C1 (K-A DEVİR 11): kayıtlı katı projenin geometrisi
@@ -20248,15 +22369,20 @@ def altitude_to_pressure():
         # kalmıştı. Sayı artık TEK KAYNAKTAN gelir: `hrma.constants`
         # (US Std Atm 1976 Eq. 33a/33b, 7 katman + tablo üstü izotermal
         # uzantı) — iki kopya bir daha ayrışamaz.
-        from hrma.constants import isa_pressure, isa_temperature
+        # V307/İRTİFA-TEK (ana model kararı, 16 Kas): ``altitude`` GEOMETRİK
+        # irtifadır; USSA 1976 tablosuna geopotansiyele çevrilerek verilir
+        # (motor sayfaları, irtifa tabloları ve yörüngeyle aynı okuma).
+        from hrma.constants import (geometric_to_geopotential,
+                                    isa_pressure_geometric,
+                                    isa_temperature_geometric)
 
         try:
             h = float(altitude)
         except (TypeError, ValueError):
             h = float('nan')
         if math.isfinite(h):
-            pressure = isa_pressure(h) / 1e5   # Pa -> bar
-            T = isa_temperature(h)
+            pressure = isa_pressure_geometric(h) / 1e5   # Pa -> bar
+            T = isa_temperature_geometric(h)
         else:
             # Sonlu olmayan irtifa bir ölçüm değildir: sayı UYDURULMAZ.
             # (Aşağıdaki süzgeç bunları `null` olarak yayımlar.)
@@ -20327,10 +22453,13 @@ def altitude_to_pressure():
                 'status': 'error',
                 'error': 'altitude_outside_model',
                 'message': (
-                    'No atmospheric state is reported for this altitude: the '
-                    'US Standard Atmosphere 1976 tables begin at '
-                    f'{ISA_TABLE_BOTTOM_M:.0f} m geopotential height. Below '
-                    'that the troposphere lapse rate would simply be '
+                    'No atmospheric state is reported for this altitude: '
+                    'atmospheric states are reported for geometric altitudes '
+                    f'of {ISA_TABLE_BOTTOM_M:.0f} m and above. This limit is '
+                    'the start of the US Standard Atmosphere 1976 tables, '
+                    'applied to the geometric altitude you entered (the '
+                    'tables themselves are written in geopotential height). '
+                    'Below it the troposphere lapse rate would simply be '
                     'extrapolated downwards, which produces a temperature '
                     'and a pressure that describe no atmosphere. Publishing '
                     'them would read as a measurement rather than as the '
@@ -20342,7 +22471,12 @@ def altitude_to_pressure():
                 'tabulated_from_m': ISA_TABLE_BOTTOM_M,
                 'tabulated_to_m': ISA_TABLE_TOP_M,
             }), 422
-        if math.isfinite(h) and h > ISA_TABLE_TOP_M:
+        # Tablo tepesi GEOPOTANSİYEL bir sınırdır: uzantı rejimi H ile
+        # belirlenir (yörünge çözücüsü ``_atm_full`` ile aynı). Alt uç
+        # geometrik ``h`` ile karşılaştırılır: yörüngenin atış bandı
+        # (``LAUNCH_CONDITION_BANDS['altitude']``) ve ``_atm_full``in
+        # kenarı da öyle; −5000 m geometrik = −5003,9 m geopotansiyel.
+        if math.isfinite(h) and geometric_to_geopotential(h) > ISA_TABLE_TOP_M:
             if not (isinstance(pressure, float) and math.isfinite(pressure)
                     and pressure > 0.0):
                 return jsonify({
@@ -20419,14 +22553,21 @@ def export_eng_file():
         filename = safe_name(motor_data.get('motor_name'),
                              default='HRMA-001') + '.eng'
 
-        return jsonify({
+        _govde = {
             'status': 'success',
             'filename': filename,
             'content': eng_content,
             # ÖH D17 / P9B3-11 — /calculate ile AYNI alan adı ve şema.
             'eng_envelope_warning': _eng_raporu.get('eng_envelope_warning'),
             'motor_summary': openrocket_exporter.export_motor_summary(motor_data)
-        })
+        }
+        # V307/GÜVERTE-ORTAM: itkinin tanımlandığı ortam (sıvı tasarım ortamı
+        # deniz seviyesi değilse; dosyanın yorum satırlarıyla AYNI kayıt).
+        # Deniz seviyesi tasarımında anahtar konmaz: gövde bugünküyle aynı.
+        _ortam = openrocket_exporter.design_ambient_declaration(motor_data)
+        if _ortam is not None:
+            _govde['eng_design_ambient'] = _ortam
+        return jsonify(_govde)
 
     except Exception as e:
         red = _openrocket_data_rejection(e)
@@ -24370,7 +26511,9 @@ def find_optimum_of_ratio():
                 'reason': 'not_supplied',
                 'message': ('atmospheric_pressure was not supplied; the '
                             'same default ambient pressure as the hybrid '
-                            'solver (/calculate) was used.')})
+                            'solver (/calculate) was used: the ISA '
+                            'sea-level pressure (US Standard Atmosphere '
+                            '1976).')})
         else:
             try:
                 _opt_pa = float(_opt_pa_ham)
@@ -25361,6 +27504,41 @@ def _trajectory_solver_rejection(exc):
 # aynı çelişkiye aynı toleransla bakar.
 _TRAJECTORY_PROPELLANT_REL_TOL = TRAJECTORY_PROPELLANT_REL_TOL
 
+
+def _parasut_girdi_kapisi(data, *, alan_zorunlu=False):
+    """Paraşüt girdileri → ``(geçen değerler, adlı kusurlar)``; TEK kapı.
+
+    V307/FS-KÜÇÜK (kalem 3): düzlemsel uç (``/api/trajectory-analysis``) ve
+    Fırlatma Sahası 6-DOF ucu (``/api/six-dof-analysis``, paraşütlü iniş)
+    aynı kuralı iki yerde yazıyordu; ikisi artık bu işlevi çağırır. Kural
+    (alan ve Cd pozitif, gecikme negatif değil) ``launch_site_flight.
+    parachute_input_defect``tedir. Okuma ``_request_number``la: okunamayan
+    değer kendi kaydıyla (``not_a_number`` / ``not_finite``) kusur olur.
+    ``alan_zorunlu``: paraşütlü iniş modeli alanı ister (düzlemsel çözücü
+    alanı varsaymaz; 6-DOF ucunun ``required_for_parachute_descent`` kuralı).
+    Sıra ``PARACHUTE_INPUT_FIELDS`` sırasıdır (yanıtlar bit-aynı kalır).
+    """
+    from hrma.analysis import launch_site_flight as _lsf
+    deger, kusur = {}, []
+    for alan, _pozitif in _lsf.PARACHUTE_INPUT_FIELDS:
+        try:
+            v = _request_number(data, alan)
+        except _RequestFieldError as exc:
+            kusur.append(dict(exc.record))
+            continue
+        if v is None:
+            if alan_zorunlu and alan == 'parachute_area':
+                kusur.append({'field': alan,
+                              'reason': 'required_for_parachute_descent'})
+            continue
+        kayit = _lsf.parachute_input_defect(alan, v)
+        if kayit is not None:
+            kusur.append(kayit)
+            continue
+        deger[alan] = v
+    return deger, kusur
+
+
 @app.route('/api/trajectory-analysis', methods=['POST'])
 def trajectory_analysis():
     """Perform trajectory analysis
@@ -25893,20 +28071,11 @@ def trajectory_analysis():
         # alan ve Cd pozitif, açılma gecikmesi negatif olamaz; bunun dışındaki
         # değer ADIYLA reddedilir (çözücü geçersizi sessizce "verilmedi"
         # sayıyordu).
-        _KURTARMA_ALANLARI = (('parachute_area', True), ('parachute_cd', True),
-                              ('parachute_deploy_delay', False))
-        for _anahtar, _pozitif_mi in _KURTARMA_ALANLARI:
-            _deger = _request_number(data, _anahtar)
-            if _deger is None:
-                continue
-            if (_pozitif_mi and not _deger > 0.0) or (not _pozitif_mi and _deger < 0.0):
-                _bant_disi.append({
-                    'field': _anahtar,
-                    'reason': ('must_be_positive' if _pozitif_mi
-                               else 'must_be_non_negative'),
-                    'value': _deger})
-                continue
-            launch_params[_anahtar] = _deger
+        # V307/FS-KÜÇÜK (kalem 3): kural TEK yardımcıda (Fırlatma Sahası
+        # 6-DOF kapısıyla aynı işlev); ret kayıtları ve sırası aynı.
+        _parasut_deger, _parasut_kusur = _parasut_girdi_kapisi(data)
+        _bant_disi.extend(_parasut_kusur)
+        launch_params.update(_parasut_deger)
         if _bant_disi:
             return jsonify({
                 'status': 'error',
@@ -25938,7 +28107,7 @@ def trajectory_analysis():
         # ``/calculate``in duvar saati bütçesi burada da geçerlidir (ölçüldü
         # 28 Ağu: parachute_area = 1e9 iniş integrasyonunu 180 s'te
         # bitirmiyordu). Bütçe dolarsa YARIM yörünge yayımlanmaz; adıyla 503.
-        if any(k in launch_params for k, _p in _KURTARMA_ALANLARI):
+        if any(k in launch_params for k in _parasut_deger):
             _durum, _sonuc = _butce_ile_kos(
                 lambda: trajectory_analyzer.calculate_trajectory(
                     motor_data, launch_params),
@@ -26279,6 +28448,27 @@ def _safety_form_upper_bands(motor_type):
             'burn_time': (0.0, float(BURN_TIME_MAX_S))}
 
 
+#: ``/analyze_safety`` ZORUNLU alan kümesi — TEK TANIM (V307/KÜÇÜKLER kalem 6).
+#: Uç bu kümeyle eksik alanı adıyla 422 ile reddeder; şablon onu ``<meta
+#: name="hrma-safety-required">`` olarak basar (``inject_safety_contract``),
+#: güverte GÜVENLİK paneli oradan okur (ISIL KORUMA sekmesinin deseni).
+#: ÖLÇÜLDÜ (taban 303c16f85): panel kendi listesinde ``thrust``ı zorunlu
+#: sayıyordu (uç saymıyor; itkiye bağlı kolları adıyla geri çekiyor),
+#: ``propellant_mass``ı saymıyordu (uç sayıyor, boşsa 422). PDF güvenlik
+#: bölümünün kümesi (``pdf_safety.PDF_SAFETY_REQUIRED_FIELDS``) buna eşittir
+#: (bekçi ``test_d31_ihracat_a1::TestP9B321TekKaynak``).
+SAFETY_REQUIRED_FIELDS = (
+    'chamber_pressure', 'chamber_temperature', 'propellant_mass',
+    'chamber_diameter', 'wall_thickness',
+)
+
+
+@app.context_processor
+def inject_safety_contract():
+    """GÜVENLİK panelinin zorunlu alan kümesi (``SAFETY_REQUIRED_FIELDS``)."""
+    return {'safety_required': list(SAFETY_REQUIRED_FIELDS)}
+
+
 @app.route('/analyze_safety', methods=['POST'])
 def analyze_safety():
     """Comprehensive safety analysis endpoint"""
@@ -26292,10 +28482,22 @@ def analyze_safety():
         # 11100 baytlık analiz, hepsi kullanıcının hiç vermediği
         # varsayılanlardan. Güvenlik hükmü, verisi olmayan bir motor için
         # üretilemez; eksik girdide 422 döner.
-        REQUIRED_SAFETY_FIELDS = (
-            'chamber_pressure', 'propellant_mass', 'chamber_diameter',
-            'wall_thickness',
-        )
+        # V307/GÜVERTE-ISIL (kalem 4) — ODA SICAKLIĞI DA ZORUNLU. ÖLÇÜLDÜ
+        # (docs/scofield/raw/OH/V307/guverte-isil/k4_once.json, taban
+        # c2c455b4c): ``chamber_temperature`` gönderilmeyen (ya da ``''`` /
+        # ``null`` gelen) istek HTTP 200 + 23 588 baytlık tam güvenlik paketi
+        # alıyordu; uç sıcaklığı 3000 K sayıp ``defaults_applied`` ile beyan
+        # ediyordu. 3000 K'nin kaynağı yok ve ısıl eksenin (cidar sıcaklığı,
+        # yanık mesafeleri) sürücüsüdür: beyan çözüm değildir. İtki, yanma
+        # süresi ve itici tipi aynı gerekçeyle daha önce kaldırılmıştı; o
+        # alanlarda modül ilgili kolu adıyla geri çekiyor, sıcaklıkta ise
+        # geri çekilecek tek bir kol yok (ısı zinciri hükmün tamamına girer),
+        # bu yüzden basınç / çap / cidar ile aynı desen: eksikse adlı 422.
+        # Güverte paneli sıcaklığı motor sonucundan tohumlar (boşsa isteği
+        # zaten göndermez).
+        # V307/KÜÇÜKLER (kalem 6): küme modül düzeyinde tek tanım; şablon ve
+        # panel aynı kümeyi okur.
+        REQUIRED_SAFETY_FIELDS = SAFETY_REQUIRED_FIELDS
         missing = [key for key in REQUIRED_SAFETY_FIELDS
                    if data.get(key) in (None, '')]
         if missing:
@@ -26389,10 +28591,11 @@ def analyze_safety():
         motor_type = _metin_varsayilani('motor_type', None)
         chamber_pressure = float(data.get('chamber_pressure'))  # bar
         # ÖH D23 a2 / P13B4-12: üçü de ham ``float()`` ile okunuyordu;
-        # kapı artık uçta GÖRÜNÜR ve ret alanı adıyla anar (varsayılan
-        # değerler DEĞİŞMEDİ — ADIM 4 ayrı kalemdir).
+        # kapı artık uçta GÖRÜNÜR ve ret alanı adıyla anar.
+        # V307/GÜVERTE-ISIL (kalem 4): 3000 K varsayılanı KALKTI; alan
+        # yukarıdaki zorunlu kümede (eksikse 422, buraya gelinmez).
         chamber_temperature = input_guard.num(
-            data, 'chamber_temperature', default=3000, unit='K')
+            data, 'chamber_temperature', required=True, unit='K')
         # V301/PANEL (K-C1 AÇIK 5) — İTKİ UYDURULMAZ. Eski satır
         # ``default=1000`` idi ve ``defaults_applied`` ile beyan ediliyordu:
         # itki gelmeyen istekte bağlama kuvveti, serbest kalan motorun
@@ -26445,7 +28648,8 @@ def analyze_safety():
             # ÖH D35 / OH-ON-06: ``motor_type`` bu listeden ÇIKTI — artık
             # ona varsayılan UYGULANMIYOR (yukarıdaki blok). Künye yalnız
             # gerçekten uygulanan varsayılanları sayar.
-            ('chamber_temperature', 3000),
+            # V307/GÜVERTE-ISIL (kalem 4): ``chamber_temperature`` bu
+            # listeden ÇIKTI — 3000 K varsayılanı kalktı, alan zorunlu.
             # V301/PANEL: ``thrust`` bu listeden ÇIKTI — ona artık
             # varsayılan UYGULANMIYOR (yukarıda).
             # ÖH D36 / onemli2-sivi a2: ``burn_time`` bu listeden ÇIKTI —
@@ -28382,6 +30586,19 @@ def analyze_structural_safety():
                 'drawn. This is not a verification of your own wall, and '
                 "the verdict is the motor's own structural verdict when the "
                 'request matches the motor result.')
+            # V307/SEKME-GÜVERTE (NK3-K-2): aynı künye oda bloğunda da.
+            # ÖLÇÜLDÜ (olcum_once_A.json, katı L2): design_basis
+            # 'sized_by_hrma' derken chamber_analysis hâlâ modülün
+            # 'user_supplied' / "verified against user-supplied wall
+            # thickness" cümlesini taşıyordu (ekranda "CİDAR: HRMA
+            # BOYUTLANDIRDI" ⟷ "wall_thickness_source: user_supplied").
+            _yb_ca = structural_results.get('chamber_analysis')
+            if isinstance(_yb_ca, dict):
+                _yb_ca['wall_thickness_source'] = 'sized_by_hrma'
+                _yb_ca['safety_factor_basis'] = (
+                    'evaluated against the wall HRMA sized in the motor '
+                    'result (not a wall you supplied), at this analysis\'s '
+                    'design pressure')
         if data.get('motor_result') is not None:
             _yb_kayit = _yb_hukum(str(data.get('motor_type') or ''),
                                   data['motor_result'])
@@ -28503,6 +30720,17 @@ _THERMAL_OPTIONAL_GAS_POSITIVE_FIELDS = (
 )
 #: Işıyan tür mol kesirleri (0 ≤ x ≤ 1).
 _THERMAL_MOLE_FRACTION_FIELDS = ('x_H2O', 'x_CO2')
+
+#: V307/GÜVERTE-ISIL (kalem 1) — ``/analyze_thermal_safety``in isteğe bağlı
+#: ASTAR İSTASYONU girdileri: motor sonucunun astar bloğundaki gaz tarafı
+#: katsayısı [W/m²K], sürücü (recovery) sıcaklık [K] ve kenar gazı özgül
+#: ısısı [J/kgK]. İlk ikisi ÇİFTTİR (çekirdek yarım çifti reddeder); c_p
+#: isteğe bağlıdır (yoksa üfleme blokajı çözülmez, çekirdek bunu beyan eder).
+#: Yalnız ``wall_protection = 'ablative_liner'`` ile anlamlıdır. Gerekçe ve
+#: ölçüm: ``heat_transfer_analysis.LINER_STATION_SUPPLIED_SOURCE``.
+_THERMAL_LINER_STATION_PAIR = ('liner_h_gas_W_m2K', 'liner_T_recovery_K')
+_THERMAL_LINER_STATION_FIELDS = _THERMAL_LINER_STATION_PAIR + (
+    'liner_gas_cp_J_kgK',)
 
 #: V306/TERMAL-KONTUR (KILAVUZ K-P4, S1) — NOZUL GEOMETRİSİ BEYAZ LİSTESİ.
 #: ÖLÇÜLDÜ (docs/scofield/raw/OH/V306/termal-kontur/olcum/once_ornek.json,
@@ -29039,7 +31267,27 @@ def analyze_thermal_safety():
         # GERÇEK seçeneklerdir; modelin onları çözmemesi bir eksikliktir,
         # sessizce başka bir soğutmanın sayısını basmak ise bir hükümdür.
         # Beyaz liste modülün TEK tanım noktasından okunur.
-        if not is_supported_cooling_type(cooling_type):
+        # V307/SEKME-GÜVERTE (NK3-S-3): ablatif (astarla korunan) sınıf
+        # astar yoluyla değerlendirilir (KAPI 1f'den sonra eşleşme kapısı);
+        # çıplak cidar sınırı dış yüzde doğal taşınımla çözülür ve soğutma
+        # bütçesi yayımlanmaz (heat_transfer_analysis.
+        # declare_liner_protected_cooling).
+        from hrma.analysis.heat_transfer_analysis import (
+            BARE_WALL_BOUND_OUTER_COOLING, LINER_PROTECTED_COOLING_TYPES,
+            declare_liner_protected_cooling)
+        _astar_sinifi = (cooling_type
+                         if isinstance(cooling_type, str)
+                         and cooling_type in LINER_PROTECTED_COOLING_TYPES
+                         else None)
+        if not is_supported_cooling_type(cooling_type) and _astar_sinifi is None:
+            # V307/GÜVERTE-ISIL (kalem 2): değer sıvı motorun KENDİ soğutma
+            # sınıflarından biriyse (film / ışınım / dump) ret bunu adıyla
+            # söyler: o sınıfın hükmü motor sonucunun soğutma bloğundadır.
+            # Güverte paneli bu sınıflarda isteği hiç göndermez; bu dal
+            # doğrudan çağıran içindir. Liste motorun tek tanımından okunur
+            # (``COOLING_TYPES_RECOGNISED``, modül başında içe aktarılır).
+            _motor_sinifi = (isinstance(cooling_type, str)
+                             and cooling_type in COOLING_TYPES_RECOGNISED)
             return jsonify({
                 'status': 'error',
                 'error': 'unsupported_cooling_type',
@@ -29048,7 +31296,12 @@ def analyze_thermal_safety():
                     'and regenerative cooling. It has no design temperature '
                     'difference and no film coefficient for the requested '
                     'type, so no cooling area, no wall temperature and no '
-                    'risk level were computed. Nothing was substituted.'),
+                    'risk level were computed. Nothing was substituted.'
+                    + (' The requested type is a cooling class of the liquid '
+                       'motor: its verdict is the cooling block of the motor '
+                       'result (cooling_system), not this endpoint.'
+                       if _motor_sinifi else '')),
+                'motor_cooling_class': _motor_sinifi,
                 'invalid_fields': [{
                     'field': 'cooling_type',
                     'reason': 'unsupported_value',
@@ -29067,7 +31320,8 @@ def analyze_thermal_safety():
         # Alanlar YOKSA yanıt bit-aynı kalır.
         from hrma.analysis.heat_transfer_analysis import (
             ConflictingHeatTransferInput, SUPPORTED_WALL_PROTECTIONS,
-            WALL_PROTECTION_NONE, apply_wall_protection)
+            WALL_PROTECTION_ABLATIVE_LINER, WALL_PROTECTION_NONE,
+            apply_wall_protection)
         _cift_verilen = [k for k in _THERMAL_SUPPLIED_WALL_FIELDS
                          if data.get(k) not in (None, '')]
         t_hot = t_cold = None
@@ -29129,6 +31383,89 @@ def analyze_thermal_safety():
                 }],
             }), 422
 
+        # V307/SEKME-GÜVERTE (NK3-S-3): ablatif sınıf yalnız astar yoluyla
+        # anlamlıdır — astar istenmediyse çıplak cidarın doğal taşınım
+        # hükmü motorun soğutması diye basılmaz; adıyla reddedilir.
+        if (_astar_sinifi is not None
+                and wall_protection != WALL_PROTECTION_ABLATIVE_LINER):
+            return jsonify({
+                'status': 'error',
+                'error': 'invalid_thermal_input',
+                'message': (
+                    'Ablative cooling is evaluated as a liner-protected wall: '
+                    'the liner absorbs the hot-gas heat. Set the wall '
+                    'protection to the ablative liner; a bare-wall natural '
+                    'convection verdict is not published as the motor\'s '
+                    'cooling. Nothing was computed.'),
+                'invalid_fields': [{
+                    'field': 'wall_protection',
+                    'reason': 'ablative_cooling_requires_liner',
+                    'value': _clip_echo(wall_protection, 60),
+                    'allowed_values': [WALL_PROTECTION_ABLATIVE_LINER],
+                }],
+            }), 422
+
+        # --- KAPI 1i: ASTAR İSTASYONU GİRDİLERİ (V307/GÜVERTE-ISIL) ---------
+        # ÖLÇÜLDÜ (docs/scofield/raw/OH/V307/guverte-isil/olcum_once.json):
+        # sıvı ablatif motorun hazne astarı motor sonucunda 1,59 mm (gerileme
+        # 0,1375 mm/s), bu uçta 7,78 mm (0,2080 mm/s) — aynı çekirdek, iki
+        # ayrı gaz tarafı girdisi. Güverte motorun astar istasyonu girdilerini
+        # gönderir; alanlar YOKSA yanıt bit-aynı kalır (istasyon bu isteğin
+        # zincirinden türetilir). Kapı: sonlu + pozitif; sürücü çift ya ikisi
+        # birden ya hiç; sürücü sıcaklık hazne sıcaklığını aşamaz (recovery
+        # sıcaklığı durgunluk sıcaklığının üstünde olamaz); astar yolu
+        # istenmediyse alanlar sessizce düşmez, adıyla reddedilir.
+        _astar_ist_verilen = [k for k in _THERMAL_LINER_STATION_FIELDS
+                              if data.get(k) not in (None, '')]
+        liner_station = None
+        if _astar_ist_verilen:
+            _kotu = _collect_unphysical_fields(
+                data, positive=_THERMAL_LINER_STATION_FIELDS)
+            if not _kotu:
+                _eksik_cift = [k for k in _THERMAL_LINER_STATION_PAIR
+                               if k not in _astar_ist_verilen]
+                _kotu += [{
+                    'field': k, 'reason': 'pair_incomplete',
+                    'basis': ('liner_h_gas_W_m2K and liner_T_recovery_K are '
+                              'one liner station: send both or neither (the '
+                              'edge-gas specific heat is optional and needs '
+                              'the pair)')} for k in _eksik_cift]
+            if not _kotu and wall_protection != WALL_PROTECTION_ABLATIVE_LINER:
+                _kotu.append({
+                    'field': _astar_ist_verilen[0],
+                    'reason': 'liner_station_requires_ablative_liner',
+                    'value': _clip_echo(wall_protection, 60),
+                    'allowed_values': [WALL_PROTECTION_ABLATIVE_LINER],
+                    'basis': ('liner station inputs size the ablative liner; '
+                              'without the ablative liner wall protection '
+                              'they would be dropped without a word')})
+            if not _kotu:
+                _tr = float(data['liner_T_recovery_K'])
+                _tc = motor_data.get('chamber_temperature')
+                if _tc is not None and _tr > _tc * (1.0 + 1e-9):
+                    _kotu.append({
+                        'field': 'liner_T_recovery_K',
+                        'reason': 'above_chamber_temperature',
+                        'value': _tr, 'limit': _tc,
+                        'basis': ('the recovery temperature that drives the '
+                                  'liner station cannot exceed the chamber '
+                                  '(stagnation) temperature')})
+            if _kotu:
+                return jsonify({
+                    'status': 'error',
+                    'error': 'invalid_thermal_input',
+                    'message': ('A liner cannot be sized from those liner '
+                                'station inputs. Fix the listed fields; '
+                                'nothing was computed.'),
+                    'invalid_fields': _kotu,
+                }), 422
+            liner_station = {
+                'h_gas_W_m2K': float(data['liner_h_gas_W_m2K']),
+                'T_recovery_K': float(data['liner_T_recovery_K'])}
+            if data.get('liner_gas_cp_J_kgK') not in (None, ''):
+                liner_station['gas_cp_J_kgK'] = float(
+                    data['liner_gas_cp_J_kgK'])
+
         # Initialize heat transfer analyzer
         thermal_analyzer = HeatTransferAnalyzer()
 
@@ -29139,7 +31476,8 @@ def analyze_thermal_safety():
                 material=material,
                 wall_thickness=wall_thickness,
                 ambient_temp=ambient_temp,
-                cooling_type=cooling_type
+                cooling_type=(BARE_WALL_BOUND_OUTER_COOLING
+                              if _astar_sinifi is not None else cooling_type)
             )
         except MissingHeatTransferInput as eksik:
             return jsonify({
@@ -29170,7 +31508,10 @@ def analyze_thermal_safety():
         apply_wall_protection(
             thermal_analyzer, thermal_results, motor_data, material,
             wall_thickness, wall_temperature_hot=t_hot,
-            wall_temperature_cold=t_cold, wall_protection=wall_protection)
+            wall_temperature_cold=t_cold, wall_protection=wall_protection,
+            liner_station=liner_station)
+        if _astar_sinifi is not None:
+            declare_liner_protected_cooling(thermal_results, _astar_sinifi)
 
         # --- KAPI 2: kazanılmamış hüküm yayımlanmaz ----------------------
         # sanitize_json_values NaN'ı ``null``a çevirir, yani geri çekme
@@ -29353,8 +31694,14 @@ def analyze_wall_profile():
         motor_data = {
             'chamber_pressure': _request_number(
                 data, 'chamber_pressure', 20, absent_log=verilmedi),      # bar
+            # V307/GÜVERTE-ISIL (kalem 4): 3000 K varsayılanı KALKTI (aynı
+            # kaynaksız sayı ``/analyze_safety``te zorunlu alana çevrildi).
+            # ÖLÇÜLDÜ (docs/scofield/raw/OH/V307/guverte-isil/k4_once.json):
+            # bu uçta sıcaklıksız istek aşağıdaki çekirdek kapıda
+            # (``_thermal_missing_fields``) zaten 422 alıyordu; 3000 hiçbir
+            # yanıta ulaşmıyordu ama yazılıydı. Alan yoksa None (kapı reddeder).
             'chamber_temperature': _request_number(
-                data, 'chamber_temperature', 3000, absent_log=verilmedi),   # K
+                data, 'chamber_temperature', None, absent_log=verilmedi),   # K
             'chamber_diameter': _request_number(
                 data, 'chamber_diameter', 0.1, absent_log=verilmedi),       # m
             'chamber_length': _request_number(
@@ -29524,7 +31871,8 @@ def analyze_wall_profile():
                         'wall profile was published and the value was not '
                         'clamped to a default: a heat-transfer verdict '
                         'computed from a specific-heat ratio the caller never '
-                        'asked for would be a fabricated number. This request '
+                        'asked for would describe a different gas than the one requested. '
+                        'This request '
                         'previously ended in HTTP 500 with the bare solver '
                         'text and no field name.'),
                 })
@@ -29689,6 +32037,18 @@ def analyze_wall_profile():
                 'missing_field_groups': missing_groups,
             }), 422
 
+        # V307/SEKME-GÜVERTE (NK3-S-3): ablatif (astarla korunan) sınıfta bu
+        # profil ÇIPLAK cidarın dengesidir (astar yok, yanıt bunu zaten
+        # söyler); dış yüz modeli kardeş uçla aynı tek tanım
+        # (``BARE_WALL_BOUND_OUTER_COOLING``) ve yanıtta adıyla.
+        from hrma.analysis.heat_transfer_analysis import (
+            BARE_WALL_BOUND_OUTER_COOLING, BARE_WALL_OUTER_COOLING_BASIS,
+            LINER_PROTECTED_COOLING_TYPES)
+        _profil_motor_sogutma = None
+        if (isinstance(cooling_type, str)
+                and cooling_type in LINER_PROTECTED_COOLING_TYPES):
+            _profil_motor_sogutma = cooling_type
+            cooling_type = BARE_WALL_BOUND_OUTER_COOLING
         # Soğutma tipi: kardeş uçla aynı beyaz liste (P4B1-06). Tanınmayan
         # tip burada da sessizce doğal taşınıma düşüyordu ve T_wall_eq o
         # varsayımdan çıkıyordu.
@@ -29877,6 +32237,14 @@ def analyze_wall_profile():
         if _motor_girdi_kunyesi is not None:
             govde['motor_input_basis'] = sanitize_json_values(
                 _motor_girdi_kunyesi)
+        # V307/SEKME-GÜVERTE (NK3-S-3): ablatif sınıfta profilin dış yüz
+        # modeli adıyla (alan yalnız o sınıfta eklenir; öbür istekler
+        # BİT-AYNI).
+        if _profil_motor_sogutma is not None:
+            govde['motor_cooling_type'] = _profil_motor_sogutma
+            govde['bare_wall_outer_cooling'] = BARE_WALL_BOUND_OUTER_COOLING
+            govde['bare_wall_outer_cooling_basis'] = (
+                BARE_WALL_OUTER_COOLING_BASIS)
         # --- ÖH D25 / P16B3-18 · YUTULAN GİRDİ ADIYLA İLAN EDİLİR --------
         # Kalem "``mdot_total`` ve ``burn_time`` hiçbir çıktıyı
         # değiştirmiyor" diyordu. ÖLÇÜLDÜ (taban ``cdf2106``,
@@ -33486,7 +35854,7 @@ def api_cfd_nozzle():
             ('P_ambient_Pa',
              'Ambient pressure [Pa] is required: the Summerfield separation '
              'criterion p_w < k*P_ambient is defined against it, and assuming '
-             'sea level or vacuum would be a fabricated input '
+             'sea level or vacuum would substitute an input you did not give '
              '(hrma/cfd/separation.py refuses a missing ambient pressure).',
              0.0, None, False),
         ):
@@ -34910,7 +37278,7 @@ FUEL_DENSITY_UNAVAILABLE_BASIS = (
     'condensed-phase density. HRMA used to publish the molecular weight '
     '(x10 for liquids) in this field, which is a different physical '
     'quantity with different units and was wrong by factors of 2 to 35. '
-    'The field is left null instead of carrying a fabricated number; '
+    'The field is left null instead of carrying an unsupported number; '
     'density_source names the record when HRMA has a measured one.')
 
 
@@ -35099,11 +37467,18 @@ def get_cached_oxidizer_properties(oxidizer_type, temperature):
 #: modül onu sessizce 1,0 s'ye düşürüyor — uç artık adıyla sorar.
 #:
 #: Biçim: analiz türü -> (alternatif alan adları,) demeti.
+#:
+#: V307/KÜÇÜKLER-2 (kalem 2): oda sıcaklığı da İKİZ koşuldur — figür modülü
+#: 3000 K varsaymayı bıraktı (``_nozzle_fig_motor_data`` adıyla reddeder);
+#: panel alanı zorunlu ve motordan tohumlu. ÖLÇÜM: ``docs/scofield/raw/OH/
+#: V307/kucukler-2/olcum/k2_once.json``.
 _APA_REQUIRED_ANY_OF = {
     'nozzle_mach': (('throat_area', 'throat_diameter'),
-                    ('expansion_ratio', 'exit_diameter')),
+                    ('expansion_ratio', 'exit_diameter'),
+                    ('chamber_temperature',)),
     'heat_flux': (('throat_area', 'throat_diameter'),
-                  ('burn_time',)),
+                  ('burn_time',),
+                  ('chamber_temperature',)),
 }
 
 
@@ -35124,8 +37499,9 @@ def _apa_eksik_reddi(analysis_type, eksik):
         'message': (
             'This figure was not drawn: values that define it were not '
             'supplied and are not assumed on your behalf. The area ratio '
-            'sets the whole Mach field, the throat area sets its scale and '
-            'the burn time is the waterfall time axis — a figure built from '
+            'sets the whole Mach field, the throat area sets its scale, '
+            'the chamber temperature sets the gas state and the burn time '
+            'is the waterfall time axis — a figure built from '
             'placeholder numbers would be labelled with them as if they were '
             'measured. Nothing was computed.'),
         'analysis_type': analysis_type,
@@ -35133,6 +37509,36 @@ def _apa_eksik_reddi(analysis_type, eksik):
         'required_any_of': [list(g) for g in
                             _APA_REQUIRED_ANY_OF.get(analysis_type, ())],
     }), 422
+
+
+def _apa_mol_agirligi_oku(data):
+    """V307/GRAFİK-BİRİM (kalem 2) — Mach / ısı akısı figürlerinin MW okuması.
+
+    PERFORMANS paneli artık motorun yayımladığı molekül ağırlığını gönderir
+    (alan + motor tohumu). Eskiden alan ham geçiyordu; ÖLÇÜLDÜ
+    (``docs/scofield/raw/OH/V307/grafik-birim/olcum/k2_once.json`` →
+    ``bozuk``): ``heat_flux`` MW = −5 → 500 (karmaşık sayı), MW = 0 → 500
+    (sıfıra bölme); metin ya da ``true`` sessizce "yok" sayılıp 24 g/mol
+    varsayımına düşüyordu. Döner: (değer ya da None, ret yanıtı ya da None).
+    Alan yoksa (None) figür beyanlı varsayımını kullanır — davranış aynı.
+    """
+    ham = data.get('molecular_weight')
+    if ham is None:
+        return None, None
+    neden = _kanonik_gerekce(ham)
+    deger = None if neden else float(ham)
+    if deger is not None and not deger > 0.0:
+        neden = 'out_of_range'
+    if neden is None:
+        return deger, None
+    return None, (jsonify({
+        'status': 'error',
+        'error': 'invalid_figure_input',
+        'message': ('molecular_weight must be a finite number of g/mol '
+                    'greater than 0; the figure was not drawn.'),
+        'invalid_fields': [{'field': 'molecular_weight', 'reason': neden,
+                            'unit': 'g/mol'}],
+    }), 422)
 
 
 @app.route('/api/advanced-performance-analysis', methods=['POST'])
@@ -35170,8 +37576,21 @@ def advanced_performance_analysis():
                 'pc_range': data.get('pc_range'),
                 'of_range': data.get('of_range'),
                 'grid_n': data.get('grid_n'),
+                # V307/KÜÇÜKLER-2 (kalem 4): künyenin "at expansion ratio ε"
+                # cümlesi bu alanı okuyor ama uç onu geçirmiyordu (panel
+                # gönderiyor; künye "(expansion ratio not reported)" diyordu).
+                'expansion_ratio': data.get('expansion_ratio'),
             }
             engine_data = {k: v for k, v in engine_data.items() if v is not None}
+            # V307/KÜÇÜKLER-2 (kalem 4): taban Isp'nin tasarım ortamı (panelin
+            # tohumu; isteğe bağlı kayıt). Künye ortamı adıyla söyler; kayıt
+            # yoksa künye bugünküyle aynı. Kapı karşılaştırmayla ortak.
+            _ortam_kaydi, _ortam_ret = _tasarim_ortami_kaydi_oku(
+                data.get('design_ambient'), 'invalid_figure_input')
+            if _ortam_ret is not None:
+                return _ortam_ret
+            if _ortam_kaydi is not None:
+                engine_data['design_ambient'] = _ortam_kaydi
 
             plot_json = create_chamber_pressure_mixture_ratio_3d_surface(engine_data)
 
@@ -35186,7 +37605,10 @@ def advanced_performance_analysis():
                     'reference': ('NASA SP-125 — Huzel & Huang, Design of '
                                   'Liquid Propellant Rocket Engines '
                                   '(2nd ed., 1971)'),
-                    'description': 'Shows optimum O/F ratio and chamber pressure regions with combustion instability bands'
+                    # V307/ONARIM-İTKİ-A: "with combustion instability
+                    # bands" diyordu; figür bantların MODELLENMEDİĞİNİ
+                    # yazıyor (kaldırıldılar). Kart figürle aynı şeyi söyler.
+                    'description': 'Equilibrium Isp over chamber pressure and O/F for the propellant pair; shows where the optimum region lies'
                 }
             }
             # Kitap uyum B16, 2. tur (Ş-7): yüzey düğümleri görselleştirme
@@ -35236,6 +37658,10 @@ def advanced_performance_analysis():
             # basıncını değiştirmek grafiği hiç değiştirmiyordu. Aynı ısı
             # akısı dalındaki desen uygulanır: alan varsa geçilir, yoksa
             # hiç konmaz ve figür "assumed" listesinde açıkça yazar.
+            # V307/GRAFİK-BİRİM (kalem 2): MW kapıdan okunur.
+            _apa_mw, _apa_mw_ret = _apa_mol_agirligi_oku(data)
+            if _apa_mw_ret is not None:
+                return _apa_mw_ret
             cfd_data = {
                 # ÖH D23 a2 / P13B4-12: ham 400 alanı ADIYLA anmıyordu.
                 # ÖH D27 a4 / P7B4-11: ``default=`` KALKTI (bkz.
@@ -35252,7 +37678,7 @@ def advanced_performance_analysis():
                 'chamber_pressure': data.get('chamber_pressure'),
                 'chamber_temperature': data.get('chamber_temperature'),
                 'gamma': data.get('gamma'),
-                'molecular_weight': data.get('molecular_weight'),
+                'molecular_weight': _apa_mw,
                 # Görselleştirme sözleşmesi: ambient_pressure PASCAL
                 # (NozzleFlow1D.from_motor_data ambient_pressure=Pa bekler).
                 # Bar cinsinden gönderen çağıranlar için ayrı anahtar.
@@ -35264,6 +37690,18 @@ def advanced_performance_analysis():
                           else None)),
             }
             cfd_data = {k: v for k, v in cfd_data.items() if v is not None}
+            # V307/ONARIM-İTKİ-A (M7-ITKI-7): motorun tasarım ortamı kaydı
+            # (panel sıvı/hibrit motorun ``design_ambient`` bloğundan
+            # gönderir). Açık ortam basıncı verilmediyse figür basıncı bu
+            # kayıttan okur ve ortamı adıyla yazar; eskiden kayıt okunmuyor,
+            # vakum tasarımı 1 atm'de "ayrılmış" çiziliyordu. Kapı 3B yüzey
+            # koluyla ortak (kip beyaz listesi, adlı 422).
+            _ortam_kaydi, _ortam_ret = _tasarim_ortami_kaydi_oku(
+                data.get('design_ambient'), 'invalid_figure_input')
+            if _ortam_ret is not None:
+                return _ortam_ret
+            if _ortam_kaydi is not None and 'ambient_pressure' not in cfd_data:
+                cfd_data['design_ambient'] = _ortam_kaydi
 
             # ÖH D27 a4 / P7B4-11: fail-closed kapı (bkz.
             # ``_APA_REQUIRED_ANY_OF``). Modülün kendi ``ValueError``ı
@@ -35283,7 +37721,9 @@ def advanced_performance_analysis():
                                   'Charts for Compressible Flow" (Ames '
                                   'Research Staff, 1953); Anderson, "Modern '
                                   'Compressible Flow", 3rd ed.'),
-                    'description': 'Visualizes Mach distribution and shock/threshold regions for over/under-expansion detection'
+                    # V307/ONARIM-İTKİ-A (M7-ITKI-7): kart rejimin HANGİ
+                    # ortamda çözüldüğünü söyler (künye ortamı adıyla yazar).
+                    'description': 'Quasi-1D Mach number along the nozzle and the flow regime at the stated ambient (over/under-expansion, separation, normal shock)'
                 }
             })
             
@@ -35299,6 +37739,10 @@ def advanced_performance_analysis():
             # ``critical_heat_flux`` figürün KULLANICI referans düzlemleridir
             # (``_heat_flux_reference_planes``) — sorulmamış bir referans
             # çizgisi çizilmez.
+            # V307/GRAFİK-BİRİM (kalem 2): MW kapıdan okunur.
+            _apa_mw, _apa_mw_ret = _apa_mol_agirligi_oku(data)
+            if _apa_mw_ret is not None:
+                return _apa_mw_ret
             thermal_data = {
                 'burn_time': input_guard.num(data, 'burn_time', unit='s'),
                 'chamber_length': input_guard.num(
@@ -35308,7 +37752,7 @@ def advanced_performance_analysis():
                     data, 'base_heat_flux', unit='W/m^2'),
                 'critical_heat_flux': input_guard.num(
                     data, 'critical_heat_flux', unit='MW/m^2'),
-                'molecular_weight': data.get('molecular_weight'),
+                'molecular_weight': _apa_mw,
                 'throat_area': data.get('throat_area'),
                 'throat_diameter': data.get('throat_diameter'),
                 'chamber_pressure': data.get('chamber_pressure'),
@@ -35339,7 +37783,10 @@ def advanced_performance_analysis():
                     # docs/STANDART_ATIFLARI.md'de.
                     'reference': ('NASA SP-8124 — Liquid Rocket Engine '
                                   'Self-Cooled Combustion Chambers (1977)'),
-                    'description': 'Gradient colored waterfall showing local heat flux along cooling channels with thermal runaway detection'
+                    # V307/ONARIM-İTKİ-A: "thermal runaway detection"
+                    # diyordu; figür modülünde böyle bir çarpan YOK
+                    # (visualization: 'No "thermal runaway" multiplier').
+                    'description': 'Wall heat flux along the chamber and nozzle over the burn (Bartz convection, with gas radiation where it can be evaluated)'
                 }
             })
             
@@ -37236,7 +39683,7 @@ def flow_analysis():
             'message': (
                 'A quasi-1D nozzle solution cannot be produced from server '
                 'defaults: the regime, CF, thrust and throat state that this '
-                'endpoint publishes ARE these numbers. The missing fields '
+                'analysis publishes ARE these numbers. The missing fields '
                 'describe the motor and its operating environment; they '
                 'cannot be derived from the rest of the request and none was '
                 'assumed on your behalf. Nothing was solved.'),
@@ -37247,6 +39694,25 @@ def flow_analysis():
                  'unit': _FLOW_REQUIRED_KUNYE[ad][0] or None,
                  'basis': _FLOW_REQUIRED_KUNYE[ad][1]}
                 for ad in _flow_eksik],
+        }), 422
+
+    # V307/KÜÇÜKLER (kalem 7; GÜVERTE-ISIL DEVİR 2) — FİZİK DIŞI ODA
+    # SICAKLIĞI ADIYLA 422. ÖLÇÜLDÜ (taban 303c16f85,
+    # docs/scofield/raw/OH/V307/kucukler/olcum/k7_once.json): −3000 K gövde
+    # çözücüye kadar iniyor ve HTTP 400 + çözücünün ham cümlesi ("chamber_
+    # temperature must be positive [K].") dönüyordu; alan makine-okur
+    # biçimde adlandırılmıyordu. Mutlak sıcaklık > 0 K olmak zorundadır; güverte
+    # bu kodu zaten tanıyor (analysis_dock ``invalid_flow_input``).
+    if not (chamber_temperature is not None and chamber_temperature > 0.0):
+        return jsonify({
+            'status': 'error',
+            'error': 'invalid_flow_input',
+            'message': ('chamber_temperature must be an absolute temperature '
+                        'above 0 K. Nothing was solved.'),
+            'invalid_fields': [{
+                'field': 'chamber_temperature', 'reason': 'out_of_range',
+                'unit': 'K', 'value': data.get('chamber_temperature'),
+                'basis': 'absolute temperature: must be greater than 0 K'}],
         }), 422
 
     # --- OH-D31-14 · İKİNCİ AYAK: LÜLE GEOMETRİSİ UYDURULMAZ -------------
@@ -37277,7 +39743,7 @@ def flow_analysis():
             'message': (
                 'The nozzle geometry was not supplied. The area ratio sets '
                 'the exit Mach number, CF, the separation regime and the '
-                'thrust this endpoint publishes, so it cannot be assumed on '
+                'thrust this analysis publishes, so it cannot be assumed on '
                 'your behalf: send either an expansion_ratio or an '
                 'exit_diameter (in metres). Nothing was solved.'),
             'missing_fields': ['expansion_ratio', 'exit_diameter'],
@@ -38046,6 +40512,14 @@ def _run_uq_analysis(motor_type, level, seed, inputs, overrides,
         if isinstance(_blok, dict) and _blok.get('std') == 0:
             _blok['zero_spread_reason'] = (
                 _uqa.ZERO_SPREAD_REASON_DESIGN_TARGET)
+    # --- V307/GRAFİK-BİRİM (kalem 3) · ÇIKTI BAŞINA BİRİM -----------------
+    # ÖLÇÜLDÜ (V307/DİL-EKRAN KALAN O7): çıktı bloklarında birim alanı
+    # yoktu, kartlar birimsiz sayı basıyordu. Birim fabrikanın tek
+    # tablosundan (``uq_adapters.CONTRACT_OUTPUT_UNITS``) gelir; tabloda
+    # olmayan çıktıya birim uydurulmaz (``None``; bekçi bunu KIRMIZI sayar).
+    for _ad, _blok in _govde['outputs'].items():
+        if isinstance(_blok, dict):
+            _blok['unit'] = _uqa.output_unit(motor_type, _ad)
     # --- ÖH D28 a1 / P7B4-18 (ikinci yarı) · MOTORUN KENDİ HÜKMÜ -------
     # ÖLÇÜLDÜ (``a1/once.json`` K2): sağlıklı hibrit gövdenin 19 üst
     # anahtarının hiçbiri motorun ``design_warnings`` defterini taşımıyordu

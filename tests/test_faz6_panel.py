@@ -527,7 +527,10 @@ def test_t74_example_vehicle_name_is_a_translated_placeholder():
     assert en[key] != tr[key], '%s çevrilmemiş' % key
 
     render = cut_function(src, 'renderVehicleText')
-    assert 'name_key' in render, 'rozet name_key\'i kullanmıyor'
+    # V307/ONARIM2-FS-EKRAN (M7-FS-6): ad seçimi aracAdi işlevine taşındı
+    # (köprünün iç adı yerine motor türünün görünen adı); name_key orada.
+    assert 'aracAdi(v)' in render and 'name_key' in cut_function(src, 'aracAdi'), \
+        'rozet name_key\'i kullanmıyor'
     fv_src = read(pathlib.Path(__file__).resolve().parents[1]
                   / 'hrma' / 'analysis' / 'flight_vehicle.py')
     assert fv_src.count("'name_key':") == 1 and "name_key:" not in src, \
