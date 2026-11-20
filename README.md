@@ -5,11 +5,12 @@
 
 A comprehensive desktop tool for designing and analyzing hybrid, solid, and liquid rocket motors. Input your parameters, get optimized motor geometry, performance metrics, and an interactive 3D model of your motor built live from the solver output.
 
-> **Current stable release: v3.0.6 (10 November 2026).** The most stable and
-> most thoroughly verified HRMA to date, recommended for all users.
+> **Current stable release: v3.0.7 (20 November 2026).** Tank slosh coupled
+> to the 6-DOF stability of the vehicle, one number per quantity across tabs
+> and an independent solid-motor validation; recommended for all users.
 > [Download](#just-want-to-use-hrma-download-the-installer) ·
-> [Release notes](https://github.com/berketez/HRMA/releases/tag/v3.0.6) ·
-> [What changed](#whats-new-in-v306)
+> [Release notes](https://github.com/berketez/HRMA/releases/tag/v3.0.7) ·
+> [What changed](#whats-new-in-v307)
 
 ![HRMA hybrid motor results](docs/user_guide/img/en-02-results.png)
 
@@ -41,42 +42,42 @@ its own native window and notifies you automatically when a new version is
 available. All the folders and files below are **source code for developers**;
 you can ignore them entirely.
 
-## What's New in v3.0.6
+## What's New in v3.0.7
 
-v3.0.6 is a corrections release: it adds no new analysis and changes no
-workflow. It fixes what an engineering review of the solid, liquid and hybrid
-pages found after v3.0.5, and the language and readability findings of the
-v3.0.5 user test.
+- **Tank slosh (requested by Roketsan engineers).** A new Slosh tab models the
+  first slosh mode of each liquid or hybrid tank over the fill range (frequency
+  map, NASA SP-8009 loads, ring baffle recommendation) and exports hand-off
+  files for the vehicle team. The tank geometry can be loaded from a point
+  cloud, STL, STEP or an (r, z) profile.
+- **Slosh in 6-DOF stability.** Liquid and hybrid flights are solved coupled
+  with tank slosh. When the slosh amplitude passes the linear limit, or when
+  an instability window during the burn makes it depend on the initial
+  disturbance, the coupled whole-flight numbers are not published and a
+  labelled slosh-free reference run is shown.
+- **Vehicle derived from the motor.** The airframe carries the motor's tanks,
+  the centre of gravity is built from the components, and the fins are sized
+  by a static-margin rule on a windless reference flight; the stability
+  section shows the rail exit speed and the thrust-to-weight at ignition.
+- **One quantity, one number.** The Analysis Dock tabs evaluate the motor's
+  own values, every Isp names its ambient, and an altitude you enter is a
+  geometric altitude on every path.
+- **Liquid engine:** design at sea level, an altitude, an ambient pressure or
+  in vacuum; a 3D Isp surface for liquid engines; the injector face plate is
+  checked at start and shutdown.
+- **Solid motor validation** against six NASA BATES static firings, with the
+  statistics separated by propellant family.
+- **Launch Site:** offline map packs, flight to the ground with parachute,
+  Coriolis and mission tracking; the flight summary also works without WebGL.
+- **Update window:** while an update installs, a window shows the stages.
 
-- **One quantity, one number.** Where two panels published different values
-  for the same quantity (impulse, consumed propellant, thermal exposure time,
-  test pressure, nozzle contour, jacket pressure drop, optimum O/F), there is
-  now a single value; where two definitions really differ, both are shown with
-  the reason.
-- **Hybrid:** delivered impulse, burn time and average Isp of a
-  self-pressurised N₂O tank come from the tank blowdown solution; the mass
-  budget includes the ullage vapour and the injector plate.
-- **Liquid:** the motor Isp is based on the total propellant consumption and is
-  shown next to the thrust-chamber Isp; when the cooling circuit has no valid
-  solution, the numbers that depend on it are withheld with their reason.
-- **Solid:** one nozzle contour in the response, the 3D view, STEP and FEA;
-  one test-pressure ladder; grain stress results the model cannot resolve are
-  not published.
-- **Flight:** lift-off mass is the motor's total mass; the 6-DOF thrust is
-  corrected for altitude; a parametric sweep point gives the same apogee as
-  Calculate.
-- **Saved projects:** values stored in a project are no longer overwritten by
-  a late property lookup when the project is opened.
-- **Language and readability:** charts stay inside their panels and follow a
-  live language switch; the Turkish PDF uses Turkish fonts and decimal commas.
-
-**How this release was verified.** The published commit passed the full
-regression suite (close to 30 000 automated tests, run on macOS and again on
-Linux CI), and the installers passed the 10-step release gate: version and
-provenance checks, a live computation on a non-default port, package
-signature and content manifest, and a browser tour of the application pages. Projects
-saved with v3.0.5 or earlier open in v3.0.6; some published numbers change —
-see [CHANGELOG.md](CHANGELOG.md) for the list.
+**How this release was verified.** An engineering review of the new features
+(67 findings) was closed in two repair waves before release. The published
+commit passed the regression suite on Linux CI (16 slices) and the macOS-only
+and browser tests on macOS, and the installers passed the 10-step release
+gate: version and provenance checks, a live computation on a non-default port,
+package signature and content manifest, and a browser tour of the application
+pages. Projects saved with v3.0.0 to v3.0.6 open in v3.0.7; some published
+numbers change — see [CHANGELOG.md](CHANGELOG.md) for the list.
 
 ## Features
 
