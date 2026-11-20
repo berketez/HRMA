@@ -8,7 +8,7 @@
    "motor_name": "Example Hybrid N2O-HTPB 3kN",
    "motor_description": "Örnek tasarım: N2O/HTPB hibrit motor, 3 kN itki, 10 s yanma, 30 bar oda basıncı, O/F 6,0. Regresyon a = 6,399e-05, n = 0,554: Carmicino ve ark. saf HTPB/N2O ateşlemelerine (HRMA doğrulama kayıtları) log-log uyarlama; deneylerde N2O gaz, bu örnekte sıvı enjekte edilir. Başlangıç oksitleyici akısı 250 kg/m²·s, uyarlamanın ölçüm aralığının içinde. / Example design: N2O/HTPB hybrid motor, 3 kN thrust, 10 s burn, 30 bar chamber pressure, O/F 6.0. Regression a = 6.399e-05, n = 0.554: log-log fit to the Carmicino et al. pure HTPB/N2O firings (HRMA validation records); the tests injected gaseous N2O, this example injects liquid N2O. Initial oxidizer flux 250 kg/m²·s, inside the measured range of the fit.",
    "single_altitude": 0,
-   "single_pressure": 1.013,
+   "single_pressure": 1.01325,
    "alt_start": 0,
    "alt_end": 10000,
    "alt_points": 10,
@@ -21,6 +21,7 @@
    "tank_pressure": 50.53,
    "l_star": 1,
    "initial_port_diameter": 0,
+   "mass_flux_chamber": 250,
    "port_count": "",
    "expansion_ratio": 0,
    "nozzle_type": "conical",
@@ -28,8 +29,7 @@
    "combustion_efficiency": "",
    "chamber_diameter_input": 0,
    "residual_web_thickness": "",
-   "contraction_ratio": 0,
-   "mass_flux_chamber": 250,
+   "contraction_ratio": "",
    "fuel_type": "htpb",
    "fuel_density": 920,
    "regression_a": 6.399e-05,
@@ -76,6 +76,53 @@
    "viz_ds_eps": "500",
    "viz_slider": "0"
   },
+  "dynamic": {
+   "flight": {
+    "format": 1,
+    "sixdof": {
+     "format": 1,
+     "fields": {
+      "sd_body_d": "0.218",
+      "sd_body_l": "1.94",
+      "sd_nose_l": "0.50",
+      "sd_nose_type": "ogive",
+      "sd_fin_count": "4",
+      "sd_fin_root": "",
+      "sd_fin_tip": "",
+      "sd_fin_span": "",
+      "sd_fin_sweep": "",
+      "sd_fin_pos": "",
+      "sd_dry_m": "25.00",
+      "sd_prop_m": "13.307",
+      "sd_payload_m": "",
+      "sd_payload_x": "",
+      "sd_cd0": "0.50",
+      "sd_wind": "5",
+      "sd_wind_dir": "0",
+      "sd_elev": "90",
+      "sd_azimuth": "0",
+      "sd_rail": "5",
+      "sd_thrust": "2577.1",
+      "sd_burn": "10.41"
+     },
+     "user_typed": [],
+     "mass_mode": "simple",
+     "components": [],
+     "thrust_source": "auto",
+     "use_curve": true
+    },
+    "transient": {
+     "format": 1,
+     "feed_mode": "blowdown",
+     "feed_mode_user_chosen": false,
+     "tank_temp": "293.15",
+     "tank_temp_user_typed": false,
+     "fill": "0.85",
+     "fill_user_typed": false
+    },
+    "trajectory_user_typed": []
+   }
+  },
   "ui_state": {
    "environment_tab": "single",
    "design_tab": "thrust_time",
@@ -85,14 +132,14 @@
  "description": "Örnek tasarım: N2O/HTPB hibrit motor, 3 kN itki, 10 s yanma, 30 bar oda basıncı, O/F 6,0. Regresyon a = 6,399e-05, n = 0,554: Carmicino ve ark. saf HTPB/N2O ateşlemelerine (HRMA doğrulama kayıtları) log-log uyarlama; deneylerde N2O gaz, bu örnekte sıvı enjekte edilir. Başlangıç oksitleyici akısı 250 kg/m²·s, uyarlamanın ölçüm aralığının içinde. / Example design: N2O/HTPB hybrid motor, 3 kN thrust, 10 s burn, 30 bar chamber pressure, O/F 6.0. Regression a = 6.399e-05, n = 0.554: log-log fit to the Carmicino et al. pure HTPB/N2O firings (HRMA validation records); the tests injected gaseous N2O, this example injects liquid N2O. Initial oxidizer flux 250 kg/m²·s, inside the measured range of the fit.",
  "results_summary": {
   "thrust_N": 3000,
-  "isp_s": 209.7338729101265,
-  "burn_time_s": 10.414278740423775,
+  "isp_s": 209.7279782241692,
+  "burn_time_s": 10.414278830711584,
   "chamber_pressure_bar": 30,
-  "total_impulse_Ns": 26838.605254277936,
-  "isp_basis": "design_point",
-  "computed_with_version": "3.0.6"
+  "total_impulse_Ns": 26838.56337344453,
+  "isp_basis": "sea_level",
+  "computed_with_version": "3.0.7"
  },
- "app_version": "3.0.6",
+ "app_version": "3.0.7",
  "created_at": "2026-10-14T14:51:51",
- "updated_at": "2026-11-09T16:28:05"
+ "updated_at": "2026-11-20T09:49:33"
 }

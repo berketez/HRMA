@@ -479,16 +479,35 @@
        Sınıf UÇTAN okunur, panelde ÜRETİLMEZ; alan gelmezse künye
        "not declared" der ve kart 'dim' kalır (sayı da hüküm de
        uydurulmaz). */
+    /* V307/DİL-SON kalem 4: künye makine adı basıyordu
+       ('friction_loss_fraction_source = integral_bl_measured · <sunucunun
+       uzun gerekçesi: modül yolları, test dosyaları>'); artık sınıfın
+       okunur cümlesi (EN + TR). Sınıf yine UÇTAN okunur; tanınmayan sınıf
+       AYNEN basılır (fail-closed). Sözlük işlevin İÇİNDE: sayfa içi işlev
+       yalıtan bekçiler (test_d27_arayuz_a4) yalnız bu gövdeyi koşar. */
     function frictionOriginText(losses) {
         const src = losses && losses.friction_loss_fraction_source;
         if (!src) {
-            return 'friction_loss_fraction_source: not declared by the '
-                 + 'endpoint — whether this friction loss was MEASURED or '
-                 + 'assumed is unknown.';
+            return T('panel.nzl.frictionSrcUndeclared',
+                'Friction-loss source not declared: whether this friction '
+                + 'loss was measured or assumed is unknown.');
         }
-        return 'friction_loss_fraction_source = ' + String(src)
-             + (losses.friction_loss_fraction_basis
-                ? ' · ' + String(losses.friction_loss_fraction_basis) : '');
+        const SINIF = {
+            integral_bl_measured: ['panel.nzl.frictionSrcMeasured',
+                'Friction loss measured: compressible boundary-layer '
+                + 'solution along the nozzle wall (momentum-integral '
+                + 'method).'],
+            user: ['panel.nzl.frictionSrcUser',
+                'Friction loss is the value you entered; the measured '
+                + 'boundary-layer value is reported alongside but not '
+                + 'used.'],
+            legacy_constant: ['panel.nzl.frictionSrcLegacy',
+                'No boundary-layer measurement is available for this run, '
+                + 'so a fixed bookkeeping friction loss is used: an '
+                + 'estimate, not a boundary-layer solution.'],
+        };
+        const rec = SINIF[String(src)];
+        return rec ? T(rec[0], rec[1]) : String(src);
     }
 
     // Ölçülmüş kayıp = 'ok'; ölçülmemiş/sabit = 'warn'; beyansız = 'dim'.
@@ -510,20 +529,29 @@
 
        Kart artık kendi tanımını ve — uç yayımladıysa — kardeş tanımlarla
        ORANINI taşır. Oran ölçüdür, eşik değil: sayı yoksa satır yok. */
+    /* V307/DİL-SON kalem 4: tanım ve kardeşleri alan yoluyla basılıyordu
+       ('performance.thrust_N — …', 'losses.thrust_effective_N = …');
+       artık okunur adla. Oran yine yalnız iki sayı da yayımlandıysa. */
     function thrustDefinitionText(perf, losses) {
         const f = perf && perf.thrust_N;
-        let out = 'performance.thrust_N — momentum + pressure thrust of the '
-                + 'solved (possibly separated) flow.';
+        let out = T('panel.nzl.thrustDefSolved',
+            'Thrust of the solved flow: momentum + pressure thrust (the flow '
+            + 'may be separated).');
         const kiyas = [
-            ['losses.thrust_effective_N', losses && losses.thrust_effective_N],
-            ['performance.thrust_full_flow_N', perf && perf.thrust_full_flow_N],
+            [T('panel.nzl.thrustDefEffective',
+               'Effective thrust after divergence + friction losses'),
+             losses && losses.thrust_effective_N],
+            [T('panel.nzl.thrustDefFullFlow',
+               'Full-flow thrust (as if the flow did not separate)'),
+             perf && perf.thrust_full_flow_N],
         ];
         kiyas.forEach(function (pair) {
             const v = pair[1];
             if (typeof v === 'number' && isFinite(v)
                     && typeof f === 'number' && isFinite(f) && f !== 0) {
                 out += ' · ' + pair[0] + ' = ' + U.fmt(v, 0) + ' N ('
-                     + U.fmt(v / f, 3) + '× this card).';
+                     + U.tf('panel.nzl.thrustDefRatio', { r: U.fmt(v / f, 3) },
+                            '{r}× this card') + ').';
             }
         });
         return out;

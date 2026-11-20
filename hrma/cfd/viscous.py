@@ -226,7 +226,7 @@ def _check_wall_thermal(wall_thermal, T_wall, T_wall_source, ni):
     if T_wall is None:
         raise ValueError(
             'wall_thermal="isothermal" için T_wall ZORUNLUDUR. Duvar '
-            'sıcaklığı uydurulmaz (varsayılan yok): termal FEA, regen '
+            'sıcaklığı varsayılmaz (varsayılan değer yok): termal FEA, regen '
             'çözücü ya da kullanıcı verir ve kaynağı T_wall_source ile '
             'beyan edilir.')
     if not isinstance(T_wall_source, str) or not T_wall_source.strip():

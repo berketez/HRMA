@@ -197,7 +197,7 @@ LFI_COEFFICIENT_BASIS = (
 _SUPPORTED_NOTE = (
     "supported oxidizer families: 'gox'/'lox' (6.38e5) and 'n2o' (4.47e5). "
     'The correlation publishes no calibrated constant for any other '
-    'oxidizer, and none is fabricated here.')
+    'oxidizer, and none is assumed here.')
 
 
 def _normalise_oxidizer(oxidizer_type):
@@ -392,7 +392,7 @@ def assess_hybrid_lfi(oxidizer_type, grain_length_m, chamber_pressure_Pa,
          'hybrid system to some extent" (conclusion 3) and that the linear '
          'theory "predicts an unlimited growth of the oscillations" so the '
          'amplitude cannot be estimated (conclusion 4). A "stable" verdict '
-         'would therefore be a fabricated clearance, and an "unstable" '
+         'would therefore be an unsupported clearance, and an "unstable" '
          'verdict would overstate severity: the honest reading is that the '
          f'mechanism is expected to be active near {frequency:.3g} Hz. '
          'Published scatter of the correlation against 43 motor tests: 13.94% '

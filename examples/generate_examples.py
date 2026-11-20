@@ -93,6 +93,7 @@ KATI_ORNEGE_TASINAN_FORM_ALANLARI = (
 )
 
 
+from hrma.constants import P_SEA_LEVEL_PA, PA_PER_BAR  # noqa: E402
 from hrma.engines.hybrid_rocket_engine import (    # noqa: E402
     HYBRID_CHAMBER_MATERIAL_DEFAULT, TANK_TEMPERATURE_DEFAULT_K)
 
@@ -105,6 +106,24 @@ HIBRIT_TANK_SICAKLIGI_K = TANK_TEMPERATURE_DEFAULT_K
 #: Form alanı ``tank_pressure``in adımı 0,1 bar (advanced.html ``step="0.1"``):
 #: doyma basıncı bu haneye yuvarlanır.
 TANK_BASINCI_ONDALIK = 1
+
+#: V307/AĞIRLIK-MERKEZİ-2 (Berke kararı, 18 Kas) — SIVI ÖRNEK ARACIN FAYDALI
+#: YÜKÜ. Örnek araç girdisi: aviyonik + kurtarma + yük, tek noktasal kütle
+#: (HRMA seçimi; gerçek bir aracın verisi değil, kaynaklı "tipik" değer
+#: değil). Neden: bileşen ağırlık merkezinde yalın araç (motor 63 kg + tanklar +
+#: 45 kg yedek itici kıçta) kanat kuralını 4·d açıklıkta sağlayamıyor ve uç
+#: ``fin_rule_not_met`` ile reddediyor (yalın araç için doğru davranış).
+#: Gerçek araç önden yüklüdür: yük bölmesi Ø0,50 m ogive burnun hemen
+#: arkasında, kütle merkezi burun ucundan 0,75 m. ÖLÇÜLDÜ
+#: (docs/scofield/raw/OH/V307/agirlik-merkezi-2/sivi_yuk.json, panel isteği):
+#: 60 kg → en düşük marj 1,008 kal (eşiğin hemen üstü, hedef 1,5 tutmuyor);
+#: 100 kg → 1,512 (açıklık 1,221 m); 120 kg → 1,512 (açıklık 0,970 m, kalkış
+#: 563,5 kg, apoje 44,2 km); 150 kg → 1,510 (0,735 m). 120 kg hedefi rahat
+#: sağlayan en küçük yuvarlak değerdir. Değer sayfanın 6-DOF aracında ELLE
+#: YAZILMIŞ girdi olarak (``inputs.dynamic.flight.sixdof``) taşınır; motor
+#: hesabı onu ezmez.
+SIVI_ORNEK_FAYDALI_YUK_KG = 120.0
+SIVI_ORNEK_FAYDALI_YUK_ISTASYON_M = 0.75
 
 #: Sabit nokta turu üst sınırı. Tur 1 tohumu açar ve sayfanın tam belgesini
 #: kaydeder; tur 2 o belgeyi açar ve aynı gövdeyi/belgeyi vermelidir. Sınır
@@ -227,12 +246,37 @@ def ornek_hibrit_regresyonu():
 KAYITTAN_DUSEN_ALANLAR = {'hybrid': ('total_impulse', 'param_start',
                                      'param_end')}
 
-#: Kayıttan düşen ``inputs`` bölümleri. ``dynamic`` (uçuş/6-DOF ve geçici
-#: analiz panellerinin durumu: kuru kütle, itici, itki, yanma süresi …) bu
-#: örnekte kullanıcı girdisi DEĞİL (``user_typed`` boş), sonuçtan türetilen
-#: değerlerdir; dosyada dondurulursa motor değiştiğinde bayat kalır. Sayfa
-#: bunları sonuçtan yeniden kurar (katı/sıvı örnekler de taşımıyor).
-KAYITTAN_DUSEN_BOLUMLER = {'hybrid': ('dynamic',)}
+#: Kayıttan düşen ``inputs`` bölümleri — BOŞ.
+#: V307/S2-KALINTI (kalem 4, NK3-H + KILAVUZ): burada eskiden
+#: ``{'hybrid': ('dynamic',)}`` vardı; gerekçesi "katı/sıvı örnekler de
+#: taşımıyor" idi, oysa ÖLÇÜLDÜ (3.0.6 örnekleri, 519ab53ec): sıvı ve katı
+#: örnek ``inputs.dynamic.flight`` TAŞIYOR, yalnız hibrit taşımıyordu. Sonuç:
+#: hibrit örnek açılınca proje şeridi ve 6-DOF / Zaman Çözümlü panelleri
+#: "3.0.6 öncesi bir sürümle kaydedilmiş" diyordu (dosyanın app_version'ı
+#: 3.0.6). Bayatlık kaygısı da tutmuyor: ``dynamic.flight`` yalnız ELLE
+#: yazılan alanları damgalar (``user_typed`` / ``trajectory_user_typed``
+#: boş); damgasız alanları sayfa her motor hesabında yeniden tohumlar
+#: (sixdof_panel.js ``projeDurumunuKur``, project_bar.js
+#: ``restoreFlightSetup``). Üç örnek aynı belgeyi taşır.
+KAYITTAN_DUSEN_BOLUMLER = {}
+
+
+def kayittan_dusur(motor_type, belge):
+    """Sayfanın belgesinden örneğe girmeyen alan/bölümleri çıkarır.
+
+    ``belge`` yerinde değişir; dönen liste düşenlerin adlarıdır
+    (``inputs.<bölüm>`` biçiminde bölümler). Tek yer: ``main`` bunu
+    çağırır, bekçi (tests/test_v307_s2_kalinti.py) aynı işlevi sınar."""
+    girdiler = belge['inputs']
+    dusen = [k for k in KAYITTAN_DUSEN_ALANLAR.get(motor_type, ())
+             if k in girdiler['fields']]
+    for k in dusen:
+        girdiler['fields'].pop(k)
+    for k in KAYITTAN_DUSEN_BOLUMLER.get(motor_type, ()):
+        if k in girdiler:
+            girdiler.pop(k)
+            dusen.append('inputs.' + k)
+    return dusen
 
 
 # ---------------------------------------------------------------------------
@@ -405,8 +449,10 @@ def build_examples(client):
     hybrid_fields = {
         # Motor kimliği (motor_description aşağıda GİRDİLERDEN üretilir)
         'motor_name': NAMES['hybrid'],
-        # Ortam: tek irtifa (deniz seviyesi)
-        'single_pressure': 1.013,
+        # Ortam: tek irtifa (deniz seviyesi). ISA deniz seviyesi basıncı
+        # merkezî sabitten (3.0.7 HİBRİT-ORTAM §8-2: yuvarlanmış 1,013 bar
+        # tasarımı 'deniz seviyesi dışı' sayıyordu; sayfanın varsayılanı 1,01325).
+        'single_pressure': P_SEA_LEVEL_PA / PA_PER_BAR,
         # Tasarım noktası. O/F 6,0 (v3.0.5, NK-5; ana model kararı): O/F 7'de
         # lüle boğazı 3304 K ile grafitin 3300 K izin sınırını aşıyordu
         # (warn.hybrid.nozzle_material_over_temp, KRİTİK).
@@ -553,7 +599,15 @@ def build_examples(client):
                          'analysis_tab': 'single'},
         },
         'solid': {'description': solid_desc, 'fields': solid_fields},
-        'liquid': {'description': liquid_desc, 'fields': liquid_fields},
+        'liquid': {'description': liquid_desc, 'fields': liquid_fields,
+                   # V307/AĞIRLIK-MERKEZİ-2: 6-DOF aracının faydalı yükü
+                   # (sayfanın kendi uçuş kurulumu şeması; elle yazılmış).
+                   'dynamic': {'flight': {'format': 1, 'sixdof': {
+                       'format': 1, 'mass_mode': 'simple',
+                       'fields': {
+                           'sd_payload_m': repr(SIVI_ORNEK_FAYDALI_YUK_KG),
+                           'sd_payload_x': repr(SIVI_ORNEK_FAYDALI_YUK_ISTASYON_M)},
+                       'user_typed': ['sd_payload_m', 'sd_payload_x']}}}},
     }
 
 
@@ -803,6 +857,8 @@ def main(secilen=None):
         inputs = {'fields': spec['fields']}
         if spec.get('ui_state'):
             inputs['ui_state'] = spec['ui_state']
+        if spec.get('dynamic'):
+            inputs['dynamic'] = copy.deepcopy(spec['dynamic'])
         store.save_project(NAMES[motor_type], {
             'format': 'hrma-project', 'format_version': 1,
             'name': NAMES[motor_type], 'description': spec['description'],
@@ -841,16 +897,14 @@ def main(secilen=None):
                                  'belgesinden farklı')
         _ozeti_denetle(client, motor_type, name, govde,
                        diskte['results_summary'])
-        dusen = [k for k in KAYITTAN_DUSEN_ALANLAR.get(motor_type, ())
-                 if k in diskte['inputs']['fields']]
-        dusen_bolum = [k for k in KAYITTAN_DUSEN_BOLUMLER.get(motor_type, ())
-                       if k in diskte['inputs']]
-        if dusen or dusen_bolum:
-            for k in dusen:
-                diskte['inputs']['fields'].pop(k)
-            for k in dusen_bolum:
-                diskte['inputs'].pop(k)
-                dusen.append('inputs.' + k)
+        dusen = kayittan_dusur(motor_type, diskte)
+        # V307/S2-KALINTI (kalem 4): örnek, sayfanın uçuş kurulumunu taşımak
+        # ZORUNDA (yoksa açılışta "3.0.6 öncesi" notu çıkar) — fail-closed.
+        if not ((diskte['inputs'].get('dynamic') or {}).get('flight')):
+            raise SystemExit(f'{name}: belgede inputs.dynamic.flight yok — '
+                             'sayfanın uçuş kurulumu (serializeFlightSetup) '
+                             'örneğe girmedi')
+        if dusen:
             # Ürünün kayıt biçimi (hrma/utils/projects.py save_project).
             dosya.write_text(json.dumps(diskte, ensure_ascii=False, indent=1,
                                         allow_nan=False), encoding='utf-8')

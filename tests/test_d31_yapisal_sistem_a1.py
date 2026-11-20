@@ -273,7 +273,10 @@ class TestP7B2_23SloshRetGovdesi:
             'radius': 0.5, 'fill_height': 1.0, 'fluid_density': 1000.0})
         assert r.status_code == 200
         s = r.get_json()['slosh']
-        assert s['f1_hz'] == pytest.approx(0.9558086926296774, rel=1e-12)
+        # 3.0.7 (V307/K1): ξ1 artık kesin kök (scipy jnp_zeros, Dodge (1.41));
+        # 4 basamaklı 1,8412 ile 0,9558086926296774 idi. CALKANTI §C-d:
+        # f1 = 0,955804 Hz.
+        assert s['f1_hz'] == pytest.approx(0.9558044436219495, rel=1e-12)
         assert 'invalid_fields' not in r.get_json()
 
 

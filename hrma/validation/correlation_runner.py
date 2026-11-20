@@ -241,6 +241,41 @@ def _score_adapter_result(adapter_result: Dict[str, Any],
 
 # --- Hucre istatistigi -------------------------------------------------------
 
+#: Katalogda ve kayitta ailesi bulunamayan kati kaydin etiketi.
+SOLID_FAMILY_UNCLASSIFIED = "unclassified"
+
+
+def propellant_family_of(record: Dict[str, Any]) -> Optional[str]:
+    """Kati kaydin ITICI AILESI; kati olmayan kayitta None.
+
+    V307/KATI-DOGRULAMA karar 3: kati istatistigi itici ailesine gore AYRI
+    yayimlanir (tek karisik baslik sayisi yok). Farkli bilesimleri tek
+    hucrede birlestirmek genellenebilirligi oldugundan guclu gosterir:
+    KN-seker amator motorlari ile AN agirlikli aluminyumlu NASA BATES
+    kosulari ayni 'solid / isp' hucresine girmemelidir.
+
+    Sira: (1) kaydin acik beyani ``propellants.propellant_family``;
+    (2) ``hrma_propellant_key``in merkezi katalogdaki ailesi
+    (``propellants_db``: 'sugar', 'composite', 'double_base'); (3)
+    ``SOLID_FAMILY_UNCLASSIFIED``. Aile UYDURULMAZ.
+    """
+    if record.get("motor_type") != "solid":
+        return None
+    prop = record.get("propellants") or {}
+    acik = prop.get("propellant_family")
+    if isinstance(acik, str) and acik.strip():
+        return acik.strip().lower()
+    anahtar = (prop.get("hrma_propellant_key") or prop.get("hrma_fuel_key")
+               or prop.get("fuel"))
+    if anahtar:
+        from hrma.data import propellants_db
+        kayit = propellants_db.get_propellant_safe(str(anahtar).lower())
+        aile = (kayit or {}).get("family")
+        if aile:
+            return str(aile)
+    return SOLID_FAMILY_UNCLASSIFIED
+
+
 def _campaign_key(record: Dict[str, Any]) -> str:
     """Kaydin bagimsiz-kampanya anahtari (F006).
 
@@ -447,6 +482,7 @@ def _aggregate(record_results: List[Dict[str, Any]]) -> Dict[str, Any]:
                 non_converged_entries.append({
                     "test_id": rr["test_id"],
                     "motor_type": rr["motor_type"],
+                    "propellant_family": rr.get("propellant_family"),
                     "quantity": quantity,
                     "error_pct": score["error_pct"],
                     "confidence": rr["confidence"],
@@ -472,7 +508,7 @@ def _aggregate(record_results: List[Dict[str, Any]]) -> Dict[str, Any]:
                 "measurement_u_pct": score.get("measurement_u_pct"),
                 "normalized_error": score.get("normalized_error"),
             }
-            key = (rr["motor_type"], quantity)
+            key = (rr["motor_type"], quantity, rr.get("propellant_family"))
             band = ("high_medium" if rr["confidence"] in MAIN_CONFIDENCE_LEVELS
                     else "low")
             if rr.get("out_of_scope"):
@@ -482,6 +518,7 @@ def _aggregate(record_results: List[Dict[str, Any]]) -> Dict[str, Any]:
                 out_of_scope_entries.append({
                     "test_id": rr["test_id"],
                     "motor_type": rr["motor_type"],
+                    "propellant_family": rr.get("propellant_family"),
                     "quantity": quantity,
                     "error_pct": score["error_pct"],
                     "confidence": rr["confidence"],
@@ -496,6 +533,7 @@ def _aggregate(record_results: List[Dict[str, Any]]) -> Dict[str, Any]:
                 anomaly_entries.append({
                     "test_id": rr["test_id"],
                     "motor_type": rr["motor_type"],
+                    "propellant_family": rr.get("propellant_family"),
                     "quantity": quantity,
                     "error_pct": score["error_pct"],
                     "confidence": rr["confidence"],
@@ -513,10 +551,13 @@ def _aggregate(record_results: List[Dict[str, Any]]) -> Dict[str, Any]:
     def _emit(groups: Dict[Any, List[Dict[str, Any]]], band: str
               ) -> List[Dict[str, Any]]:
         out = []
-        for (mt, q), entries in sorted(groups.items()):
+        for (mt, q, aile), entries in sorted(
+                groups.items(),
+                key=lambda kv: (kv[0][0], kv[0][1], kv[0][2] or "")):
             if all(e.get("_non_converged") for e in entries):
                 withheld.append({
                     "motor_type": mt, "quantity": q, "confidence_band": band,
+                    "propellant_family": aile,
                     "n": len(entries),
                     "reason": ("all scored runs failed the adapter's own "
                                "convergence criterion; cell verdict withheld "
@@ -524,12 +565,13 @@ def _aggregate(record_results: List[Dict[str, Any]]) -> Dict[str, Any]:
                 })
                 continue
             cell = _cell(mt, q, entries, band)
+            cell["propellant_family"] = aile
             # P10B2-06: hucrenin sayilari, kapsam-disi kayitlarin CIKARILMIS
             # olmasindan pay aliyorsa bu pay ADIYLA ve SAYIYLA yayimlanir.
             # Beyan degil OLCUM: alternatif istatistik gercek girislerden
             # hesaplanir, okur basligin bu secime ne kadar duyarli oldugunu
             # kendi gozuyle gorur.
-            disi = out_of_scope.get(((mt, q), band)) or []
+            disi = out_of_scope.get(((mt, q, aile), band)) or []
             if disi:
                 cell["n_out_of_scope"] = len(disi)
                 cell["out_of_scope_test_ids"] = sorted(
@@ -550,17 +592,20 @@ def _aggregate(record_results: List[Dict[str, Any]]) -> Dict[str, Any]:
     # okunurdu; oysa olculdu, sayilar duruyor ve model kapsami geregi
     # cikarildi. Adiyla, hata araligiyla ve gerekcesiyle geri cekilir.
     scope_withheld: List[Dict[str, Any]] = []
-    yayimlanan = {(c["motor_type"], c["quantity"], c["confidence_band"])
+    yayimlanan = {(c["motor_type"], c["quantity"],
+                   c.get("propellant_family"), c["confidence_band"])
                   for c in cells + low_cells}
-    for ((mt, q), band), disi in out_of_scope.items():
-        if (mt, q, band) in yayimlanan:
+    for ((mt, q, aile), band), disi in out_of_scope.items():
+        if (mt, q, aile, band) in yayimlanan:
             continue
         hatalar = [e["error_pct"] for e in disi]
         notlar = sorted({e.get("model_scope_note") for e in out_of_scope_entries
                          if e["motor_type"] == mt and e["quantity"] == q
+                         and e.get("propellant_family") == aile
                          and e.get("model_scope_note")})
         scope_withheld.append({
             "motor_type": mt,
+            "propellant_family": aile,
             "quantity": q,
             "confidence_band": band,
             "n": len(disi),
@@ -579,7 +624,8 @@ def _aggregate(record_results: List[Dict[str, Any]]) -> Dict[str, Any]:
     out_of_scope_entries.sort(key=lambda e: (e["test_id"], e["quantity"]))
     anomaly_entries.sort(key=lambda e: (e["test_id"], e["quantity"]))
     non_converged_entries.sort(key=lambda e: (e["test_id"], e["quantity"]))
-    withheld.sort(key=lambda c: (c["motor_type"], c["quantity"]))
+    withheld.sort(key=lambda c: (c["motor_type"], c["quantity"],
+                                 c.get("propellant_family") or ""))
     return {
         "cells": cells,
         "low_confidence_cells": low_cells,
@@ -651,6 +697,7 @@ def run_correlation(records: Optional[Iterable[Dict[str, Any]]] = None,
             "record_type": rec.get("record_type", "static_fire"),
             "confidence": rec.get("source", {}).get("confidence"),
             "campaign": _campaign_key(rec),  # F006
+            "propellant_family": propellant_family_of(rec),
             "quantity_flags": adapter_result.get("quantity_flags", {}),
             "anomaly": bool(rec.get("anomaly", {}).get("flag", False)),
             "anomaly_note": rec.get("anomaly", {}).get("note"),
@@ -763,6 +810,12 @@ def _is_single_observation(cell: Dict[str, Any]) -> bool:
     return int(cell.get("n", 0)) == 1
 
 
+def _motor_label(cell: Dict[str, Any]) -> str:
+    """Tablo satirinin motor etiketi: kati hucrede itici ailesiyle birlikte."""
+    aile = cell.get("propellant_family")
+    return f"{cell['motor_type']} [{aile}]" if aile else str(cell["motor_type"])
+
+
 def _cell_rows(cells: List[Dict[str, Any]]) -> List[str]:
     rows = []
     for cell in cells:
@@ -775,7 +828,7 @@ def _cell_rows(cells: List[Dict[str, Any]]) -> List[str]:
             medape = f"{cell['median_ape_pct']:.1f}"
             rms = f"{cell['rms_pct']:.1f}"
         rows.append(
-            f"| {cell['motor_type']} | {quantity} "
+            f"| {_motor_label(cell)} | {quantity} "
             f"| {cell['n']} ({cell['n_campaigns']}) "
             f"| {_fmt_pct(cell['bias_pct'])} "
             f"| {medape} "
@@ -795,7 +848,7 @@ def _cell_rows(cells: List[Dict[str, Any]]) -> List[str]:
                 ex_medape = f"{ex['median_ape_pct']:.1f}"
                 ex_rms = f"{ex['rms_pct']:.1f}"
             rows.append(
-                f"| {cell['motor_type']} | {ex_quantity} "
+                f"| {_motor_label(cell)} | {ex_quantity} "
                 f"| {ex['n']} ({ex['n_campaigns']}) "
                 f"| {_fmt_pct(ex['bias_pct'])} "
                 f"| {ex_medape} | {ex_rms} "
@@ -817,7 +870,7 @@ def _cell_rows(cells: List[Dict[str, Any]]) -> List[str]:
                 inc_medape = f"{inc['median_ape_pct']:.1f}"
                 inc_rms = f"{inc['rms_pct']:.1f}"
             rows.append(
-                f"| {cell['motor_type']} | {inc_quantity} "
+                f"| {_motor_label(cell)} | {inc_quantity} "
                 f"| {inc['n']} ({inc['n_campaigns']}) "
                 f"| {_fmt_pct(inc['bias_pct'])} "
                 f"| {inc_medape} | {inc_rms} "
@@ -882,7 +935,7 @@ def to_markdown(result: Dict[str, Any]) -> str:
         for cell in camp_cells:
             cs = cell["campaign_stats"]
             lines.append(
-                f"| {cell['motor_type']} | {cell['quantity']} "
+                f"| {_motor_label(cell)} | {cell['quantity']} "
                 f"| {cs['n_campaigns']} | {_fmt_pct(cs['bias_pct'])} "
                 f"| {cs['median_ape_pct']:.1f} |")
 
@@ -902,7 +955,7 @@ def to_markdown(result: Dict[str, Any]) -> str:
                   "| Motor | Quantity | Layer | N |", "|---|---|---|---|"]
         for cell in withheld:
             lines.append(
-                f"| {cell['motor_type']} | {cell['quantity']} "
+                f"| {_motor_label(cell)} | {cell['quantity']} "
                 f"| {cell['confidence_band']} | {cell['n']} |")
 
     non_conv = result["statistics"].get("non_converged_entries") or []
@@ -941,7 +994,7 @@ def to_markdown(result: Dict[str, Any]) -> str:
                   "|---|---|---|---|---|---|"]
         for cell in scope_withheld:
             lines.append(
-                f"| {cell['motor_type']} | {cell['quantity']} "
+                f"| {_motor_label(cell)} | {cell['quantity']} "
                 f"| {cell['confidence_band']} | {cell['n']} "
                 f"| {_fmt_pct(cell['error_pct_min'])} .. "
                 f"{_fmt_pct(cell['error_pct_max'])} "

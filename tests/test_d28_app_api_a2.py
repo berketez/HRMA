@@ -58,6 +58,9 @@ WALL = {'chamber_pressure': 40.0, 'chamber_temperature': 3000.0,
 
 GUVENLIK = {'chamber_pressure': 40.0, 'propellant_mass': 5.0,
             'chamber_diameter': 0.1, 'wall_thickness': 0.005,
+            # V307/GÜVERTE-ISIL kalem 4: oda sıcaklığı zorunlu (3000 K
+            # varsayılanı kalktı); eski örtük değer açık, sayılar bit-aynı.
+            'chamber_temperature': 3000.0,
             'motor_type': 'hybrid'}
 
 

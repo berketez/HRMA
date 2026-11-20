@@ -247,10 +247,16 @@ class TestOHD1611CalculateItkiEgrisi:
         # kalınlaşan cidar/ağırlaşan kuru kütleyle 5957,62 m verdi. Malzeme
         # burada sabitlenir; çapa ve tolerans DEĞİŞMEDİ (birebir döndüğü
         # ölçüldü — neden yalnız varsayılan).
+        # V307/ORTAM-TEK (19 Kas): tasarım ortamı da AÇIKÇA — hibrit
+        # sayfasının formunun gerçekten gönderdiği 1,01325 bar (ölçüldü:
+        # docs/scofield/raw/OH/V307/ortam-tek/olcum/form_ortam.json). Ortamsız
+        # istek yokluk varsayılanına düşüyordu (18 Kas'tan beri ISA; önce
+        # 1,0 bar) ve apoje çapası onunla kayıyordu.
         r = _sessiz(c.post, '/calculate', json={
             'thrust': 1000, 'burn_time': 10, 'of_ratio': 6.0,
             'chamber_pressure': 20.0, 'fuel_type': 'htpb',
-            'oxidizer_type': 'n2o', 'chamber_material': 'steel_4130'})
+            'oxidizer_type': 'n2o', 'chamber_material': 'steel_4130',
+            'atmospheric_pressure': 1.01325})
         assert r.status_code == 200
         return r.get_json()
 
@@ -468,7 +474,14 @@ class TestOHD1611CalculateItkiEgrisi:
         # kütlesi 1,5758018 -> 1,5760153 kg; impuls ve harcanan aynı. Kâhin:
         # ek tur ÖNCESİ kod (07553401a) yeni atıl kütleyle (vehicle_mass_dry)
         # 15904,956713423588 m — BİT-AYNI. Ölçüm olcum/d17_ullage/README.md.
-        assert apoje == pytest.approx(15904.956713423588,
+        # V307/ORTAM-TEK (19 Kas) — ÇAPA ÖLÇÜMLE YENİLENDİ: 15904,956713423588
+        # -> 15910,338333190808 m (+5,38 m). İstek tasarım ortamını artık
+        # açıkça 1,01325 bar gönderir (fikstür notu); çapa 1,0 bar yokluk
+        # varsayılanında ölçülmüştü. Kök ölçüldü (docs/scofield/raw/OH/V307/
+        # ortam-tek/olcum/k1_olcum.json 'd17_apoje'): açık 1,0 bar eski çapayı
+        # BİT-AYNI verir; ortamsız istek açık 1,01325 ile BİT-AYNI. Bekçinin
+        # sorusu DEĞİŞMEDİ; tolerans aynı.
+        assert apoje == pytest.approx(15910.338333190808,
                                       rel=capa_rel(1e-6, 1e-5))
         assert apoje != pytest.approx(5656.753349589398, rel=1e-6)
 

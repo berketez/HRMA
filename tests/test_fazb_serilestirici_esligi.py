@@ -451,7 +451,11 @@ SERILESTIRICILER: Tuple[Tuple[str, str, int, str], ...] = (
     # Defterin kendi kuralıyla (S1 satırındaki D16 örneği) adres kaydı
     # güncellendi: S2 473 -> 543, S4 184 -> 223. Eşik değil ADRES
     # güncellenir; iddianın gücü aynen durur. (Birleşme: S1 app-api a3, S2/S4 hibrit a1.)
-    ('S2', 'hrma/analysis/tank_blowdown.py', 543, 'N2OTankBlowdown._pack_state'),  # Z1: doyma tablosu 306->309 K uzadı, adres kaydı
+    # 3.0.7 (19 Kas, ana model): V307/CI-KIRMIZI (314afe3b1) tank_blowdown.py'de
+    # aynı büyüklüğün iki yolunu tek hesaba bağlarken tanımın üstüne 5 satır
+    # ekledi; adres 543 -> 548 (ölçüldü: akşam tam süpürmesi 7165b9acd).
+    # Yalnız ADRES güncellenir, iddia aynı.
+    ('S2', 'hrma/analysis/tank_blowdown.py', 548, 'N2OTankBlowdown._pack_state'),  # Z1: doyma tablosu 306->309 K uzadı, adres kaydı
     ('S3', 'hrma/stability/fuel_thermal.py', 123, 'ThermalProperty.as_dict'),
     ('S4', 'hrma/stability/response.py', 223, 'QSHODBand.as_dict'),
     ('S5', 'hrma/stability/bands.py', 103, 'QSHODBandRecord.as_dict'),
@@ -568,7 +572,13 @@ def test_s1_dusen_alanlar_defterin_saydigi_kadar():
     # satır listesi). Bekçi artık kusuru değil ONARIMI donduruyor: bir
     # dürüstlük alanı yeniden düşürülürse kırmızı verir.
     assert len(ic) == 20, f'iç hücre şekli değişmiş: {sorted(ic)}'
-    assert len(yayim) == 20, f'yayımlanan hücre şekli değişmiş: {sorted(yayim)}'
+    # V307 KATI-DOĞRULAMA karar 3 (16 Kas 2026): yayım 20 -> 21. Katı
+    # istatistiği itici ailesine göre ayrı yayımlandığı için hücre kimliğine
+    # ``propellant_family`` eklendi (katı dışı hücrede None). Düşen alan
+    # sayısı DEĞİŞMEDİ; eklenen alan koşucunun ``_emit`` adımında hücreye
+    # yazılır, buradaki elle kurulmuş iç hücre onu taşımaz.
+    assert len(yayim) == 21, f'yayımlanan hücre şekli değişmiş: {sorted(yayim)}'
+    assert 'propellant_family' in yayim and yayim['propellant_family'] is None
     assert len(rapor.dusen) == 3, rapor.metin()
     # Başka bir adla yaşayanlar düşülünce GERÇEKTEN kaybolan sayı çıkmalı.
     baska_adla_yasayan = sum(1 for i in S1_IZINLER
@@ -765,14 +775,22 @@ S2_IZINLER = (
          gerekce=('adımda teslim edilen oksitleyici debisi; blok aynı '
                   'büyüklüğü mdot_ox_kg_s serisi olarak yayımlıyor'),
          yasadigi_yer='mdot_ox_kg_s'),
+    # V307/ÇALKANTI-MOTOR (16 Kas): sıvı kolu artık yayımlanıyor — adım
+    # sınırlarında seri olarak ``oxidizer_inventory.liquid_mass_kg`` (+
+    # ``liquid_mass_time_s``, künyesi ``liquid_mass_basis``); çalkantı
+    # bağlantısının m_t'si. Ad farklı (tek adım değil seri) ve alt blokta
+    # olduğu için izin satırı KALIR; yaşam yeri gösterilir.
     Izin(alan='m_liquid',
-         gerekce=('tankın iç kütle defteri; blok kütle serisi yerine itki / '
-                  'toplam impuls / harcanan itici bütçesini yayımlıyor. '
-                  'Beyan taşımayan durum değişkeni.')),
+         gerekce=('tankın iç kütle defterinin sıvı kolu; blok onu adım '
+                  'sınırlarında SERİ olarak oxidizer_inventory altında '
+                  '(liquid_mass_time_s / liquid_mass_kg) yayımlıyor, tek '
+                  'adımın skaleri olarak değil.'),
+         yasadigi_yer='oxidizer_inventory'),
     Izin(alan='m_vapor',
-         gerekce=('tankın iç kütle defterinin buhar kolu; aynı gerekçe — '
-                  'blok kütle defterini değil enerji/itki bütçesini '
-                  'yayımlıyor, beyan taşımaz.')),
+         gerekce=('tankın iç kütle defterinin buhar kolu; blok buharı seri '
+                  'olarak yayımlamıyor — ateşleme ve son envanter '
+                  'oxidizer_inventory\'de (tank_initial_vapour_kg, '
+                  'tank_final_kg), beyan taşımaz.')),
     Izin(alan='phase',
          gerekce=('adımın sıvı/buhar fazı. B-4 ÖLÇÜMÜ eski gerekçeyi '
                   '("blok fazı end_event ile bildiriyor") ÇÜRÜTTÜ: '

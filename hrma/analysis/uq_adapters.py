@@ -43,6 +43,8 @@ from hrma.utils.input_guard import finite_number
 
 __all__ = [
     "CONTRACT_OUTPUTS",
+    "CONTRACT_OUTPUT_UNITS",
+    "output_unit",
     "UNMAPPED_PARAMS",
     "ZERO_CONTRACT_INFLUENCE",
     "WITHHELD_REASONS",
@@ -64,6 +66,31 @@ CONTRACT_OUTPUTS = {
     "solid": ("isp", "c_star", "max_pressure", "total_impulse"),
     "liquid": ("isp", "thrust", "c_star", "mdot_total"),
 }
+
+#: V307/GRAFİK-BİRİM (kalem 3) — kontrat çıktılarının BİRİMİ (tek kaynak;
+#: uç her çıktı bloğuna ``unit`` olarak yazar). Her satır fabrikanın okuduğu
+#: motor alanının KENDİ birimidir; sayı çevrilmez. ÖLÇÜLDÜ (örnek motorlar,
+#: ``docs/scofield/raw/OH/V307/grafik-birim/olcum/k3_birim.json``):
+#: hibrit ``chamber_pressure`` 30,0 (girdi bar), ``regression_rate_avg``
+#: 0,001172 (m/s; app.js raporu ×1000 ile mm/s basar); katı ``max_pressure``
+#: = max(``thrust_curve.pressure``), eğri bar (40,0007 ⟷ P_c 40 bar; çözücü
+#: ``pressure_bar`` yedeğini aynı diziye yazar); sıvı ``mdot_total`` =
+#: ``total_mass_flow`` kg/s (25 kN / (Isp·g0) = 10,0 kg/s).
+CONTRACT_OUTPUT_UNITS = {
+    "hybrid": {"isp": "s", "thrust": "N", "chamber_pressure": "bar",
+               "c_star": "m/s", "total_impulse": "N*s",
+               "regression_rate_avg": "m/s"},
+    "solid": {"isp": "s", "c_star": "m/s", "max_pressure": "bar",
+              "total_impulse": "N*s"},
+    "liquid": {"isp": "s", "thrust": "N", "c_star": "m/s",
+               "mdot_total": "kg/s"},
+}
+
+
+def output_unit(motor_type, key):
+    """Kontrat çıktısının birimi; tabloda yoksa ``None`` (uydurulmaz)."""
+    return CONTRACT_OUTPUT_UNITS.get(motor_type, {}).get(key)
+
 
 #: V306/SAYI (NR-5) — TASARIM HEDEFİ olan çıktılar: motor bu büyüklüğü
 #: girdiden alır ve debiyi ona göre boyutlandırır (hibrit
@@ -455,7 +482,8 @@ def make_hybrid_factory(inputs, track_performance=False):
     nominal değerlerle dolar ve örnek #0 aynı girişleri görür.
     """
     from hrma.engines.combustion_analysis import CombustionAnalyzer
-    from hrma.engines.hybrid_rocket_engine import HybridRocketEngine
+    from hrma.engines.hybrid_rocket_engine import (
+        HYBRID_DEFAULT_AMBIENT_BAR, HybridRocketEngine)
 
     data = dict(inputs or {})
     # app.py /calculate kurucu bloğu (aynı anahtarlar, aynı varsayılanlar).
@@ -465,7 +493,10 @@ def make_hybrid_factory(inputs, track_performance=False):
         total_impulse=data.get('total_impulse'),
         of_ratio=data.get('of_ratio', 1.0),
         chamber_pressure=data.get('chamber_pressure', 20.0),
-        atmospheric_pressure=data.get('atmospheric_pressure', 1.0),
+        # V307/TEK-TANIM kalem 6: isteğin ortamı; yoksa /calculate ile AYNI
+        # ad (ISA deniz seviyesi; eski kaynaksız 1,0 bar).
+        atmospheric_pressure=data.get('atmospheric_pressure',
+                                      HYBRID_DEFAULT_AMBIENT_BAR),
         chamber_temperature=data.get('chamber_temperature'),
         gamma=data.get('gamma', 1.25),
         gas_constant=data.get('gas_constant'),
@@ -786,6 +817,31 @@ def make_solid_factory(inputs, track_performance=False):
 
 # --- Sıvı --------------------------------------------------------------------
 
+def liquid_uq_isp(result):
+    """V307/GÜVERTE-ORTAM — sıvı belirsizlik çıktısının Isp'si: TASARIM
+    ORTAMININ Isp'si (itki çıktısı da o ortamın itkisidir).
+
+    ÖLÇÜLDÜ (docs/scofield/raw/OH/V307/guverte-ortam/olcum/ortam_once.json,
+    K2, nominal örnek): çıktı ``isp_sea_level`` okuyordu. 3.0.7'de deniz
+    seviyesi dışındaki tasarımda bu alan aynı lülenin GERÇEK deniz seviyesi
+    değeridir — vakum tasarımında (deniz seviyesinde yapışık, örnek sıvı
+    ε 12) çıktı 254,71 s (deniz seviyesi) basılıyordu, tasarımın kendi Isp'si
+    299,25 s (vakum); itki çıktısı ise 25 000 N vakum itkisiydi (iki ayrı
+    ortam yan yana). Nozul deniz seviyesinde ayrıksa (L3 ε 50) alan ``None``
+    ve çıktı listesinden SESSİZCE düşüyordu (yanıtta Isp kartı yok).
+
+    Kural: tasarım deniz seviyesindeyse (``design_ambient.is_sea_level`` True
+    ya da blok yok) AYNEN ``isp_sea_level`` okunur (deniz seviyesi tasarımı
+    bit-aynı); değilse ``isp_design_ambient`` (yanıtın başlık Isp'si). Ortamın
+    adı panelde, isteğin kendi tasarım ortamı alanlarından yazılır
+    (uncertainty_panel.js). Sayı türetilmez.
+    """
+    da = result.get('design_ambient') if isinstance(result, dict) else None
+    if isinstance(da, dict) and da.get('is_sea_level') is False:
+        return result.get('isp_design_ambient')
+    return result.get('isp_sea_level')
+
+
 def make_liquid_factory(inputs, track_performance=False):
     """/calculate_liquid kurucu bloğunu izleyen sıvı UQ fabrikası.
 
@@ -863,7 +919,7 @@ def make_liquid_factory(inputs, track_performance=False):
         result = engine.calculate_performance()
         _defteri_kaydet(factory, engine)
         resolved = {
-            'isp': result.get('isp_sea_level'),
+            'isp': liquid_uq_isp(result),
             'thrust': result.get('thrust'),
             'c_star': result.get('c_star'),
             'mdot_total': result.get('total_mass_flow'),

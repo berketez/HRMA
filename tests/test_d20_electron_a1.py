@@ -451,7 +451,13 @@ class TestP12aB409MotorAdi:
     def test_results_kolu_motor_name_veriyor(self):
         app = oku('hrma/app.py')
         i = app.index('def flight_vehicle()')
-        kol = app[i:i + 4000]
+        # 3.0.7 (17 Kas): sabit 4000 karakterlik pencere, FS-KÜÇÜK (vakum
+        # tasarımı adlı reddi, include_motor_result) ve UÇUŞ-GÖVDE eklemeleriyle
+        # 'project' dalını dışarıda bırakıyordu (ofset 4248). Pencere artık
+        # işlevin kendisi: bir sonraki üst düzey tanım ya da rota bezeyicisine kadar.
+        son = min((k for k in (app.find('\n@app.', i + 1), app.find('\ndef ', i + 1))
+                   if k != -1), default=len(app))
+        kol = app[i:son]
         res = kol[kol.index("if source == 'results'"):
                   kol.index("elif source == 'project'")]
         assert 'motor_name=' in res, (

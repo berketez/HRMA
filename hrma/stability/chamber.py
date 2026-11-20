@@ -261,7 +261,7 @@ def bulk_mode_zero_lag(burn_rate_exponent, tau_c_s=None):
                 'Solid-phase thermal lag is NOT modelled here: with it, '
                 'L*/chuffing instability is possible at n < 1 (< 150 Hz '
                 'band). Supplying propellant thermal diffusivity is an F2b '
-                'gate; no default is fabricated.'),
+                'gate; there is no default value.'),
             'nonlinear_behaviour':
                 STABILITY_NOT_MODELLED['nonlinear_behaviour'],
         },

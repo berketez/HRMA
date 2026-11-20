@@ -579,7 +579,7 @@ def size_igniter(*,
                     'the safe delay; the term is not small - 1 bar at '
                     '293 K reaching 3400 K at constant volume is 11.6 bar '
                     'on its own. No value was substituted, because a '
-                    'fabricated purge state would read as a measurement.'),
+                    'substituted purge state would read as a measurement.'),
             }
         try:
             t_max = safe_ignition_window_s(

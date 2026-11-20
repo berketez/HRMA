@@ -155,8 +155,13 @@ class TestP16B214KasaCidarKapisi:
         #   V301/N-CEA-2: termokimya motorun Pc'sinde CEA'dan, boyutlanan
         #     tane 124,134 -> 124,453 mm (× 0,99752).
         # Kanıt: docs/scofield/raw/OH/V301/kati-sivi/K-D/capa_olcum.json.
-        for t_mm, beklenen_sf in ((2.4, 2.33548899546175),
-                                  (49.9, 48.558708697308894)):
+        # V307 KATI-DOĞRULAMA faz 3 (B1, 16 Kas 2026): 2,33548899546175 / 48,558708697308894
+        # -> 2,3228447660418508 / 48,295814093953474 (iki SF de AYNI 0,99459
+        # çarpanıyla kaydı). Yük hedef itkilidir; iki fazlı nozul kaybı
+        # (%3,40) artık uygulandığı için boyutlandırma aynı itki için taneyi
+        # büyütüyor (kasa Ø 125,15 mm), hoop yarıçapı arttı. Tolerans aynı.
+        for t_mm, beklenen_sf in ((2.4, 2.3228447660418508),
+                                  (49.9, 48.295814093953474)):
             r, g = _kati_iste(C, case_thickness=t_mm)
             assert r.status_code == 200, 'meşru cidar %g reddedildi' % t_mm
             ca = _case_analizi(g)

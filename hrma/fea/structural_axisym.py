@@ -1223,7 +1223,7 @@ def solve_linear(mesh: AxisymMesh,
             f"inner_pressure = {_p_ref(inner_pressure):g} Pa, outer_pressure = "
             f"{float(outer_pressure):g} Pa). akma/0 sonlu bir emniyet "
             "katsayısı vermez; 'sonsuz' yayımlamak hem geçersiz JSON "
-            "(Infinity) üretir hem de yüksüz bir koşumdan uydurma emniyet "
+            "(Infinity) üretir hem de yüksüz bir koşumdan anlamsız bir emniyet "
             "payı okutur (P8B1-07). safety_factor_nodal alanı gerilmesiz "
             "düğümlerde inf taşır ve bu sayı aşağıdaki sayaçla beyan "
             "edilir.")

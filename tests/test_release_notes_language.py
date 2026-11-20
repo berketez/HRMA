@@ -60,6 +60,8 @@ I18N_JS = os.path.join(STATIC_JS, 'i18n.js')
 I18N_COMMON_JS = os.path.join(STATIC_JS, 'i18n_common.js')
 
 TR_LETTERS = re.compile(r'[çğıİöşüÇĞÖŞÜ]')
+#: EN özel adları (ör. 'Türkiye') tek tanımda: tests/support/yedek_dili.py
+from tests.support.yedek_dili import en_metinde_turkce_harf as _tr_harf  # noqa: E402
 MARKER = re.compile(r'<!--\s*HRMA-LANG:([a-z]{2})\s*-->', re.I)
 
 #: ÖH D24 / OH-D23-11 (b): bu kapı MODÜL düzeyindeydi
@@ -109,7 +111,7 @@ def test_yayin_notu_iki_dilli_kaynak_olarak_okunabiliyor():
     """Testlerin dayandığı gerçek veri gerçekten iki dilli olmalı."""
     assert set(BOLUM) == {'en', 'tr'}, (
         'yayın notunda iki dil imi yok: %s' % sorted(BOLUM))
-    assert not TR_LETTERS.search(BOLUM['en']), 'EN bölümünde Türkçe harf var'
+    assert not _tr_harf(BOLUM['en']), 'EN bölümünde Türkçe harf var'
     assert len(TR_LETTERS.findall(BOLUM['tr'])) >= 3, 'TR bölümü Türkçe değil'
 
 
@@ -453,7 +455,7 @@ def test_imsiz_iki_dilli_govdede_de_turkce_secilir():
 def test_imsiz_govdede_ingilizce_arayuz_ingilizce_gorur():
     sonuc = _pencereyi_ac(_bilgi(notes=IMSIZ, source='page'), 'en')
     notlar = sonuc['notlar']
-    assert not TR_LETTERS.search(notlar), (
+    assert not _tr_harf(notlar), (
         'İngilizce arayüzde Türkçe bölüm sızdı:\n%s' % notlar[:400])
 
 

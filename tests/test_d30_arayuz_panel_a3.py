@@ -705,5 +705,8 @@ class TestP12bB4_15ProjeYuklemeGerekcesi:
 
     def test_ornek_arac_kunyesi_duruyor(self, launch_site):
         govde = islev_govdesi(launch_site, 'loadProjectVehicle')
-        assert govde.count("'site.projectLoadFailed'") == 2, (
+        # V307/ONARIM2-FS-EKRAN (M7-FS-15): künye nedeniyle birlikte notun
+        # kendisinde; anahtar projeYuklenemediNotu'nda (iki dal da onu kurar).
+        assert govde.count('applyVehicle(null, projeYuklenemediNotu(') == 2, (
             'ornek araca dusus kunyesiz kaldi')
+        assert "'site.projectLoadFailed'" in islev_govdesi(launch_site, 'projeYuklenemediNotu')

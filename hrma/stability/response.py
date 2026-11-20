@@ -380,7 +380,7 @@ def critical_response_real(damping_total_1_s, response_gain_1_s):
             'The supplied damping budget is not a net loss (sum >= 0), so no '
             'finite critical response exists: the mode is already being '
             'driven by the terms in the budget itself. No threshold is '
-            'fabricated.')
+            'published.')
     else:
         r_crit = -total / gain
         note = (

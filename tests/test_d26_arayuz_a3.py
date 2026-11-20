@@ -343,9 +343,15 @@ class TestYapisalPanelHukumleri:
         assert 'VERDICT WITHHELD' in r['text']
 
     def test_p11b4_02_gerekce_ekranda(self):
+        # V307/DİL-EKRAN-2 (ÖK-22 kararı, 18 Kas): gerekçe artık makine kodu
+        # ('stations_not_verified') değil okunur cümleyle basılıyor; kod
+        # 3.0.6'da sözlükte olmadığı için HAM iniyordu. Ölçülen olgu aynı:
+        # hüküm geri çekildiğinde gerekçe ekranda.
         r = self._render(_yapisal_yuk())
-        assert 'stations_not_verified' in r['html'], (
+        assert 'Some stations were not verified' in r['text'], (
             'hüküm geri çekildi ama gerekçe hiç basılmıyor')
+        assert 'stations_not_verified' not in r['text'], (
+            'gerekçe makine adıyla basılıyor')
 
     def test_p11b4_02_hukum_verildiginde_ISSUED_geri_gelir(self):
         """Ölçüt gevşetilmedi: gerçek hüküm hâlâ ISSUED basılır."""
@@ -357,7 +363,9 @@ class TestYapisalPanelHukumleri:
         html = r['html']
         rozetler = re.findall(
             r'color:(var\(--hd-[a-z]+)[^;]*;[^<]*"[^>]*>\s*'
-            r'(STRUCTURE|RISK): NOT_EVALUATED', html)
+            # V307/DİL-EKRAN (NK3-H-4): rozet ham kod yerine hüküm sözcüğünü
+            # basar ('NOT_EVALUATED' → 'NOT EVALUATED'); ölçülen aynı olgu.
+            r'(STRUCTURE|RISK): NOT EVALUATED', html)
         renkler = {ad: renk for renk, ad in rozetler}
         assert set(renkler) == {'STRUCTURE', 'RISK'}, (
             'iki rozet de basılmalı: %r' % (rozetler,))

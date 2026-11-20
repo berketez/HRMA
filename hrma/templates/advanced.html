@@ -6,6 +6,12 @@
     <!-- Yükleme bayt tavanları (app.py inject_upload_limits; import_ui.js okur;
          V3 güvenlik 5. tur): sayı JS'e kopyalanmaz. -->
     <meta name="hrma-upload-limits" content='{{ upload_limits|tojson }}'>
+    <!-- V307/GÜVERTE-ISIL: ısıl koruma sekmesinin kip başına zorunlu alanları
+         = ucun kapısı (app.py thermal_protection_form_contract); protection_panel.js okur. -->
+    <meta name="hrma-tp-mode-required" content='{{ tp_mode_required|tojson }}'>
+    <!-- V307/KÜÇÜKLER (kalem 6): güvenlik panelinin zorunlu alan kümesi = ucun
+         kapısı (app.py SAFETY_REQUIRED_FIELDS); safety_panel.js okur. -->
+    <meta name="hrma-safety-required" content='{{ safety_required|tojson }}'>
     <!-- V306/HİBRİT-SAYI (kalem 7): formun kabul bantları = sunucunun bandı
          (app.py _hibrit_form_bantlari ← CANONICAL_LIMITS); sayı JS'e kopyalanmaz. -->
     <meta name="hrma-hybrid-input-limits" content='{{ hybrid_input_limits|tojson }}'>
@@ -847,6 +853,8 @@
          (FEED SYSTEM: slosh / pressurant / water hammer) -->
     <script src="/static/js/panels/cooling_panel.js"></script>
     <script src="/static/js/panels/feed_panel.js"></script>
+    <!-- 3.0.7 K5: tank çalkantı modeli bölümü (Besleme → Çalkantı) -->
+    <script src="/static/js/calkanti_panel.js"></script>
     <!-- COMPARE paneli: snapshot tabanlı konfigürasyon karşılaştırması -->
     <script src="/static/js/panels/comparative_panel.js"></script>
     <!-- v2.5.0 G3 panelleri: Monte Carlo belirsizlik (UNCERTAINTY)
@@ -1303,7 +1311,7 @@
                             <span data-i18n="adv.label.altitudeM">Altitude (m)</span> <span class="unit" data-i18n="adv.unit.aboveSeaLevel">above sea level</span>
                             <div class="tooltip">
                                 <div class="tooltip-icon">?</div>
-                                <span class="tooltip-text" data-i18n="adv.tip.altitudeM">Altitude of the design point above sea level (m). It fills the ambient pressure field below with the ISA 1976 pressure of that altitude; that pressure is the nozzle back pressure, so it changes thrust, C_F and Isp (a lower ambient pressure gives a higher Isp). Form range 0-50000 m.</span>
+                                <span class="tooltip-text" data-i18n="adv.tip.altitudeM">Altitude of the design point above sea level, in m (geometric altitude). It fills the ambient pressure field below with the ISA 1976 pressure of that altitude; that pressure is the nozzle back pressure, so it changes thrust, C_F and Isp (a lower ambient pressure gives a higher Isp). Form range 0-50000 m.</span>
                             </div>
                         </label>
                         <input type="number" id="single_altitude" value="0" min="0" max="50000" onchange="updateSinglePressure()">
@@ -1314,10 +1322,10 @@
                             <span data-i18n="adv.label.ambientPressureBar">Ambient Pressure (bar)</span> <span class="unit" id="single_pressure_mode" data-i18n="adv.unit.usStandardAtmosphere1976">US Standard Atmosphere 1976</span>
                             <div class="tooltip">
                                 <div class="tooltip-icon">?</div>
-                                <span class="tooltip-text" data-i18n="adv.tip.ambientPressureBar">Computed from altitude using the US Standard Atmosphere 1976 model (ISA). You can also type your launch site's measured barometric pressure directly — the field then switches to site-specific mode until the altitude is changed again.</span>
+                                <span class="tooltip-text" data-i18n="adv.tip.ambientPressureBar">Design ambient pressure, in bar: the nozzle back pressure at which the thrust you enter is produced, so it changes thrust, C_F and Isp. Computed from altitude using the US Standard Atmosphere 1976 model (ISA). You can also type your launch site's measured barometric pressure directly — the field then switches to site-specific mode until the altitude is changed again. Empty: the ISA pressure of the altitude above is used; if the altitude is empty too, Calculate stops and names this field (no value is assumed). Form range 0-1.2 bar.</span>
                             </div>
                         </label>
-                        <input type="number" id="single_pressure" value="1.013" step="0.001" min="0" max="1.2"
+                        <input type="number" id="single_pressure" step="0.001" min="0" max="1.2"
                                oninput="markPressureCustom()">
                         <div class="help-text" id="single_pressure_help" data-i18n="adv.help.autoFromAltitudeIsa">Auto from altitude (ISA 1976) — or enter your site's measured pressure</div>
                     </div>
@@ -1332,7 +1340,7 @@
                                 <span data-i18n="adv.label.initialAltitudeM">Initial Altitude (m)</span>
                                 <div class="tooltip">
                                     <div class="tooltip-icon">?</div>
-                                    <span class="tooltip-text" data-i18n="adv.tip.initialAltitudeM">Start altitude of the altitude profile (m). The calculation runs at this altitude: its ISA 1976 ambient pressure is the nozzle back pressure, as in the single-altitude mode. Empty: 0 m. Form range 0-50000 m.</span>
+                                    <span class="tooltip-text" data-i18n="adv.tip.initialAltitudeM">Start altitude of the altitude profile above sea level, in m (geometric altitude). The motor is designed at this altitude: its ISA 1976 ambient pressure is the nozzle back pressure, as in the single-altitude mode. The Altitude Profile table shown after Calculate starts here. Empty: the request is not sent (no value is assumed). Form range 0-50000 m.</span>
                                 </div>
                             </label>
                             <input type="number" id="alt_start" value="0" min="0" max="50000">
@@ -1342,7 +1350,7 @@
                                 <span data-i18n="adv.label.finalAltitudeM">Final Altitude (m)</span>
                                 <div class="tooltip">
                                     <div class="tooltip-icon">?</div>
-                                    <span class="tooltip-text" data-i18n="adv.tip.finalAltitudeM">End altitude of the altitude profile (m). Only the Preview Profile chart uses it (ISA 1976 ambient pressure from the start to the end altitude); the calculation does not read it. Form range 0-50000 m.</span>
+                                    <span class="tooltip-text" data-i18n="adv.tip.finalAltitudeM">End altitude of the altitude profile above sea level, in m (geometric altitude). After Calculate, the Altitude Profile table evaluates the same nozzle (fixed geometry) from the start to this altitude: thrust and Isp at each point from the ISA 1976 ambient pressure. It does not change the motor design. Empty: the request is not sent. Form range 0-50000 m; it must differ from the start altitude.</span>
                                 </div>
                             </label>
                             <input type="number" id="alt_end" value="10000" min="0" max="50000">
@@ -1352,7 +1360,7 @@
                                 <span data-i18n="adv.label.numberPoints">Number of Points</span>
                                 <div class="tooltip">
                                     <div class="tooltip-icon">?</div>
-                                    <span class="tooltip-text" data-i18n="adv.tip.numberPoints">Number of points of the Preview Profile curve between the start and end altitude. The calculation does not read it. Form range 3-100.</span>
+                                    <span class="tooltip-text" data-i18n="adv.tip.numberPoints">Number of evenly spaced points of the Altitude Profile table (and of the Preview Profile curve) from the start to the end altitude. Empty: the request is not sent. Form range 3-100, whole number.</span>
                                 </div>
                             </label>
                             <input type="number" id="alt_points" value="10" min="3" max="100">
@@ -1515,11 +1523,22 @@
                         <span data-i18n="adv.label.initialPortDiameterMm">Initial Port Diameter (mm)</span> <span class="unit" data-i18n="adv.unit.0Auto">0 = auto</span>
                         <div class="tooltip">
                             <div class="tooltip-icon">?</div>
-                            <span class="tooltip-text" data-i18n="adv.tip.initialPortDiameterMm">Starting fuel grain port diameter. Drives initial oxidizer mass flux, regression rate and the whole thrust-time curve. Leave 0 to size the port automatically from the design mass flux (350 kg/m2.s, or the chamber Gox you enter under finite combustion).</span>
+                            <span class="tooltip-text" data-i18n="adv.tip.initialPortDiameterMm">Starting fuel grain port diameter. Drives initial oxidizer mass flux, regression rate and the whole thrust-time curve. Leave 0 to size the port automatically from the design mass flux (the Mass Flux field below; empty or 0 there: 350 kg/m²·s, HRMA choice).</span>
                         </div>
                     </label>
                     <input type="number" id="initial_port_diameter" value="0" step="1" min="0" max="500">
                     <div class="help-text" data-i18n="adv.help.overridesAutomaticPortSizing">Overrides automatic port sizing; directly changes the transient thrust curve</div>
+                </div>
+                <div class="form-group">
+                    <label for="mass_flux_chamber">
+                        <span data-i18n="adv.label.massFluxKgM">Mass Flux (kg/m²⋅s)</span> <span class="unit" data-i18n="adv.unit.goxChamber">initial port G_ox</span>
+                        <div class="tooltip">
+                            <div class="tooltip-icon">?</div>
+                            <span class="tooltip-text" data-i18n="adv.tip.massFluxKgM">Initial oxidizer mass flux in the fuel port, G_ox = ṁ_ox / A_port, in kg/m²·s, used in every combustion type. When no initial port diameter is given it sizes the port: A_port = ṁ_ox / G_ox (total over all ports); through the regression law ṙ = a·G_ox^n (the solver uses the oxidizer flux) it also sets the grain length. Empty or 0: 350 kg/m²·s is used (HRMA choice, not a measured value) and the result reports the design flux. If you give an initial port diameter this field is not used and the flux is derived from the port. Above 600 kg/m²·s a port flooding warning is raised (HRMA threshold). Form range 0-1000.</span>
+                        </div>
+                    </label>
+                    <input type="number" id="mass_flux_chamber" value="0" step="10" min="0" max="1000">
+                    <div class="help-text" data-i18n="adv.help.oxidizerMassFluxThrough">Initial oxidizer mass flux in the fuel port; it sizes the port when no initial port diameter is given (empty or 0: 350 kg/m²·s)</div>
                 </div>
                 <!-- ÖH D23 fix-20 — PORT SAYISI KAPISI. ÖH D22 app-api a1
                      (P7B1-05) alanı üç hibrit ucunda motora bağladı
@@ -1584,7 +1603,7 @@
                             <span class="tooltip-text" data-i18n="adv.tip.combustionType">Chamber model of the equilibrium solution. Infinite area: the chamber cross-section is treated as infinite, so the gas enters the nozzle at rest and the injector-face pressure is the nozzle stagnation pressure. Finite area: with a finite contraction ratio the gas is accelerated in the chamber by combustion and loses stagnation pressure (Rayleigh flow), so the nozzle inlet stagnation pressure is lower; it needs a contraction ratio or chamber mass flux. Neither option models mixing.</span>
                         </div>
                     </label>
-                    <select id="combustion_type" onchange="updateCombustionParams()">
+                    <select id="combustion_type">
                         <option value="infinite" data-i18n="adv.opt.infiniteAreaCombustion">Infinite Area Combustion</option>
                         <option value="finite" data-i18n="adv.opt.finiteAreaCombustion">Finite Area Combustion</option>
                     </select>
@@ -1638,35 +1657,27 @@
                     <input type="number" id="residual_web_thickness" step="0.1" min="0" placeholder="0">
                 </div>
                 
-                <!-- Finite Combustion Parameters -->
-                <div id="finite_combustion_params" style="display: none;">
-                    <div class="form-group">
-                        <label for="contraction_ratio">
-                            <span data-i18n="adv.label.contractionRatio">Contraction Ratio</span> <span class="unit" data-i18n="adv.unit.ac">Ac/At</span>
-                            <div class="tooltip">
-                                <div class="tooltip-icon">?</div>
-                                <span class="tooltip-text" data-i18n="adv.tip.contractionRatio">Contraction ratio A_c/A_t (chamber cross-section over throat area). A value above 1 is used as given; empty or 0 (any value up to 1): it is derived from the chamber geometry, (D_ch/d_t)². It sets the convergent cone length of the nozzle and, with the finite-area combustion type, the chamber Mach number and the injector-face to nozzle stagnation pressure ratio (isentropic area relation, Sutton and Biblarz Ch. 3). Below 2 a warning is raised. Form range 0-10; a value above 0 here clears and disables the mass flux.</span>
-                            </div>
-                        </label>
-                        <input type="number" id="contraction_ratio" step="0.1" min="0" max="10" 
-                               onchange="updateFiniteParams('contraction')" data-i18n-placeholder="adv.ph.serverDefaultApplies" placeholder="server default applies (declared)">
-                        <div class="help-text" data-i18n="adv.help.chamberAreaThroatArea">Chamber area to throat area ratio (leave 0 to calculate from mass flux)</div>
-                    </div>
-                    <div class="form-group">
-                        <label for="mass_flux_chamber">
-                            <span data-i18n="adv.label.massFluxKgM">Mass Flux (kg/m²⋅s)</span> <span class="unit" data-i18n="adv.unit.goxChamber">initial port G_ox</span>
-                            <div class="tooltip">
-                                <div class="tooltip-icon">?</div>
-                                <span class="tooltip-text" data-i18n="adv.tip.massFluxKgM">Initial oxidizer mass flux in the fuel port, G_ox = ṁ_ox / A_port, in kg/m²·s. When no initial port diameter is given it sizes the port: A_port = ṁ_ox / G_ox (total over all ports); through the regression law ṙ = a·G_ox^n (the solver uses the oxidizer flux) it also sets the grain length. Empty or 0: 350 kg/m²·s is used (HRMA choice, not a measured value) and the result reports the design flux. If you give an initial port diameter this field is not used and the flux is derived from the port. Above 600 kg/m²·s a port flooding warning is raised (HRMA threshold). Form range 0-1000; a value above 0 here clears and disables the contraction ratio.</span>
-                            </div>
-                        </label>
-                        <input type="number" id="mass_flux_chamber" value="0" step="10" min="0" max="1000"
-                               onchange="updateFiniteParams('mass_flux')">
-                        <div class="help-text" data-i18n="adv.help.oxidizerMassFluxThrough">Oxidizer mass flux through chamber (leave 0 to calculate from contraction ratio)</div>
-                    </div>
-                    <div style="margin-top: 10px; padding: 10px; background: var(--hd-inset, #0a1524); border-radius: 4px; font-size: 12px;">
-                        <strong data-i18n="adv.txt.note">Note:</strong> <span data-i18n="adv.txt.fillOnlyOneParameterOther">Fill only ONE parameter. The other will be calculated automatically.</span>
-                    </div>
+                <!-- V307/SEKME-MOTOR (DİL-HİBRİT §8.1): daralma oranı ve kütle
+                     akısı eskiden yalnız "sonlu alanlı" yanma tipinde
+                     görünüyordu (finite_combustion_params), ama sunucu ikisini
+                     de HER tipte okuyor: daralma oranı lülenin yakınsak
+                     konturunu (hybrid_rocket_engine._resolve_contraction_ratio
+                     -> design_nozzle), kütle akısı port boyutlandırmasını
+                     (initial_gox -> G_ox_design). Gizli alanın değeri yine
+                     gidiyordu; kullanıcı görmediği bir girdinin hesaba
+                     girdiğini bilemiyordu. İki alan artık her tipte görünür;
+                     aralarındaki "yalnız birini doldur" bağı sunucuda yok
+                     (biri port, öbürü lüle) ve kaldırıldı. -->
+                <div class="form-group">
+                    <label for="contraction_ratio">
+                        <span data-i18n="adv.label.contractionRatio">Contraction Ratio</span> <span class="unit" data-i18n="adv.unit.ac">Ac/At</span>
+                        <div class="tooltip">
+                            <div class="tooltip-icon">?</div>
+                            <span class="tooltip-text" data-i18n="adv.tip.contractionRatio">Contraction ratio A_c/A_t (chamber cross-section over throat area). A value above 1 is used as given; empty or 0 (any value up to 1): it is derived from the chamber geometry, (D_ch/d_t)². It sets the convergent cone length of the nozzle in every combustion type and, with the finite-area combustion type, also the chamber Mach number and the injector-face to nozzle stagnation pressure ratio (isentropic area relation, Sutton and Biblarz Ch. 3). Below 2 a warning is raised. Form range 0-10.</span>
+                        </div>
+                    </label>
+                    <input type="number" id="contraction_ratio" step="0.1" min="0" max="10" data-i18n-placeholder="adv.ph.serverDefaultApplies" placeholder="server default applies (declared)">
+                    <div class="help-text" data-i18n="adv.help.chamberAreaThroatArea">Chamber area to throat area ratio (empty or 0: derived from the chamber geometry)</div>
                 </div>
             </div>
         </div>
@@ -2126,10 +2137,10 @@
                         <span data-i18n="adv.label.injectorMaterial">Injector Material</span>
                         <div class="tooltip">
                             <div class="tooltip-icon">?</div>
-                            <span class="tooltip-text" data-i18n="adv.tip.injectorMaterial">Material of the injector plate. Used only in the injector plate structural check: a clamped circular plate (Roark Table 11.2, case 10b) with ASME PG-52 ligament efficiency gives the bending stress, the safety factor and the required thickness from the room-temperature yield strength, and the plate mass from the density. With no material selected the plate check is not run.</span>
+                            <span class="tooltip-text" data-i18n="adv.tip.injectorMaterial">Material of the injector plate. Used only in the injector plate structural check: a clamped circular plate (Roark Table 11.2, case 10b) with ASME PG-52 ligament efficiency gives the bending stress, the safety factor and the required thickness from the room-temperature yield strength, and the plate mass from the density. Two load cases: operating (the injector pressure drop) and start/shutdown (the absolute feed pressure just upstream of the plate, chamber pressure + injector pressure drop, against vacuum, while the chamber is not pressurised; Huzel and Huang, NASA SP-125, p. 129); the verdict is the lower safety factor of the two. The start/shutdown load is a quasi-static upper bound that excludes pressure surges. Water hammer, dynamic amplification, thermal stress and fatigue are not modelled. With no material selected the plate check is not run.</span>
                         </div>
                     </label>
-                    <select id="injector_material" class="form-control" autocomplete="off" title="Material of the injector plate. Used only in the injector plate structural check: a clamped circular plate (Roark Table 11.2, case 10b) with ASME PG-52 ligament efficiency gives the bending stress, the safety factor and the required thickness from the room-temperature yield strength, and the plate mass from the density. With no material selected the plate check is not run." data-i18n-title="adv.tip.injectorMaterial">{{ malzeme_secenekleri(hybrid_materials.injector_material, hybrid_materials.injector_material.default_value, true) }}</select>
+                    <select id="injector_material" class="form-control" autocomplete="off" title="Material of the injector plate. Used only in the injector plate structural check: a clamped circular plate (Roark Table 11.2, case 10b) with ASME PG-52 ligament efficiency gives the bending stress, the safety factor and the required thickness from the room-temperature yield strength, and the plate mass from the density. Two load cases: operating (the injector pressure drop) and start/shutdown (the absolute feed pressure just upstream of the plate, chamber pressure + injector pressure drop, against vacuum, while the chamber is not pressurised; Huzel and Huang, NASA SP-125, p. 129); the verdict is the lower safety factor of the two. The start/shutdown load is a quasi-static upper bound that excludes pressure surges. Water hammer, dynamic amplification, thermal stress and fatigue are not modelled. With no material selected the plate check is not run." data-i18n-title="adv.tip.injectorMaterial">{{ malzeme_secenekleri(hybrid_materials.injector_material, hybrid_materials.injector_material.default_value, true) }}</select>
                     <div id="injector_material_props" class="help-text hrma-mat-props" style="line-height: 1.45;"></div>
                     <div id="injector_material_send" class="help-text hrma-mat-send" style="font-family: var(--hd-mono, monospace); font-size: 0.72rem;"></div>
                 </div>
@@ -2336,7 +2347,7 @@
                             <span data-i18n="adv.label.finalMassKg">Final Mass (kg)</span>
                             <div class="tooltip">
                                 <div class="tooltip-icon">?</div>
-                                <span class="tooltip-text" data-i18n="adv.tip.finalMassKg">Vehicle mass after propellant consumption (dry mass + payload). Avionics, wiring and the recovery system belong in this mass: the engine dry (flying inert) mass does not contain them.</span>
+                                <span class="tooltip-text" data-i18n="adv.tip.finalMassKg">Vehicle mass after propellant consumption (dry mass + payload). Avionics, wiring and the recovery system belong in this mass: the engine dry (flying inert) mass does not contain them. The Dry Mass field of the 6-DOF panel is filled with this value; that panel has a separate Payload Mass field, so do not enter the payload in both places.</span>
                             </div>
                         </label>
                         <input type="number" id="final_mass" value="25" min="1" max="10000" step="0.1">
@@ -2658,6 +2669,19 @@
                      Backend bunları üretiyordu ama hibrit sayfası çizmiyordu.
                      Paneller display:none başlar; app.js renderOptionalPlot()
                      yalnız veri geldiğinde açar (boş kutu bırakılmaz). -->
+                <!-- V307/SEKME-MOTOR (DİL-HİBRİT §8.2): "İrtifa Profili" sekmesinin
+                     sonucu. Yalnız profil kipinde hesaplanınca görünür; satırlar
+                     sunucunun motor.altitude_profile_performance bloğundan
+                     (hrma/analysis/altitude_performance.py). Veri yoksa panel
+                     gizli; hesaplanmadıysa nedeni yazılır. -->
+                <div class="panel" id="altitudeProfilePanel" style="width: 100%; display: none;">
+                    <h2 data-i18n="adv.sec.altitudeProfileResult">Altitude Profile</h2>
+                    <div class="chart-explanation">
+                        <p><span data-i18n="adv.txt.altitudeProfileWhat">This motor's nozzle (fixed geometry, designed at the start altitude) evaluated at each altitude of the profile: F(h) = F_design + (p_design - p_a(h)) · A_e and Isp = F / (ṁ · g0), with the ISA 1976 ambient pressure. Rows where the motor's own flow-separation criterion (Summerfield) predicts separation publish no thrust or Isp.</span></p>
+                    </div>
+                    <div id="altitude_profile_table"></div>
+                </div>
+
                 <div class="panel" id="altitudePerformancePanel" style="width: 100%; display: none;">
                     <h2 data-i18n="adv.sec.altitudePerformance">Altitude Performance</h2>
                     <div class="chart-explanation">
@@ -2665,7 +2689,7 @@
                         <ul>
                             <li><strong data-i18n="adv.txt.specificImpulseVsAltitude">Specific Impulse vs Altitude:</strong> <span data-i18n="adv.txt.ispSRisesAsBack">Isp (s) rises as back pressure falls</span></li>
                             <li><strong data-i18n="adv.txt.thrustVsAltitude">Thrust vs Altitude:</strong> <span data-i18n="adv.txt.thrustNSameChamberConditions">Thrust (N) at the same chamber conditions</span></li>
-                            <li><strong data-i18n="adv.txt.thrustCoefficientVsAltitude">Thrust Coefficient vs Altitude:</strong> <span data-i18n="adv.txt.cfPureNozzleContribution">Cf, the pure nozzle contribution</span></li>
+                            <li><strong data-i18n="adv.txt.thrustCoefficientVsAltitude">Thrust Coefficient vs Altitude:</strong> <span data-i18n="adv.txt.cfPureNozzleContribution">Cf, the pure nozzle contribution</span><!-- V307/ORTAM-TEK kalem 5 (ana model KARAR (a), 18 Kas): CF tanımı; ortak ipucu bileşeninin biçimi (field_help.js HRMAHelp.html) --><span class="tooltip hrma-help"><span class="tooltip-icon" tabindex="0" role="button" aria-label="?" aria-describedby="cfAltitudeDefinitionTip">?</span><span class="tooltip-text" role="tooltip" data-i18n="adv.tip.cfAltitudeDefinition" id="cfAltitudeDefinitionTip">Thrust coefficient (dimensionless), the same definition as the motor headline value: CF = F / (CD · Pc · At), referred to the effective throat area CD · At (CD = 0.98, the discharge coefficient that sizes the throat; equivalently F / (ṁ · c*)). The headline value is the lossless CF (Sutton & Biblarz, Eq. 3-30, divergence on the momentum term) times the friction, two-phase and kinetic efficiencies. The nozzle is fixed, so Pc and At do not change with altitude and CF(h) = CF,design · F(h) / F,design, where F(h) = F,design + (p,design − pa(h)) · Ae. Referred to the geometric throat area alone the same quantity would be 0.98 times this value. This is a result, not an input.</span></span></li>
                             <li><strong data-i18n="adv.txt.atmosphericPressureVsAltitude">Atmospheric Pressure vs Altitude:</strong> <span data-i18n="adv.txt.ambientPressureBarUsedBy">Ambient pressure (bar) used by the model</span></li>
                             <li><strong data-i18n="adv.txt.readingIt">Reading it:</strong> <span data-i18n="adv.txt.theGapBetweenSeaLevel">The gap between sea-level and vacuum values shows how much the fixed expansion ratio costs off design</span></li>
                         </ul>
@@ -3401,9 +3425,10 @@
         // bu sapan sayıyı alana YAZIYOR, profil kipinde de uca gönderiliyor.
         //
         // TEK KAYNAK: katman tablosu ve sabitler hrma/constants.py'deki
-        // ISA_LAYERS / G_0 / M_AIR / R_STAR_ICAO / ISA_TABLE_TOP_M ile
-        // BİREBİR aynıdır ve bekçi (test_d15_sablonlar_a2.py) iki tarafı
-        // sayı sayı çaprazlar: ayrışırlarsa test kırmızı olur. Formüller
+        // ISA_LAYERS / G_0 / M_AIR / R_STAR_ICAO / ISA_TABLE_TOP_M /
+        // ISA_GEOPOTENTIAL_EARTH_RADIUS_M ile BİREBİR aynıdır ve bekçi
+        // (test_d15_sablonlar_a2.py) iki tarafı sayı sayı çaprazlar:
+        // ayrışırlarsa test kırmızı olur. Formüller
         // US Std Atm 1976 Eq. 33a/33b:
         //   lapse != 0 : P = P_b * (T/T_b)^(-g0*M/(R*·L))
         //   lapse == 0 : P = P_b * exp(-g0*M*(h-h_b)/(R*·T_b))
@@ -3422,6 +3447,7 @@
         var ISA_G0_JS = 9.80665;
         var ISA_M_AIR_JS = 0.0289644;
         var ISA_R_STAR_JS = 8.31432;
+        var ISA_R0_JS = 6356766.0;   // USSA 1976 geopotansiyel dönüşüm yarıçapı r0 (m)
         var ISA_TABLE_TOP_M_JS = 84852.0;
 
         function _isaLayerJS(h) {
@@ -3454,11 +3480,19 @@
         }
 
         // Altitude to pressure conversion (US Standard Atmosphere 1976) [bar]
+        // V307/İRTİFA-TEK (ana model kararı, 16 Kas): form irtifası
+        // GEOMETRİKTİR (deniz seviyesinden yükseklik); katman tablosu
+        // geopotansiyel irtifayla tanımlı olduğundan H = h·r0/(r0 + h) ile
+        // çevrilir — sunucunun hrma.constants.isa_pressure_geometric'iyle
+        // aynı ifade, aynı işlem sırası. Önceden h tabloya doğrudan
+        // veriliyordu: 20 km'de basınç %1, 50 km'de %5 düşük (yörünge,
+        // irtifa tabloları ve İrtifa Profili ile çelişen tasarım ortamı).
         function altitudeToPressure(altitude) {
             var h = parseFloat(altitude);
             if (!isFinite(h)) return NaN;   // hüküm yoksa sayı uydurulmaz
             if (h < 0) h = 0;
-            return _isaPressurePaJS(h) / 1e5;
+            var H = h * ISA_R0_JS / (ISA_R0_JS + h);
+            return _isaPressurePaJS(H) / 1e5;
         }
 
         // Basınç alanı hangi modda: ISA hesabı mı, kullanıcının ölçtüğü saha
@@ -3490,14 +3524,17 @@
             const pressure = altitudeToPressure(altitude);
             pressureIsSiteSpecific = false;
             refreshPressureModeLabels();
-            document.getElementById('single_pressure').value = pressure.toFixed(6);
+            // V307/ONARIM-İTKİ-A (M7-ITKI-12): irtifa boşsa basınç da boş
+            // kalır (eskiden alana "NaN" yazılıyordu; tarayıcı reddediyor,
+            // alan boşalıyor, istek 1,013 bar'la gidiyordu).
+            document.getElementById('single_pressure').value =
+                Number.isFinite(pressure) ? pressure.toFixed(6) : '';
         }
 
 
 
         // Initialize combustion parameters visibility
         document.addEventListener('DOMContentLoaded', function() {
-            updateCombustionParams();
             updateOxidizerProperties(); // Initialize oxidizer form state
             
             // Add event listeners for thrust and burn time to auto-update calculated impulse
@@ -4264,7 +4301,7 @@
             if (cumle) html += _kacir(cumle) + '<br>';
             if (!kod && !cumle && !alanlar.length) {
                 html += _kacir(i18nText('adv.js.rejectNoReason',
-                    'The request was rejected but the endpoint returned no reason.'));
+                    'The request was rejected but the calculation returned no reason.'));
             }
             if (alanlar.length) {
                 html += '<strong>'
@@ -4297,7 +4334,7 @@
             }
             if (parcalar.length === 1) {
                 parcalar.push(i18nText('adv.js.rejectNoReason',
-                    'The request was rejected but the endpoint returned no reason.'));
+                    'The request was rejected but the calculation returned no reason.'));
             }
             return parcalar.join(' — ');
         }
@@ -4431,8 +4468,8 @@
                 densityInput.style.backgroundColor = 'var(--hd-inset, #0a1524)';
                 viscosityInput.style.backgroundColor = 'var(--hd-inset, #0a1524)';
                 showMessage(i18nText('adv.msg.customOxidizerUnsupported',
-                    'Custom oxidizer is not supported: no endpoint resolves '
-                    + 'its properties, so no density or viscosity is filled '
+                    'Custom oxidizer is not supported: HRMA has no property data '
+                    + 'for it, so no density or viscosity is filled '
                     + 'in. Pick a listed oxidizer.'), 'error');
                 setOxidizerSourceFailed(); // v3.0.1 K: kaynak satırı da sayı iddia etmez
                 return; // custom_unsupported — sayı UYDURULMAZ
@@ -4567,48 +4604,6 @@
                     + 'value is assumed here — the solver resolves the '
                     + 'property from its own database unless you type one.'),
                     'warning');
-            }
-        }
-
-        function updateCombustionParams() {
-            const combustionType = document.getElementById('combustion_type').value;
-            const finiteParams = document.getElementById('finite_combustion_params');
-            
-            if (combustionType === 'finite') {
-                finiteParams.style.display = 'block';
-            } else {
-                finiteParams.style.display = 'none';
-            }
-        }
-
-        function updateFiniteParams(changedParam) {
-            const contractionInput = document.getElementById('contraction_ratio');
-            const massFluxInput = document.getElementById('mass_flux_chamber');
-            
-            if (changedParam === 'contraction') {
-                const contractionValue = parseFloat(contractionInput.value);
-                if (contractionValue > 0) {
-                    // If contraction ratio is set, clear and disable mass flux
-                    massFluxInput.value = 0;
-                    massFluxInput.disabled = true;
-                    massFluxInput.style.opacity = '0.5';
-                } else {
-                    // If contraction ratio is cleared, enable mass flux
-                    massFluxInput.disabled = false;
-                    massFluxInput.style.opacity = '1';
-                }
-            } else if (changedParam === 'mass_flux') {
-                const massFluxValue = parseFloat(massFluxInput.value);
-                if (massFluxValue > 0) {
-                    // If mass flux is set, clear and disable contraction ratio
-                    contractionInput.value = 0;
-                    contractionInput.disabled = true;
-                    contractionInput.style.opacity = '0.5';
-                } else {
-                    // If mass flux is cleared, enable contraction ratio
-                    contractionInput.disabled = false;
-                    contractionInput.style.opacity = '1';
-                }
             }
         }
 
@@ -5411,21 +5406,59 @@
             // Get environment data
             const isProfileMode = document.getElementById('profile_env').classList.contains('active');
             let ambientPressure, altitudeProfile = null;
+            // V307/ONARIM-İTKİ-A (M7-ITKI-13): basınç tasarım irtifasından
+            // kurulduysa irtifa da gider; sunucu ortamı irtifanın adıyla
+            // yazar (yalnız basınç o irtifanın ISA basıncıysa).
+            let tasarimIrtifasi = null;
             
             if (isProfileMode) {
-                const altStart = parseFloat(document.getElementById('alt_start').value || 0);
-                const altEnd = parseFloat(document.getElementById('alt_end').value || 10000);
-                const points = parseInt(document.getElementById('alt_points').value || 10);
-                
+                // V307/SEKME-MOTOR (DİL-HİBRİT §8.2): sunucu profili artık
+                // okuyor ve irtifa tablosunu kuruyor. Boş alan eskiden
+                // `|| 0` / `|| 10000` / `|| 10` ile sessizce bir sayıya
+                // dönüyordu; artık null kalır ve validateFormData isteği
+                // alanın adıyla durdurur (değer varsayılmaz).
+                const profilSayisi = function (id) {
+                    const el = document.getElementById(id);
+                    const ham = String(el && el.value != null ? el.value : '').trim();
+                    if (ham === '') return null;
+                    const v = Number(ham);
+                    return Number.isFinite(v) ? v : null;
+                };
+                const altStart = profilSayisi('alt_start');
+                const altEnd = profilSayisi('alt_end');
+                const points = profilSayisi('alt_points');
+
                 altitudeProfile = {
                     start: altStart,
                     end: altEnd,
                     points: points
                 };
-                ambientPressure = altitudeToPressure(altStart); // Use start altitude for single calculation
+                // Tasarım ortamı = başlangıç irtifası (tek irtifa kipiyle aynı).
+                ambientPressure = (altStart === null) ? null : altitudeToPressure(altStart);
+                tasarimIrtifasi = altStart;
             } else {
                 // Single altitude mode - don't send altitude_profile
-                ambientPressure = parseFloat(document.getElementById('single_pressure').value || 1.013);
+                // V307/ONARIM-İTKİ-A (M7-ITKI-12): boş basınç alanı eskiden
+                // `|| 1.013` ile sessizce 1,013 bar'a dönüyordu (ISA deniz
+                // seviyesi 1,01325 değil; 0 m satırı manşetten ayrılıyordu).
+                // Artık sayı yazılmaz: basınç alanı boşsa irtifa alanının
+                // ISA 1976 basıncı (alanın kendi tanımı), o da boşsa null
+                // gider ve validateFormData isteği alanın adıyla durdurur.
+                const basincHam = String(document.getElementById('single_pressure').value || '').trim();
+                const irtifaHam = String(document.getElementById('single_altitude').value || '').trim();
+                if (basincHam !== '') {
+                    const v = Number(basincHam);
+                    ambientPressure = Number.isFinite(v) ? v : null;
+                } else if (irtifaHam !== '' && Number.isFinite(Number(irtifaHam))) {
+                    const v = altitudeToPressure(Number(irtifaHam));
+                    ambientPressure = Number.isFinite(v) ? v : null;
+                } else {
+                    ambientPressure = null;
+                }
+                if (!pressureIsSiteSpecific && irtifaHam !== ''
+                        && Number.isFinite(Number(irtifaHam)) && ambientPressure !== null) {
+                    tasarimIrtifasi = Number(irtifaHam);
+                }
                 // altitudeProfile stays null
             }
 
@@ -5450,6 +5483,12 @@
             // ÖH D32 · OH-D31-14: genişleme oranı okuması `data`dan ÖNCE
             // alınır ki negatifsizlik kıskacı yalnız GİRİLMİŞ değere uygulansın.
             const epsGirdi = numById('expansion_ratio');
+            // V307/ONARIM2-İTKİ (madde 4): iki alanın birim etiketi ve ipucu
+            // "0 = otomatik / boş ya da 0: çözücü hesaplar" der; 0 da boş gibi
+            // GÖVDEYE GİTMEZ. Gönderilen 0 sunucuda "formdan okunmayan girdi"
+            // uyarısı doğuruyordu (örnek projede iki UYARI satırı); sonuç aynı
+            // (çözücü kendi değerini çözer), uyarı yok.
+            const dchGirdi = numById('chamber_diameter_input');
 
             const data = {
                 // Motor info
@@ -5521,17 +5560,18 @@
                 // ÖH D32 · OH-D31-14: alan BOŞ ise anahtar hiç konmaz (aşağıdaki
                 // düşürme geçişi). Girilen değerin negatifsizlik kıskacı AYNEN
                 // korunur — bu onarım yalnız "girilmedi" hükmünü düzeltir.
-                expansion_ratio: (epsGirdi === null ? null : Math.max(0, epsGirdi)),
+                expansion_ratio: ((epsGirdi === null || epsGirdi === 0)
+                                  ? null : Math.max(0, epsGirdi)),
                 nozzle_type: document.getElementById('nozzle_type').value || 'conical',
                 combustion_type: document.getElementById('combustion_type').value || 'infinite',
                 // V301/H-PANEL (NK-15): boşsa anahtar GİTMEZ (aşağıdaki
                 // NUMBYID temizliği); sunucu kaynaklı varsayılanı beyan eder.
                 combustion_efficiency: numById('combustion_efficiency'),
-                chamber_diameter_input: numById('chamber_diameter_input'),
+                chamber_diameter_input: (dchGirdi === 0 ? null : dchGirdi),
                 
                 // Finite combustion parameters (only one should be > 0)
                 contraction_ratio: numById('contraction_ratio'),
-                mass_flux_chamber: parseFloat(document.getElementById('mass_flux_chamber')?.value || 0),
+                mass_flux_chamber: numById('mass_flux_chamber'),
                 
                 // Fuel
                 fuel_type: document.getElementById('fuel_type').value || 'htpb',
@@ -5826,7 +5866,10 @@
                 // V301/H-PANEL (NK-21/NK-72): boş itki/süre/impuls gönderilmez.
                 'thrust', 'burn_time', 'total_impulse',
                 'chamber_pressure', 'fuel_density', 'regression_a',
-                'regression_n'
+                'regression_n',
+                // V307/SEKME-MOTOR: kütle akısı boşsa gönderilmez (sunucu
+                // boşu 0 ile aynı okur: 350 kg/m²·s, ipucunda beyanlı).
+                'mass_flux_chamber'
             ];
             // v3.0.1 (kulvar T) — TANK BASINCI KAYNAĞI. Kullanıcı tank
             // basıncı kipinde ('user') kaynak beyanı ve sayı birlikte gider;
@@ -5930,6 +5973,11 @@
             if (altitudeProfile) {
                 data.altitude_profile = altitudeProfile;
             }
+            // V307/ONARIM-İTKİ-A (M7-ITKI-13): tasarım irtifası (yalnız
+            // basınç ondan kurulduysa; boşsa gövdeye girmez).
+            if (tasarimIrtifasi !== null && Number.isFinite(tasarimIrtifasi)) {
+                data.design_ambient_altitude_m = tasarimIrtifasi;
+            }
 
             return data;
         }
@@ -6005,8 +6053,22 @@
                     'Burn Time must be between {lo} and {hi} seconds'));
             }
             
+            // V307/SEKME-MOTOR (DİL-HİBRİT §8.2): irtifa profili alanları
+            // boşsa istek alanın adıyla durur (sunucu da adıyla reddeder).
+            if (data.altitude_profile) {
+                [['start', 'adv.label.initialAltitudeM', 'Initial Altitude (m)'],
+                 ['end', 'adv.label.finalAltitudeM', 'Final Altitude (m)'],
+                 ['points', 'adv.label.numberPoints', 'Number of Points']].forEach(function (a) {
+                    if (data.altitude_profile[a[0]] === null) {
+                        errors.push(i18nFmt('adv.js.altProfileEmpty',
+                            { label: i18nText(a[1], a[2]) },
+                            'Altitude profile: {label} is empty; the request was not sent (no value is assumed).'));
+                    }
+                });
+            }
+
             // Skip motor name pattern check - backend handles validation
-            
+
             return errors;
         }
 
@@ -6749,6 +6811,30 @@
                 ? window.I18N.t('flight.staleTrajectory', _bayatYedek) : _bayatYedek;
         }
 
+        // V307/S2-KALINTI (NK3-H-3) — "Promise hatası: … '_redrawFromAutoMarginCount'".
+        // ÖLÇÜLDÜ (docs/scofield/raw/OH/V307/s2-kalinti/h3_once.json): hibrit
+        // /calculate yörüngeyi (calculate_trajectory, varsayılan açık) AYNI
+        // yanıtta çiziyor; özgün displayCalculationResults Plotly.newPlot'u
+        // başlatır (asenkron adımları sürer) ve hemen ardından bu sarmalayıcı,
+        // önceki "Yörüngeyi Hesapla" çizimini sahip sanıp AYNI div'i
+        // Plotly.purge ediyordu. Plotly'nin bekleyen son adımı boşaltılmış
+        // div'in _fullLayout'unu okuyup TypeError atıyor, sayfanın
+        // unhandledrejection dinleyicisi bunu kırmızı ileti basıyordu; yeni
+        // motorun yörüngesi de "önceki yörünge temizlendi" diye siliniyordu.
+        // Yarış kökten kalkar: grafiği bu yanıt çizdiyse grafik bu hesabındır
+        // (sahibi güncellenir, purge YOK); temizlik yalnız yörünge çizmeyen
+        // yanıtta (onay kutusu kapalı / yörünge hesaplanamadı) yapılır — o
+        // durumda div'de bekleyen çizim yoktur.
+        function trajCizimSahibiniKur(results) {
+            var cr = window.currentResults;
+            if (results && cr === results && typeof yanitYorungeyiCizer === 'function'
+                    && yanitYorungeyiCizer(results.plots)) {
+                _hibYorungeCizimSonucu = results;
+                return;
+            }
+            trajBayatCizimiTemizle();
+        }
+
         function trajAraciEsitle() {
             trajKalkisKutlesiniEsitle();
             trajReferansAlaniDenetle();
@@ -6766,7 +6852,7 @@
             window.displayCalculationResults = function (results) {
                 var cikti = ozgun.apply(this, arguments);
                 try {
-                    trajBayatCizimiTemizle();
+                    trajCizimSahibiniKur(results);
                     trajAraciEsitle();
                 } catch (e) {
                     console.error('Trajectory vehicle sync failed:', e);
@@ -7610,11 +7696,14 @@
             document.getElementById('designConfigPanel').style.display = 'block';
             document.getElementById('generateCADBtn').disabled = false;
             document.getElementById('cadStatus').textContent = i18nText('adv.js.cadPanelOpened', 'Configuration panel opened - Ready to generate 3D model');
+            // V307/DİL-EKRAN (NK3-H-8): canlı dil geçişinde çevrilsin diye anahtar düğümde.
+            document.getElementById('cadStatus').setAttribute('data-i18n', 'adv.js.cadPanelOpened');
             showMessage(i18nText('adv.msg.designConfigurationPanelOpened', 'Design configuration panel opened'), 'info');
         }
 
         function resetCADStatus() {
             document.getElementById('cadStatus').textContent = i18nText('adv.js.cadReady', 'Ready for design generation');
+            document.getElementById('cadStatus').setAttribute('data-i18n', 'adv.js.cadReady');
             document.getElementById('generateCADBtn').disabled = false;
             document.getElementById('exportSTLBtn').disabled = true;
         }
@@ -7668,6 +7757,7 @@
 
             const durum = document.getElementById('cadStatus');
             if (durum) durum.textContent = i18nText('adv.js.cadGenerating', 'Generating full motor design...');
+            if (durum) durum.setAttribute('data-i18n', 'adv.js.cadGenerating');
 
             try {
                 // 3D simülasyon: geometri zaten currentResults.motor içinde,
@@ -7710,6 +7800,7 @@
                 if (!indir) {
                     if (durum) durum.textContent = i18nText('adv.js.cadDoneScene',
                         '3D model shown in the Motor Simulation panel.');
+                    if (durum) durum.setAttribute('data-i18n', 'adv.js.cadDoneScene');
                     return true;    // P12bB3-08
                 }
                 // STEP paketi: _downloadExport kendi iletisini basar (indirildi
@@ -7719,10 +7810,12 @@
                     durum.textContent = stepOk
                         ? i18nText('adv.js.cadDoneStep', '3D model shown in the Motor Simulation panel; STEP package (parametric solids) downloaded.')
                         : i18nText('adv.js.cadFailed', 'Design generation failed');
+                    durum.setAttribute('data-i18n', stepOk ? 'adv.js.cadDoneStep' : 'adv.js.cadFailed');
                 }
                 return stepOk;      // P12bB3-08
             } catch (error) {
                 if (durum) durum.textContent = i18nText('adv.js.cadFailed', 'Design generation failed');
+                if (durum) durum.setAttribute('data-i18n', 'adv.js.cadFailed');
                 showMessage(i18nText('adv.msg.errorGeneratingDesign', 'Error generating design: ') + error.message, 'error');
                 return false;   // P12bB3-08
             }

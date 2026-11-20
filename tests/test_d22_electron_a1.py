@@ -86,7 +86,12 @@ class TestUcusIrtifasiDatumu:
         html = oku('hrma/templates/launch_site.html')
         assert 's.altAgl != null ? s.altAgl : s.alt' in html, (
             'okuma satırı hâlâ deniz seviyesi irtifasını basıyor')
-        assert 's.apogeeAgl != null ? s.apogeeAgl : s.apogee' in html, (
+        # V307/ONARIM2-FS-EKRAN (M7-FS-1): tüm-çözüm özeti artık küre durumundan
+        # (s.apogeeAgl) değil çözümden (summary.apogee, `apogee_datum` saha
+        # üstü; deniz seviyesi bildirilirse saha rakımı düşülür) basılır.
+        i_oz = html.index('function ucusOzetiniBas(')
+        oz = html[i_oz:html.index('function cozumOlaylari(', i_oz)]
+        assert 'var a = num_(sm.apogee);' in oz and "sm.apogee_datum === 'mean_sea_level'" in oz, (
             'apoje satırı çözücüden farklı datumda')
         assert "site.altDatumTip" in html, (
             'deniz seviyesi karşılığı ekrandan tamamen kayboldu')

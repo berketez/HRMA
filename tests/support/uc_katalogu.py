@@ -596,6 +596,25 @@ KAYITLAR: Dict[str, UcKaydi] = {
         kaynak='tests/test_d19_termo_ucus_a1.py:180 (AST hasadi)',
         yuk=_YUKLER['/api/launch-site/resolve'],
     ),
+    # V307/FS-HARİTA-VERİ (6878ff9e1) — gerekçe ana modelin ölçüm kaydı
+    # docs/scofield/raw/OH/D31/fix34/a/post_uclari.json::v307_fs_harita_veri_farki.
+    '/api/map-packs/<pack_id>/cancel': UcKaydi(
+        yol='/api/map-packs/<pack_id>/cancel',
+        sinif='govdesiz',
+        gerekce=('V307/FS-HARİTA-VERİ: gövde okunmaz, paket kimliği yolda; '
+                 'yalnız süren bir harita paketi indirmesini iptal eder ve '
+                 'yarım dosyayı siler (indirme yokken adlı 409 '
+                 'not_downloading) — sarsılacak alan yok; bekçisi '
+                 'tests/test_v307_harita_paket.py'),
+    ),
+    '/api/map-packs/<pack_id>/download': UcKaydi(
+        yol='/api/map-packs/<pack_id>/download',
+        sinif='yan_etkili',
+        gerekce=('V307/FS-HARİTA-VERİ: kullanıcı onayıyla ({"consent": true}) '
+                 'harita paketini AĞDAN İNDİRİR ve diske yazar; ölçüm uğruna '
+                 'çağrılmaz. Onaysız gövde adlı 400 consent_required, ağa '
+                 'istek çıkmaz; bekçisi tests/test_v307_harita_paket.py'),
+    ),
     '/api/oxidizer-properties': UcKaydi(
         yol='/api/oxidizer-properties',
         sinif='olculebilir',
@@ -658,6 +677,27 @@ KAYITLAR: Dict[str, UcKaydi] = {
         sinif='olculebilir',
         kaynak='tests/test_wave4b_contract.py (canli kayit)',
         yuk=_YUKLER['/api/slosh-analysis'],
+    ),
+    # V307/ÇALKANTI-ARAYÜZ (9ca7e43b2) — gerekçe ana modelin ölçüm kaydı
+    # docs/scofield/raw/OH/D31/fix34/a/post_uclari.json::v307_calkanti_arayuz_farki.
+    '/api/slosh-analysis/export': UcKaydi(
+        yol='/api/slosh-analysis/export',
+        sinif='kataloglanmadi',
+        gerekce=('V307/ÇALKANTI-ARAYÜZ: taban yük tam bir ÇÖZÜLMÜŞ motor '
+                 'sonucu (tank_modeli.motor_sonucu) ister ve yanıt JSON sonuç '
+                 'değil dosya ekidir (CSV/JSON, Content-Disposition); sarsım '
+                 'matrisi yanıt yapraklarını ölçer. Saldırgan girdi kapsamı '
+                 'tests/test_calkanti_arayuz.py adlı testlerinde '
+                 '(TestDisaAktarim: bilinmeyen biçim/tablosuz tank adlı 400)'),
+    ),
+    '/api/slosh-analysis/tank-geometry': UcKaydi(
+        yol='/api/slosh-analysis/tank-geometry',
+        sinif='dosya_yuklemeli',
+        gerekce=('V307/ÇALKANTI-ARAYÜZ: gövde multipart tank geometrisi '
+                 'dosyasıdır (request.files; CSV/.xyz/PLY/STL/STEP, birim '
+                 'zorunlu); JSON alan sarsımı konusu değil. Kapıları '
+                 'tests/test_calkanti_arayuz.py adlı testlerinde (400/413/'
+                 '422, yol geçişi, geçici dizin silinmesi)'),
     ),
     # V306/HIZ (M-KATI-35): yükün n_samples'ı 8 → 20. Motor bandı
     # (SOLID_MC_SAMPLE_BAND = 20..2000) 8'i SESSİZCE 20'ye çıkarıyordu; uç

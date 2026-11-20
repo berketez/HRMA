@@ -347,6 +347,27 @@ def _gimbal_blok():
     return blok
 
 
+def _anlamli_blok():
+    """V307/KIRMIZI-A (16 Kas): gimbal kuvvet/moment satırları S2-KALINTI'dan
+    (bd7ec07f9, NK3-S-6) beri sayfanın anlamlı basamak kuralıyla basılır
+    (``liqAnlamliTxt`` → ``liqAnlamliOndalik`` → ``numTxt``). Tarayıcıda
+    üçü de sayfanın üst düzey işlevi (ölçüm: docs/scofield/raw/OH/V307/
+    kirmizi-a/once_gimbal_kunye.json — EN/TR tablo basıldı, hata 0); bu
+    koşum ise yalnız gimbal bloğunu kestiği için node 'liqAnlamliTxt is not
+    defined' ile düşüyordu (koşum eksiği, ürün değil). KOPYA YAZILMAZ: blok
+    şablondan kesilir (tests/test_d32_arayuz_panel_a1.py ile aynı sınır)."""
+    html = LIQUID.read_text(encoding='utf-8')
+    n = html.index('\n        function numTxt(')
+    num = html[n:html.index('\n        }\n', n) + len('\n        }\n')]
+    i = html.index('\n        const LIQ_ANLAMLI_BASAMAK')
+    j = html.index('\n        function liqAnlamliTxt(v, taban, unit)', i)
+    son = html.index('\n        }\n', j) + len('\n        }\n')
+    blok = html[i:son]
+    assert 'function liqAnlamliOndalik(v, taban)' in blok, (
+        'anlamlı basamak bloğu ayıklanamadı')
+    return num + blok
+
+
 HARNESS = r"""
 'use strict';
 const SPEC = __SPEC__;
@@ -382,6 +403,8 @@ global.fetch = function (url, opts) {
         json: function () { return Promise.resolve(r.body); }
     });
 };
+
+__ANLAMLI__
 
 __BLOCK__
 
@@ -422,7 +445,8 @@ def _panel_kos(tmp_path, alanlar, sonuclar, yanit=None, mutasyon=None):
             'response': yanit or {'status': 200, 'body': {}}}
     script = tmp_path / 'gimbal_kos.js'
     script.write_text(
-        HARNESS.replace('__SPEC__', json.dumps(spec)).replace('__BLOCK__', blok),
+        HARNESS.replace('__SPEC__', json.dumps(spec))
+        .replace('__ANLAMLI__', _anlamli_blok()).replace('__BLOCK__', blok),
         encoding='utf-8')
     proc = subprocess.run([NODE, str(script)], capture_output=True,
                           text=True, timeout=120)

@@ -25,6 +25,8 @@ import subprocess
 
 import pytest
 
+from tests.support.esikler import PLATFORM_GURULTU_TABANI_REL
+
 KOK = pathlib.Path(__file__).resolve().parents[1]
 ORNEK = KOK / 'examples' / 'Example Solid KNDX BATES 75mm.hrma'
 MOTOR = KOK / 'hrma' / 'engines' / 'solid_rocket_engine.py'
@@ -213,9 +215,17 @@ def test_k2_alt_sinir_asilinca_hukum_ve_adli_uyari(client):
 #: (aynı commit, yerel Darwin'de çapa bit-aynı). Tolerans YOK: her platform
 #: kendi ölçülmüş değerine birebir eşit olmalı; çapası olmayan platformda
 #: test adıyla KIRMIZI verir (sessiz atlama yok), değer ölçülüp eklenir.
+#: V307/CI-KIRMIZI (18 Kas): Linux çapası CI'ın SABİT hesap ortamının
+#: değeridir (``tools/ci_hesap_kunyesi.py`` ``SABIT_ORTAM``: OpenBLAS Zen,
+#: numpy AVX512 kapalı; prosedür §10.6 kural 9). Eski …1872 AVX512'li
+#: koşucunun (OpenBLAS Cooperlake) değeriydi; sabitsiz koşucuya göre
+#: değişiyordu. CI 44290629774 künyesi: sabitli değer 16/16 dilimde ve üç
+#: işlemci modelinde (AMD EPYC 7763, AMD EPYC 9V45, Intel Xeon 6975P-C)
+#: bit-aynı 0,005312855644371993 (``BELİRLENİMCİLİK TAMAM``); sabitsizde
+#: AVX512'li iki model …1872, EPYC 7763 …1993. Çapa sabitli ortama aittir.
 K2_KARTUS_FEA_CAPASI = {
     ('Darwin', 'arm64'): 0.5312855644370211,
-    ('Linux', 'x86_64'): 0.5312855644371872,
+    ('Linux', 'x86_64'): 0.5312855644371993,
 }
 
 
@@ -241,8 +251,21 @@ def test_k2_kartus_tane_fea_bit_ayni(client):
             contextlib.redirect_stderr(io.StringIO()):
         r = client.post('/api/fea/planar-grain', json=govde)
     assert r.status_code == 200
-    assert 100 * r.get_json()['fea']['scalars']['max_bore_strain'] == \
-        K2_KARTUS_FEA_CAPASI[anahtar]
+    olculen = 100 * r.get_json()['fea']['scalars']['max_bore_strain']
+    if anahtar == ('Darwin', 'arm64'):
+        # Referans platform: BİT-AYNI (belirlenimci, ölçüldü).
+        assert olculen == K2_KARTUS_FEA_CAPASI[anahtar]
+    else:
+        # 3.0.7 (19 Kas, ana model): Linux CI'da AYNI kod koşudan koşuya son
+        # basamaklarda ayrışıyor — ölçülen üç koşu: 0,5312855644371993
+        # (çapa), 0,5312855644371872 (3.0.6 rc.4), 0,531285564437189
+        # (3.0.7 rc.2, koşu 44488954906); yayılım ~2,3e-14 bağıl. Bit-aynılık
+        # orada ölçülebilir bir iddia değil; karşılaştırma tek kaynaklı
+        # platform gürültü tabanında (tests/support/esikler.py). Gerçek bir
+        # FEA değişikliği bunun çok üstünde sapar; referans platform
+        # bit-aynı kalır.
+        assert olculen == pytest.approx(K2_KARTUS_FEA_CAPASI[anahtar],
+                                        rel=PLATFORM_GURULTU_TABANI_REL)
 
 
 # ---------------------------------------------------------------------------
