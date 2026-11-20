@@ -588,7 +588,7 @@ class TestTermalKorumaZorunluAlanlar:
                          'burn_time_s': 10.0},
             'heat_sink': {'mode': 'heat_sink', 'h_gas_W_m2K': 5000.0,
                           'T_recovery_K': 3000.0, 'burn_time_s': 10.0,
-                          'wall_thickness_m': 0.005},
+                          'wall_thickness_m': 0.005, 'T_initial_K': 300.0},
             'radiation_equilibrium': {'mode': 'radiation_equilibrium',
                                       'h_gas_W_m2K': 5000.0,
                                       'T_recovery_K': 3000.0,
@@ -607,7 +607,12 @@ class TestTermalKorumaZorunluAlanlar:
         """Düzeltme öncesi: ``{}`` → 500 (mod varsayılanı 'ablative')."""
         response = client.post('/api/thermal-protection', json={})
         assert response.status_code == 422
-        assert response.get_json()['missing_fields'] == ['q_net_W_m2']
+        # V307/GÜVERTE-ISIL (kalem 3): skaler akının süresi de zorunlu
+        # (``_TP_MODE_REQUIRED_UNLESS``). ÖLÇÜLDÜ (taban c2c455b4c): süre
+        # yokken uç 400 + çekirdeğin ham cümlesini ("burn_time_s must be
+        # positive") dönüyordu; boş gövdede bu ikinci eksik hiç söylenmiyordu.
+        assert response.get_json()['missing_fields'] == ['q_net_W_m2',
+                                                         'burn_time_s']
 
     def test_tam_istek_calismaya_devam_eder(self, client):
         response = client.post('/api/thermal-protection', json={

@@ -68,7 +68,8 @@ async function kos(lang, depoIcerik, surumOzniteligi) {
     for (const f of ['i18n.js', 'i18n_common.js']) {
         vm.runInContext(fs.readFileSync(ROOT + '/hrma/static/js/' + f, 'utf8'), sb, { filename: f }); }
     sb.I18N.setLang(lang);
-    const govdeler = ['T', 'TF', 'nf', 'summaryMini', 'serializeResultsSummary', 'buildRecentStrip',
+    const govdeler = ['T', 'TF', 'nf', 'ozetOrtami', 'ozetOrtamEtiketi',
+                      'summaryMini', 'serializeResultsSummary', 'buildRecentStrip',
                       'unsavedRunClear', 'unsavedRunRecordOnLeave'].map(govde).join('\n');
     vm.runInContext(
         'var TYPE_PATH = { liquid: "/liquid", solid: "/solid", hybrid: "/hybrid" };\n'
@@ -85,7 +86,33 @@ async function kos(lang, depoIcerik, surumOzniteligi) {
         kati: vm.runInContext('summaryMini({isp_s: 125.4}, "solid")', sb),
         taban_kayitta: vm.runInContext('summaryMini({isp_s: 125.4, isp_basis: "design_point"}, "solid")', sb),
         bilinmiyor: vm.runInContext('summaryMini({isp_s: 125.4})', sb),
+        // V307/ONARIM-İTKİ-A (M7-ITKI-16): Isp'nin ortamı adıyla.
+        vakum: vm.runInContext('summaryMini({isp_s: 322.438, isp_basis: "design_ambient",'
+                               + ' isp_ambient_mode: "vacuum", isp_ambient_pressure_bar: 0}, "liquid")', sb),
+        irtifa: vm.runInContext('summaryMini({isp_s: 300.1, isp_basis: "design_ambient",'
+                                + ' isp_ambient_mode: "altitude", isp_ambient_altitude_m: 20000,'
+                                + ' isp_ambient_pressure_bar: 0.05529}, "liquid")', sb),
+        bozuk_ortam: vm.runInContext('summaryMini({isp_s: 300.1, isp_basis: "design_ambient",'
+                                     + ' isp_ambient_mode: "altitude"}, "liquid")', sb),
     };
+    // Özet yazıcısı: sıvı vakum, hibrit ISA deniz seviyesi, hibrit irtifa.
+    out.ozet = {};
+    vm.runInContext('motorType = "liquid"; window.currentResults = { thrust: 25000,'
+                    + ' isp_design_ambient: 322.438, isp_vacuum: 322.438,'
+                    + ' design_ambient: { is_sea_level: false, mode: "vacuum", pressure_bar: 0,'
+                    + ' altitude_m: null } };', sb);
+    out.ozet.sivi_vakum = vm.runInContext('serializeResultsSummary()', sb);
+    vm.runInContext('motorType = "hybrid"; window.currentResults = { motor: { thrust: 3000,'
+                    + ' isp: 209.73, design_ambient: { is_sea_level: true, mode: "sea_level",'
+                    + ' pressure_bar: 1.01325 } } };', sb);
+    out.ozet.hibrit_ds = vm.runInContext('serializeResultsSummary()', sb);
+    vm.runInContext('window.currentResults = { motor: { isp: 220.5, design_ambient: {'
+                    + ' is_sea_level: false, mode: "altitude", pressure_bar: 0.265,'
+                    + ' altitude_m: 10000 } } };', sb);
+    out.ozet.hibrit_irtifa = vm.runInContext('serializeResultsSummary()', sb);
+    vm.runInContext('window.currentResults = { motor: { isp: 220.5 } }; ', sb);
+    out.ozet.hibrit_eski = vm.runInContext('serializeResultsSummary()', sb);
+    vm.runInContext('motorType = "solid";', sb);
     // Kaydedilmemiş hesap: sonuç var, kaydedilmedi → ayrılırken yazılır.
     vm.runInContext('window.currentResults = { isp_sea_level: 125.43, total_impulse: 2960.3,'
                     + ' thrust_curve: { thrust: [1, 1499.7, 2] } }; unsavedRunRecordOnLeave();', sb);
@@ -179,3 +206,30 @@ def test_iki_dilde_anahtarlar():
     for k in ('proj.ispBasisSeaLevel', 'proj.ispBasisDesign', 'proj.savedAt',
               'proj.unsavedRunTitle', 'proj.notSaved', 'proj.unsavedRunNote'):
         assert js.count("'" + k + "':") == 2, k
+
+
+def test_isp_ortami_adiyla_yazilir(olcum):
+    """V307/ONARIM-İTKİ-A (M7-ITKI-16): vakum / irtifa tasarımının Isp'si
+    "(tasarım noktası)" değil ortamın adıyla; anahtarlar güverte panelinin
+    ortam anahtarları (panel.ambient.*)."""
+    en, tr = olcum['en']['mini'], olcum['tr']['mini']
+    assert en['vakum'] == 'Isp 322.4 s (vacuum)'
+    assert tr['vakum'] == 'Isp 322,4 s (vakum)'
+    assert en['irtifa'] == 'Isp 300.1 s (20000 m design altitude (0.0553 bar))'
+    assert tr['irtifa'] == 'Isp 300,1 s (20000 m tasarım irtifası (0,0553 bar))'
+    # Ortam kaydı bozuksa etiket uydurulmaz: "tasarım noktası".
+    assert en['bozuk_ortam'] == 'Isp 300.1 s (design point)'
+    oz = olcum['en']['ozet']
+    assert oz['sivi_vakum']['isp_basis'] == 'design_ambient'
+    assert oz['sivi_vakum']['isp_ambient_mode'] == 'vacuum'
+    assert oz['sivi_vakum']['isp_ambient_pressure_bar'] == 0
+    assert oz['hibrit_ds']['isp_basis'] == 'sea_level'
+    assert 'isp_ambient_mode' not in oz['hibrit_ds']
+    assert (oz['hibrit_irtifa']['isp_ambient_mode'],
+            oz['hibrit_irtifa']['isp_ambient_pressure_bar'],
+            oz['hibrit_irtifa']['isp_ambient_altitude_m']) == ('altitude', 0.265, 10000)
+    assert oz['hibrit_eski']['isp_basis'] == 'design_point'
+    # Proje dosyası kapısı yalnız skaler değer kabul eder: özet geçer.
+    from hrma.utils.projects import _validate_results_summary
+    for k in ('sivi_vakum', 'hibrit_ds', 'hibrit_irtifa', 'hibrit_eski'):
+        _validate_results_summary(oz[k])

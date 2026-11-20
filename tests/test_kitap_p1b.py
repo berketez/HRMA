@@ -582,10 +582,15 @@ def test_B11_S2_2a_iki_faz_karisim_cifti_cift_sayilmaz():
     assert kullanilan['molecular_weight_g_mol'] == pytest.approx(m, abs=TOL_M)
     kaynak = kullanilan['gas_property_source']
     assert 'gamma_frozen_chamber' in kaynak and 'MIXTURE' in kaynak
-    # Kayıp sayısı gamma/M okumaz ve Isp'ye uygulanmaz (aynen).
+    # Kayıp sayısı gamma/M okumaz (aynen). V307 KATI-DOĞRULAMA faz 3 (B1, 16 Kas 2026):
+    # kayıp artık itki katsayısına UYGULANIYOR (eski iddia: uygulanmaz);
+    # bu testin konusu olan çift sayım (karışım ilişkilerinin karışım
+    # çiftine uygulanması) yasağı değişmedi — etkin özellikler yine yok.
     assert blok['status'] == 'computed'
     assert blok['two_phase_loss_pct'] > 0.0
-    assert blok['applied_to_isp'] is False
+    assert blok['applied_to_isp'] is True
+    assert blok['applied_efficiency'] == pytest.approx(
+        1.0 - blok['two_phase_loss_pct'] / 100.0, rel=1e-12)
 
 
 def test_B11_S2A_gamma_ezilirse_isil_ve_iki_faz_motor_gammasi():

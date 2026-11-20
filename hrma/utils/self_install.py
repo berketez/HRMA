@@ -120,6 +120,101 @@ HELPER_REOPEN_AFTER_S = 10
 #: SEÇİMİ: anında çöken süreç başarı sayılmaz.
 HELPER_LAUNCH_STABLE_S = 2
 
+#: Betiğin, güncellemeyi isteyen uygulamanın kapanmasını beklediği en uzun
+#: süre (s) — eski betikteki değer (``seq 1 90``, 1 sn aralık). Pencere bu
+#: süreyi hata metninde adıyla söyler.
+HELPER_EXIT_WAIT_S = 90
+
+# ---------------------------------------------------------------------------
+# Güncelleme penceresi (V307/GÜNCELLEME-EKRAN) — TEK KAYNAK
+#
+# KUSUR (10 Kas 2026, 3.0.5 → 3.0.6, Berke): "HRMA yüklendi" düğmesinden sonra
+# uygulama kapanıyor, yeni sürüm açılana kadar (~3,5 dk; güncelleme günlüğü
+# 14:44:38 → 14:48:12) ekranda HİÇBİR ŞEY olmuyordu; tek iz birkaç saniyede
+# kaybolan bir sistem bildirimiydi. Kullanıcı kurulumun sürdüğünü, takıldığını
+# ya da bittiğini ayırt edemiyordu.
+#
+# Çözüm: yardımcı betik başlarken uygulama paketinden BAĞIMSIZ bir pencere
+# süreci açar — macOS'ta /usr/bin/osascript (JXA + AppKit), Windows'ta
+# PowerShell + WinForms. İkisi de işletim sisteminin parçasıdır; kurulum
+# sırasında silinen/değiştirilen paket içi Python'a bağlı DEĞİLDİR. Pencere
+# betiği kurulumdan ÖNCE yardımcı betiğin yanına yazılır (hrma/utils/
+# update_window.py).
+#
+# DURUM SÖZLEŞMESİ: pencere yalnız betiğin yazdığı durum dosyasını okur
+# (``UPDATE_STATUS_NAME``, betiğin yanında): ilk satır başlık, sonra
+# ``anahtar=değer`` satırları, SON satır ``end=1`` (yarım yazılmış dosya
+# okunmaz). Alanlar: pid, started, step, phase, done_kb, total_kb, lang,
+# from_version, to_version, result, error. Yol yoktur; yollar pencereye
+# argümanla gider. Adım/oran yalnız betiğin gerçekten bildiği durumdan;
+# zamana bağlı ya da uydurma ilerleme YOK.
+# ---------------------------------------------------------------------------
+
+#: Durum dosyasının adı; yeri yardımcı betiğin dizini (:func:`_helper_dir`).
+UPDATE_STATUS_NAME = "hrma_update_status.txt"
+
+#: Durum dosyası biçiminin ilk satırı (biçim değişirse sürüm numarası artar).
+UPDATE_STATUS_HEADER = "hrma-update-status 1"
+
+#: Okunacak en büyük durum dosyası (bayt). Gerçek dosya ~250 bayttır; daha
+#: büyüğü bozuk/yabancı dosyadır ve okunmaz.
+UPDATE_STATUS_MAX_BYTES = 64 * 1024
+
+#: Pencere betiklerinin adları (yardımcı betiğin yanında).
+UPDATE_WINDOW_MAC_NAME = HELPER_SCRIPT_STEM + "_window.js"
+UPDATE_WINDOW_WIN_NAME = HELPER_SCRIPT_STEM + "_window.ps1"
+
+#: Sonuç değerleri: running — sürüyor; ok — yeni sürüm açıldı; failed —
+#: tamamlanamadı (önceki sürüm yerinde); restored — yeni sürüm açılmadı,
+#: önceki sürüm geri yüklendi.
+UPDATE_RESULT_RUNNING = "running"
+UPDATE_RESULT_OK = "ok"
+UPDATE_RESULT_FAILED = "failed"
+UPDATE_RESULT_RESTORED = "restored"
+UPDATE_RESULTS = (UPDATE_RESULT_RUNNING, UPDATE_RESULT_OK,
+                  UPDATE_RESULT_FAILED, UPDATE_RESULT_RESTORED)
+
+#: Hata kodu → kullanıcının ne yapacağı (pencere metni ``window.action.*``).
+#: Betikler yalnız bu kodları yazar; ``helper_gone`` pencerenin kendi
+#: tespitidir (betik sonuç yazmadan öldü).
+UPDATE_ERROR_ACTIONS = {
+    "app_not_closed": "mac_opened",
+    "mktemp_failed": "mac_opened",
+    "mount_failed": "redownload",
+    "no_app_in_dmg": "redownload",
+    "copy_failed": "mac_opened",
+    "staged_incomplete": "mac_opened",
+    "instance_running": "mac_opened",
+    "swap_failed": "mac_opened",
+    "new_version_not_started": "mac_restored",
+    "interrupted": "manual",
+    "unexpected": "manual",
+    "helper_gone": "manual",
+    "silent_install_failed": "win_opened",
+}
+
+#: Pencerenin durum dosyasını yoklama aralığı (s) — HRMA SEÇİMİ; açılışın
+#: bekleme penceresiyle aynı tempo (packaging/launcher.py
+#: GUNCELLEME_YOKLAMA_S). Okunan dosya ~250 bayt; maliyet ihmal edilebilir.
+HELPER_WINDOW_POLL_S = 0.5
+
+#: Başarıdan sonra pencerenin kendiliğinden kapanma gecikmesi (s) — HRMA
+#: SEÇİMİ: "tamamlandı" satırı okunabilsin, yeni sürümün penceresini
+#: örtmesin.
+HELPER_WINDOW_DONE_CLOSE_S = 3
+
+#: Pencerede gösterilen sürüm alanı için izinli biçim (betiğe ve dosyaya
+#: yalnız bu biçim yazılır; uymayan değer boş kalır, sürüm satırı gizlenir).
+_VERSION_SAFE_RE = re.compile(r"[0-9A-Za-z][0-9A-Za-z.+-]{0,31}")
+
+
+def safe_version(value):
+    """Sürüm dizesi izinli biçimdeyse kendisi, değilse '' (sessiz uydurma yok:
+    bilinmeyen sürüm pencerede gösterilmez)."""
+    return value if isinstance(value, str) and _VERSION_SAFE_RE.fullmatch(
+        value) else ""
+
+
 #: Kilit aşamaları (betik yazar, açılış okur):
 #:   wait    — kopya/hazırlık sürüyor: açılış bekleme penceresi gösterir,
 #:   closing — eski sürüm kapatılıyor / takas: açılış HİÇBİR ŞEY açmadan çıkar
@@ -351,6 +446,67 @@ UPDATE_TEXTS = {
         "notify.done.sub": "Update complete",
         "notify.wait": "HRMA is being updated; it opens by itself when the "
                        "update finishes.",
+        # Güncelleme penceresi (V307/GÜNCELLEME-EKRAN; hrma/utils/update_window.py)
+        "step.installing": "Installing the new version",
+        "step.checking_install": "Checking the installation",
+        "window.heading": "Updating HRMA — please wait",
+        "window.title.ok": "HRMA — update complete",
+        "window.title.failed": "HRMA — update not completed",
+        "window.heading.ok": "Update complete",
+        "window.heading.failed": "The update could not be completed",
+        "window.versions": "{from} → {to}",
+        "window.version_to": "New version: {to}",
+        "window.hint": "This window closes by itself when the update finishes "
+                       "and HRMA opens the new version. Closing this window "
+                       "does not stop the update.",
+        "window.ok": "The new version of HRMA is opening. This window closes "
+                     "in a few seconds.",
+        "window.long": "The update is taking longer than usual (more than "
+                       "{min} minutes). The details file shows the last step.",
+        "window.close": "Close",
+        "window.installer": "Installer: {path}",
+        "window.reason.app_not_closed": "HRMA did not close within "
+                                        "{exit_wait} seconds.",
+        "window.reason.mktemp_failed": "A temporary folder for the installer "
+                                       "image could not be created.",
+        "window.reason.mount_failed": "The installer image could not be "
+                                      "opened.",
+        "window.reason.no_app_in_dmg": "No HRMA application was found in the "
+                                       "installer image.",
+        "window.reason.copy_failed": "The new version could not be copied.",
+        "window.reason.staged_incomplete": "The copied new version is "
+                                           "incomplete.",
+        "window.reason.instance_running": "Another HRMA window did not close, "
+                                          "so the new version was not put in "
+                                          "place.",
+        "window.reason.swap_failed": "The new version could not be put in "
+                                     "place.",
+        "window.reason.new_version_not_started": "The new version did not "
+                                                 "start within {verify} "
+                                                 "seconds.",
+        "window.reason.interrupted": "The update helper was stopped.",
+        "window.reason.unexpected": "The update ended unexpectedly.",
+        "window.reason.helper_gone": "The update helper closed without "
+                                     "reporting a result.",
+        "window.reason.silent_install_failed": "The silent installation did "
+                                               "not finish.",
+        "window.action.mac_opened": "The installer has been opened: drag HRMA "
+                                    "to the Applications folder to install it "
+                                    "manually. The previous version is still "
+                                    "in place.",
+        "window.action.redownload": "Download the installer again: open HRMA "
+                                    "and start the update again. The previous "
+                                    "version is still in place.",
+        "window.action.mac_restored": "The previous version has been restored "
+                                      "and is opening. The installer has also "
+                                      "been opened if you want to install it "
+                                      "manually.",
+        "window.action.manual": "Open HRMA again. If it does not open or is "
+                                "not updated, open the installer below and "
+                                "install it manually.",
+        "window.action.win_opened": "The regular installer has been started: "
+                                    "follow its steps to finish the "
+                                    "installation.",
     },
     "tr": {
         "title": "HRMA — güncelleme sürüyor",
@@ -385,6 +541,61 @@ UPDATE_TEXTS = {
         "notify.done.sub": "Güncelleme tamamlandı",
         "notify.wait": "HRMA güncelleniyor; güncelleme bitince kendiliğinden "
                        "açılacak.",
+        # Güncelleme penceresi (V307/GÜNCELLEME-EKRAN; hrma/utils/update_window.py)
+        "step.installing": "Yeni sürüm kuruluyor",
+        "step.checking_install": "Kurulum denetleniyor",
+        "window.heading": "HRMA güncelleniyor — lütfen bekleyin",
+        "window.title.ok": "HRMA — güncelleme tamamlandı",
+        "window.title.failed": "HRMA — güncelleme tamamlanamadı",
+        "window.heading.ok": "Güncelleme tamamlandı",
+        "window.heading.failed": "Güncelleme tamamlanamadı",
+        "window.versions": "{from} → {to}",
+        "window.version_to": "Yeni sürüm: {to}",
+        "window.hint": "Güncelleme bitince bu pencere kendiliğinden kapanır ve "
+                       "HRMA yeni sürümüyle açılır. Bu pencereyi kapatmak "
+                       "güncellemeyi durdurmaz.",
+        "window.ok": "HRMA'nın yeni sürümü açılıyor. Bu pencere birkaç saniye "
+                     "içinde kapanır.",
+        "window.long": "Güncelleme olağandan uzun sürüyor ({min} dakikayı "
+                       "geçti). Son adım ayrıntılar dosyasında görünür.",
+        "window.close": "Kapat",
+        "window.installer": "Kurulum dosyası: {path}",
+        "window.reason.app_not_closed": "HRMA {exit_wait} saniye içinde "
+                                        "kapanmadı.",
+        "window.reason.mktemp_failed": "Kurulum görüntüsü için geçici klasör "
+                                       "oluşturulamadı.",
+        "window.reason.mount_failed": "Kurulum görüntüsü açılamadı.",
+        "window.reason.no_app_in_dmg": "Kurulum görüntüsünde HRMA uygulaması "
+                                       "bulunamadı.",
+        "window.reason.copy_failed": "Yeni sürüm kopyalanamadı.",
+        "window.reason.staged_incomplete": "Kopyalanan yeni sürüm eksik.",
+        "window.reason.instance_running": "Açık kalan başka bir HRMA penceresi "
+                                          "kapanmadığı için yeni sürüm yerine "
+                                          "konmadı.",
+        "window.reason.swap_failed": "Yeni sürüm yerine konamadı.",
+        "window.reason.new_version_not_started": "Yeni sürüm {verify} saniye "
+                                                 "içinde açılmadı.",
+        "window.reason.interrupted": "Güncelleme yardımcısı durduruldu.",
+        "window.reason.unexpected": "Güncelleme beklenmedik biçimde sona "
+                                    "erdi.",
+        "window.reason.helper_gone": "Güncelleme yardımcısı sonuç "
+                                     "bildirmeden kapandı.",
+        "window.reason.silent_install_failed": "Sessiz kurulum tamamlanamadı.",
+        "window.action.mac_opened": "Kurulum dosyası açıldı: HRMA'yı "
+                                    "Uygulamalar klasörüne sürükleyerek elle "
+                                    "kurabilirsiniz. Önceki sürüm yerinde "
+                                    "duruyor.",
+        "window.action.redownload": "Kurulum dosyasını yeniden indirin: "
+                                    "HRMA'yı açıp güncellemeyi yeniden "
+                                    "başlatın. Önceki sürüm yerinde duruyor.",
+        "window.action.mac_restored": "Önceki sürüm geri yüklendi ve açılıyor. "
+                                      "Elle kurmak isterseniz kurulum dosyası "
+                                      "da açıldı.",
+        "window.action.manual": "HRMA'yı yeniden açın. Açılmazsa ya da "
+                                "güncellenmemişse aşağıdaki kurulum dosyasını "
+                                "açıp elle kurun.",
+        "window.action.win_opened": "Normal kurulum programı başlatıldı: "
+                                    "adımlarını izleyerek kurulumu tamamlayın.",
     },
 }
 
@@ -628,6 +839,10 @@ def _safe_size(path):
 MAC_HELPER = r"""#!/bin/bash
 # HRMA otomatik guncelleme yardimcisi - update_checker tarafindan uretilir.
 PID="$1"; DMG="$2"; TARGET="$3"; LOG="$4"; LOCK="${5:-}"
+# Pencere betigi ve durum dosyasi bu betigin YANINDA (self_install.py
+# _helper_dir); yol argumani eklenmez, cagri sozlesmesi degismez.
+SELF_DIR=""
+case "$0" in /*/*) SELF_DIR="${0%/*}" ;; esac
 cd /
 exec >>"$LOG" 2>&1
 echo "=== HRMA update helper started: $(date) ==="
@@ -637,7 +852,14 @@ echo "pid=$PID dmg=$DMG target=$TARGET lock=$LOCK"
 
 MNT=""; MNT_DIR=""; STAGING=""; OLD=""; DITTO_PID=""
 STEP="start"; PHASE="wait"; DONE_KB=""; TOTAL_KB=""
+RESULT="running"; ERR_CODE=""; WIN_PID=""
+STATUS=""; WIN_JS=""
+if [ -n "$SELF_DIR" ]; then
+    STATUS="$SELF_DIR/$STATUS_NAME"
+    WIN_JS="$SELF_DIR/$WINDOW_NAME"
+fi
 T_START="$(date +%s)"
+echo "versions: ${FROM_VERSION:-?} -> ${TO_VERSION:-?}"
 
 # Guncelleme kilidi (hrma/utils/self_install.py UPDATE_LOCK_*): acilis bunu
 # okur; gecerliyse eski surumu acmaz. Atomik yazim: gecici dosya + mv.
@@ -657,11 +879,45 @@ write_lock() {
     return 0
 }
 
-# Adim degisimi: gunluge zamanla yazilir, kilide islenir.
+# Durum dosyasi (self_install.py UPDATE_STATUS_*): guncelleme penceresi
+# YALNIZ bunu okur. Atomik yazim (gecici dosya + mv); son satir end=1.
+# Yol icermez; adim/oran yalniz betigin gercekten bildigi degerdir.
+write_status() {
+    [ -n "$STATUS" ] || return 0
+    local tmp="$STATUS.tmp.$$"
+    if { printf '%s\n' "$STATUS_HEADER"
+         printf 'pid=%s\nstarted=%s\nstep=%s\nphase=%s\n' "$$" "$T_START" "$STEP" "$PHASE"
+         printf 'done_kb=%s\ntotal_kb=%s\nlang=%s\n' "$DONE_KB" "$TOTAL_KB" "$UI_LANG"
+         printf 'from_version=%s\nto_version=%s\n' "$FROM_VERSION" "$TO_VERSION"
+         printf 'result=%s\nerror=%s\nend=1\n' "$RESULT" "$ERR_CODE"; } >"$tmp" 2>/dev/null \
+       && mv -f "$tmp" "$STATUS" 2>/dev/null; then
+        return 0
+    fi
+    rm -f "$tmp" 2>/dev/null
+    echo "WARNING: could not write the update status: $STATUS"
+    return 0
+}
+
+# Kilit (acilis okur) + durum (pencere okur) birlikte guncellenir.
+publish() { write_lock; write_status; }
+
+# Adim degisimi: gunluge zamanla yazilir, kilide ve durum dosyasina islenir.
 set_step() {
     STEP="$1"; PHASE="$2"; DONE_KB=""; TOTAL_KB=""
     echo "step: $STEP phase=$PHASE t+$(( $(date +%s) - T_START ))s ($(date +%T))"
-    write_lock
+    publish
+}
+
+# Guncelleme penceresi (V307/GUNCELLEME-EKRAN): uygulama paketinden BAGIMSIZ
+# surec - sistemin osascript'i (JXA + AppKit); paket ici Python'a baglanmaz.
+# Pencere betigi yoksa ya da baslatilamazsa guncelleme yine surer; o durumda
+# bildirimler (notify) eskisi gibi gider. Yollar arguman olarak gecer.
+window_alive() { [ -n "$WIN_PID" ] && kill -0 "$WIN_PID" 2>/dev/null; }
+start_window() {
+    [ -n "$STATUS" ] && [ -f "$WIN_JS" ] || { echo "update window: not available"; return 0; }
+    osascript -l JavaScript "$WIN_JS" "$STATUS" "$$" "$LOG" "$DMG" </dev/null >/dev/null &
+    WIN_PID=$!
+    echo "update window started: pid=$WIN_PID"
 }
 
 # HER cikis yolunda (basari, fallback, geri yukleme, TERM/INT/HUP): yarim
@@ -675,6 +931,16 @@ on_exit() {
     if [ -n "$STAGING" ] && [ -d "$STAGING" ]; then rm -rf "$STAGING"; fi
     if [ -n "$MNT" ]; then hdiutil detach "$MNT" -force >/dev/null 2>&1; fi
     if [ -n "$MNT_DIR" ]; then rmdir "$MNT_DIR" 2>/dev/null; fi
+    # Sonucu yazilmamis cikis (sinyal / beklenmedik hata): pencere nedenini
+    # gostersin. Durum, yarim takas guvencesinden SONRA yazilir.
+    if [ "$RESULT" = "running" ]; then
+        RESULT="failed"
+        case "$rc" in
+            129|130|143) ERR_CODE="interrupted" ;;
+            *) [ -n "$ERR_CODE" ] || ERR_CODE="unexpected" ;;
+        esac
+    fi
+    write_status
     if [ -n "$LOCK" ]; then rm -f "$LOCK" "$LOCK.tmp.$$" 2>/dev/null && echo "update lock removed"; fi
     echo "=== HRMA update helper exit rc=$rc t+$(( $(date +%s) - T_START ))s: $(date) ==="
 }
@@ -691,15 +957,22 @@ trap 'exit 129' HUP
 # Metin AppleScript kaynagina GOMULMEZ, arguman olarak gider (tirnak ve
 # Turkce karakter guvenli). Metinler kullanicinin arayuz dilinde (MSG_*,
 # build_mac_helper; dil bilinmiyorsa EN + TR birlikte).
+# Guncelleme penceresi aciksa bildirim GITMEZ (ayni bilgi pencerede).
 notify() {
+    if window_alive; then return 0; fi
     osascript -e 'on run argv' \
         -e 'display notification (item 1 of argv) with title "HRMA" subtitle (item 2 of argv)' \
         -e 'end run' "$1" "$2" >/dev/null 2>&1 || true
 }
 
+# fallback NEDEN KOD: kod pencerenin hata metnini secer
+# (self_install.py UPDATE_ERROR_ACTIONS).
 fallback() {
     echo "FALLBACK: $1 - opening the DMG for manual installation"
+    [ "$RESULT" = "running" ] && RESULT="failed"
+    [ -n "$ERR_CODE" ] || ERR_CODE="${2:-unexpected}"
     if [ -n "$MNT" ]; then hdiutil detach "$MNT" -force >/dev/null 2>&1; MNT=""; fi
+    write_status
     notify "$MSG_FAIL" "$SUB_FAIL"
     open "$DMG"
     exit 1
@@ -778,10 +1051,11 @@ new_bundle_pid() {
 }
 
 set_step "waiting_exit" "$PHASE_WAIT"
+start_window
 
-# 1) Uygulamanin kapanmasini bekle (en cok 90 sn). PID yeniden kullanima
+# 1) Uygulamanin kapanmasini bekle (en cok EXIT_WAIT_S sn). PID yeniden kullanima
 #    karsi komut satiri da dogrulanir: bizim bundle degilse olmus sayilir.
-for _ in $(seq 1 90); do
+for _ in $(seq 1 "$EXIT_WAIT_S"); do
     CMD="$(ps -p "$PID" -o command= 2>/dev/null)"
     [ -z "$CMD" ] && break
     case "$CMD" in
@@ -791,7 +1065,7 @@ for _ in $(seq 1 90); do
 done
 CMD="$(ps -p "$PID" -o command= 2>/dev/null)"
 case "$CMD" in
-    *"$TARGET"*) fallback "application did not exit in time" ;;
+    *"$TARGET"*) fallback "application did not exit in time" app_not_closed ;;
 esac
 sleep 1  # dosya tanitici birakma payi
 
@@ -799,17 +1073,17 @@ sleep 1  # dosya tanitici birakma payi
 notify "$MSG_START" "$SUB_START"
 set_step "mounting" "$PHASE_WAIT"
 TMPBASE="${TMPDIR:-/tmp}"; TMPBASE="${TMPBASE%/}"
-MNT_DIR="$(mktemp -d "$TMPBASE/hrma-update-XXXXXX")" || { MNT_DIR=""; fallback "mktemp failed"; }
+MNT_DIR="$(mktemp -d "$TMPBASE/hrma-update-XXXXXX")" || { MNT_DIR=""; fallback "mktemp failed" mktemp_failed; }
 MNT="$MNT_DIR"
 hdiutil attach -nobrowse -noverify -noautoopen -readonly \
-    -mountpoint "$MNT" "$DMG" || fallback "hdiutil attach failed"
+    -mountpoint "$MNT" "$DMG" || fallback "hdiutil attach failed" mount_failed
 echo "mounted: $MNT ($(date +%T))"
 
 SRC=""
 for cand in "$MNT"/*.app; do
     [ -d "$cand" ] && SRC="$cand" && break
 done
-[ -z "$SRC" ] && fallback "no .app found inside the dmg"
+[ -z "$SRC" ] && fallback "no .app found inside the dmg" no_app_in_dmg
 
 # 3) Hedefin YANINA kopyala (ayni disk bolumu -> mv = anlik adlandirma)
 PARENT="$(dirname "$TARGET")"
@@ -824,7 +1098,7 @@ set_step "copying" "$PHASE_WAIT"
 T="$(du -sk "$SRC" 2>/dev/null | awk '{print $1}')"
 case "$T" in ''|*[!0-9]*) T="" ;; esac
 TOTAL_KB="$T"
-write_lock
+publish
 echo "copying ($(date +%T)), source ${TOTAL_KB:-?} KB..."
 # --noqtn: kopya karantina ozniteligi TASIMAZ (eski akistaki ~11-14 sn'lik
 # xattr -dr adimi kalkar; olcum: docs/scofield/raw/OH/V306/guncelleme/
@@ -844,13 +1118,13 @@ while kill -0 "$DITTO_PID" 2>/dev/null; do
     case "$D" in ''|*[!0-9]*) continue ;; esac
     DONE_KB="$D"
     echo "progress: copied ${DONE_KB} KB of ${TOTAL_KB:-?} KB"
-    write_lock
+    publish
 done
 wait "$DITTO_PID"; DITTO_RC=$?
 DITTO_PID=""
 if [ "$DITTO_RC" -ne 0 ]; then
     rm -rf "$STAGING"
-    fallback "copy (ditto) failed (rc=$DITTO_RC)"
+    fallback "copy (ditto) failed (rc=$DITTO_RC)" copy_failed
 fi
 D="$(du -sk "$STAGING" 2>/dev/null | awk '{print $1}')"
 echo "copied ($(date +%T)): ${D:-?} KB (source ${TOTAL_KB:-?} KB)"
@@ -861,7 +1135,7 @@ detach_dmg
 if [ ! -d "$STAGING/Contents/MacOS" ] || \
    [ ! -d "$STAGING/Contents/Resources/app/hrma" ]; then
     rm -rf "$STAGING"
-    fallback "staged copy is incomplete"
+    fallback "staged copy is incomplete" staged_incomplete
 fi
 
 # 3c) Karantina savunmasi (takastan ONCE, staging uzerinde): kopya --noqtn
@@ -890,19 +1164,19 @@ fi
 set_step "closing" "$PHASE_CLOSING"
 if ! close_bundle_processes; then
     rm -rf "$STAGING"
-    fallback "another HRMA instance from the target is still running"
+    fallback "another HRMA instance from the target is still running" instance_running
 fi
 
 # 5) Anlik degisim: eskiyi kenara al, yeniyi oturt; olmazsa geri al
 set_step "swapping" "$PHASE_CLOSING"
 if ! mv "$TARGET" "$OLD"; then
     rm -rf "$STAGING"
-    fallback "could not move the old application aside"
+    fallback "could not move the old application aside" swap_failed
 fi
 if ! mv "$STAGING" "$TARGET"; then
     mv "$OLD" "$TARGET"
     rm -rf "$STAGING"
-    fallback "could not move the new application into place"
+    fallback "could not move the new application into place" swap_failed
 fi
 
 # 6) Yeniden baslat ve yeni surum GERCEKTEN acildi mi dogrula (V306 kalem 4).
@@ -936,14 +1210,18 @@ if [ -z "$NEW_PID" ]; then
     close_bundle_processes
     rm -rf "$TARGET"
     mv "$OLD" "$TARGET"
+    RESULT="restored"; ERR_CODE="new_version_not_started"
     set_step "restored" "$PHASE_LAUNCH"
     open "$TARGET"
-    fallback "update failed, previous version restored"
+    fallback "update failed, previous version restored" new_version_not_started
 fi
 echo "new version running: pid=$NEW_PID ($(ps -p "$NEW_PID" -o command= 2>/dev/null | cut -c1-200))"
-rm -rf "$OLD"
+# Sonuc, yeni surum DOGRULANDIKTAN sonra yazilir; pencere "tamamlandi" der ve
+# kendiliginden kapanir. Eski kopyanin silinmesi (birkac sn) bunu bekletmez.
+RESULT="ok"
 set_step "done" "$PHASE_LAUNCH"
 notify "$MSG_DONE" "$SUB_DONE"
+rm -rf "$OLD"
 echo "=== HRMA update complete: $(date) ==="
 """
 
@@ -965,14 +1243,18 @@ def _bash_quote(value):
     return "$'" + "".join(out) + "'"
 
 
-def build_mac_helper(lang=None, **sure_ayari):
+def build_mac_helper(lang=None, from_version=None, to_version=None,
+                     **sure_ayari):
     """Çalıştırılacak macOS yardımcı betiği (şablon + sabitler).
 
     Sabitler bu modülün TEK KAYNAK blokundan gömülür; betik ASCII'dir.
-    ``sure_ayari`` yalnız testler içindir (ör. ``progress_interval_s=0.2``):
-    bilinmeyen anahtar hata verir.
+    ``from_version`` / ``to_version`` güncelleme penceresinde gösterilir;
+    :func:`safe_version` biçimine uymayan değer boş yazılır (pencere sürüm
+    satırını gizler). ``sure_ayari`` yalnız testler içindir (ör.
+    ``progress_interval_s=0.2``): bilinmeyen anahtar hata verir.
     """
-    sureler = {"progress_interval_s": HELPER_PROGRESS_INTERVAL_S,
+    sureler = {"exit_wait_s": HELPER_EXIT_WAIT_S,
+               "progress_interval_s": HELPER_PROGRESS_INTERVAL_S,
                "close_wait_s": HELPER_CLOSE_WAIT_S,
                "term_wait_s": HELPER_TERM_WAIT_S,
                "launch_verify_s": HELPER_LAUNCH_VERIFY_S,
@@ -988,6 +1270,12 @@ def build_mac_helper(lang=None, **sure_ayari):
         "PHASE_CLOSING": LOCK_PHASE_CLOSING,
         "PHASE_LAUNCH": LOCK_PHASE_LAUNCH,
         "UI_LANG": normalize_ui_lang(lang) or "",
+        "STATUS_HEADER": UPDATE_STATUS_HEADER,
+        "STATUS_NAME": UPDATE_STATUS_NAME,
+        "WINDOW_NAME": UPDATE_WINDOW_MAC_NAME,
+        "FROM_VERSION": safe_version(from_version),
+        "TO_VERSION": safe_version(to_version),
+        "EXIT_WAIT_S": sureler["exit_wait_s"],
         "PROGRESS_INTERVAL_S": sureler["progress_interval_s"],
         "CLOSE_WAIT_S": sureler["close_wait_s"],
         "TERM_WAIT_S": sureler["term_wait_s"],
@@ -1007,28 +1295,98 @@ def build_mac_helper(lang=None, **sure_ayari):
 # boşluk içerse bile TIRNAKSIZ yazılır (NSIS satır sonuna kadar okur).
 # Kurucu batch icinden dogrudan cagrilir (start KULLANILMAZ — bosluklu
 # yollarda baslik/arguman ayristirmasi tuzakli; batch zaten bekler).
+# V307/GÜNCELLEME-EKRAN: betik her adımda durum dosyasını
+# (UPDATE_STATUS_*, INSTDIR\updater) yazar ve başta güncelleme penceresini
+# (PowerShell + WinForms, UPDATE_WINDOW_WIN_NAME) başlatır. Pencere uygulama
+# paketine bağlı değildir: sistemin powershell.exe'si (System32) ile koşar;
+# NSIS'in süreç kapatma filtresi (ExecutablePath $INSTDIR\*) onu görmez ve
+# kurucu updater dizinini silmez. Pencere başlatılamazsa (ör. grup ilkesi
+# betikleri yasaklamışsa) bu konsol penceresi eskisi gibi görünür kalır.
+# Satır sonu CRLF (build_win_helper): LF'li batch dosyasında 'call :etiket'
+# etiket aramasında şaşabilir.
 WIN_HELPER = """@echo off
 title HRMA Update
 cd /d "%TEMP%"
+set "HRMA_STATUS={status}"
+set "HRMA_STEP=waiting_exit"
+set "HRMA_PHASE=wait"
+set "HRMA_RESULT=running"
+set "HRMA_ERROR="
+call :hrma_status
+if exist "{window}" start "" /min powershell -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "{window}" -Status "{status}" -Installer "{setup}"
 echo.
 echo   Updating HRMA to the new version...
 echo   HRMA will reopen automatically when the update is complete.
 echo   Please do not close this window.
 echo.
-powershell -NoProfile -Command "Wait-Process -Id {pid} -Timeout 90 -ErrorAction SilentlyContinue" >nul 2>&1
+echo   [1/4] Waiting for HRMA to close
+powershell -NoProfile -Command "Wait-Process -Id {pid} -Timeout {exit_wait} -ErrorAction SilentlyContinue" >nul 2>&1
+set "HRMA_STEP=installing"
+call :hrma_status
+echo   [2/4] Installing the new version
 "{setup}" /S /D={instdir}
+set "HRMA_STEP=checking_install"
+call :hrma_status
+echo   [3/4] Checking the installation
 if not exist "{instdir}\\python\\pythonw.exe" (
+  set "HRMA_RESULT=failed"
+  set "HRMA_ERROR=silent_install_failed"
+  call :hrma_status
   echo   Silent install failed - starting the normal installer instead.
   start "" "{setup}"
   exit /b 1
 )
+set "HRMA_STEP=opening"
+set "HRMA_PHASE=launch"
+call :hrma_status
+echo   [4/4] Opening the new version
 start "" "{instdir}\\python\\pythonw.exe" "{instdir}\\app\\launcher.py"
+set "HRMA_STEP=done"
+set "HRMA_RESULT=ok"
+call :hrma_status
 (goto) 2>nul & del "%~f0"
+exit /b 0
+
+:hrma_status
+(
+  echo {header}
+  echo pid=
+  echo started=
+  echo step=%HRMA_STEP%
+  echo phase=%HRMA_PHASE%
+  echo done_kb=
+  echo total_kb=
+  echo lang={lang}
+  echo from_version={from_version}
+  echo to_version={to_version}
+  echo result=%HRMA_RESULT%
+  echo error=%HRMA_ERROR%
+  echo end=1
+) 2>nul 1>"%HRMA_STATUS%"
+exit /b 0
 """
 
 
-def build_win_helper(pid, setup_path, instdir):
-    return WIN_HELPER.format(pid=int(pid), setup=setup_path, instdir=instdir)
+def _win_updater_path(instdir, name):
+    """INSTDIR\\updater\\<ad> (Windows yolu; testler macOS'ta da üretir)."""
+    return instdir.rstrip("\\/") + "\\updater\\" + name
+
+
+def build_win_helper(pid, setup_path, instdir, lang=None, from_version=None,
+                     to_version=None):
+    """Windows yardımcı betiği (CRLF, ASCII). Yollar ``plan_install``'ın
+    ``_CMD_UNSAFE`` kapısından geçmiştir; dil ve sürüm yalnız izinli
+    biçimde gömülür (``normalize_ui_lang`` / :func:`safe_version`)."""
+    metin = WIN_HELPER.format(
+        pid=int(pid), setup=setup_path, instdir=instdir,
+        exit_wait=int(HELPER_EXIT_WAIT_S),
+        status=_win_updater_path(instdir, UPDATE_STATUS_NAME),
+        window=_win_updater_path(instdir, UPDATE_WINDOW_WIN_NAME),
+        header=UPDATE_STATUS_HEADER,
+        lang=normalize_ui_lang(lang) or "",
+        from_version=safe_version(from_version),
+        to_version=safe_version(to_version))
+    return "\r\n".join(metin.split("\n"))
 
 
 def _write_helper(plan, content, suffix):
@@ -1040,19 +1398,47 @@ def _write_helper(plan, content, suffix):
     return path
 
 
-def launch_helper(plan, installer_path, pid=None):
-    """Yardımcı betiği yazar ve bağımsız süreç olarak başlatır.
+def _write_window(plan):
+    """Güncelleme penceresi betiğini yardımcı betiğin yanına yazar.
 
+    Pencere bir İYİLEŞTİRMEDİR: yazılamazsa güncelleme yine başlar (betik
+    pencere dosyasını bulamayınca bunu günlüğe yazar ve eski bildirimlere
+    düşer). Dönüş: yol ya da None; hata fırlatmaz.
+    """
+    try:
+        from hrma.utils import update_window
+        if plan["platform"] == "darwin":
+            icerik = update_window.build_mac_window()
+            ad = UPDATE_WINDOW_MAC_NAME
+        else:
+            icerik = update_window.build_win_window()
+            ad = UPDATE_WINDOW_WIN_NAME
+        return _write_helper(plan, icerik, ad[len(HELPER_SCRIPT_STEM):])
+    except Exception:
+        return None
+
+
+def launch_helper(plan, installer_path, pid=None, versions=None):
+    """Yardımcı betiği (ve güncelleme penceresi betiğini) yazar, betiği
+    bağımsız süreç olarak başlatır.
+
+    ``versions``: (kurulu sürüm, kurulacak sürüm) — pencerede gösterilir;
+    bilinmeyen/izinsiz biçimli değer gösterilmez.
     Başarıda {"launched": True, "log": ...}; hata fırlatmaz, sorun varsa
     {"launched": False, "error": ...} döner (çağıran manuel moda düşer).
     """
     pid = pid or os.getpid()
     log_path = update_log_path()
+    eski, yeni = (tuple(versions) + (None, None))[:2] if versions else (None, None)
     try:
+        _write_window(plan)
         if plan["platform"] == "darwin":
-            script = _write_helper(plan, build_mac_helper(_ui_lang), ".sh")
+            script = _write_helper(
+                plan, build_mac_helper(_ui_lang, from_version=eski,
+                                       to_version=yeni), ".sh")
             # 5. argüman: güncelleme kilidi (açılış okur, betik her çıkışta
-            # kaldırır — bkz. UPDATE_LOCK_* bloğu).
+            # kaldırır — bkz. UPDATE_LOCK_* bloğu). Durum dosyası ve pencere
+            # betiği betiğin yanındadır (argüman eklenmez).
             subprocess.Popen(
                 ["/bin/bash", script, str(pid), installer_path,
                  plan["target"], log_path, update_lock_path()],
@@ -1061,11 +1447,14 @@ def launch_helper(plan, installer_path, pid=None):
             )
         else:
             script = _write_helper(
-                plan, build_win_helper(pid, installer_path, plan["target"]),
+                plan, build_win_helper(pid, installer_path, plan["target"],
+                                       lang=_ui_lang, from_version=eski,
+                                       to_version=yeni),
                 ".bat")
             # Görünür küçük bir konsol: sessiz kurulum 1-2 dk sürer, kullanıcı
             # "uygulama yok oldu" sanmasın. CREATE_NEW_CONSOLE süreci bizim
             # konsolumuzdan da ayırır; uygulama kapanınca yardımcı yaşar.
+            # Güncelleme penceresini betik başlatır (WIN_HELPER).
             subprocess.Popen(
                 ["cmd.exe", "/c", script],
                 creationflags=(subprocess.CREATE_NEW_CONSOLE

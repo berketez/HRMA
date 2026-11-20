@@ -121,6 +121,14 @@ class TestIsAkisi:
 # atlamaya tanınır.
 # ---------------------------------------------------------------------------
 from tests.test_d37_atlama_butcesi import _arac, _tezgah, _yaml  # noqa: E402
+from tools.atlama_kapisi import ATLAMA_BUTCESI  # noqa: E402
+
+#: Sentetik rapordaki atlama sayısı bütçenin ÜSTÜNDE olmalı: devredilmeyen
+#: atlamalar kapıyı kapatır, devredilenler bütçeye sayılmadığı için açık
+#: bırakır. 3.0.6'da sabit 100 yazılıydı (bütçe 96 + 4); 3.0.7'de bütçe 136'ya
+#: çıkınca 100 bütçenin altında kaldı ve dört "sayılır" vakası açık döndü
+#: (18 Kas 2026). Sayı artık bütçeden türetilir.
+DEVIR_ADEDI = ATLAMA_BUTCESI + 4
 
 STEP_AKISI = """jobs:
   pytest:
@@ -161,7 +169,7 @@ def _devir_junit(adet, classname='tests.test_s', tip='pytest.skip',
 ])
 def test_step_devri_iki_govdede_ayni(tmp_path, ad, classname, tip, mesaj,
                                      beklenen):
-    xml = _devir_junit(100, classname, tip, mesaj)
+    xml = _devir_junit(DEVIR_ADEDI, classname, tip, mesaj)
     sonuc = []
     for alt, kos in (('a', _arac), ('y', _yaml)):
         kok = _tezgah(tmp_path / alt)
@@ -173,6 +181,6 @@ def test_step_devri_iki_govdede_ayni(tmp_path, ad, classname, tip, mesaj,
     (a_acik, a_cikti), (y_acik, y_cikti) = sonuc
     assert a_acik == y_acik, (ad, a_cikti[-500:], y_cikti[-500:])
     assert a_acik is beklenen, (ad, a_cikti[-500:])
-    beklenen_devir = 100 if beklenen else 0
+    beklenen_devir = DEVIR_ADEDI if beklenen else 0
     for cikti in (a_cikti, y_cikti):
         assert 'step_devri=%d ' % beklenen_devir in cikti, (ad, cikti[-400:])

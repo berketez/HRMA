@@ -79,6 +79,9 @@ MODUL_KW = dict(propellant_mass=100.0, propellant_type='liquid_biprop',
 #: Uç düzeneği: zorunlu dörtlü + itki + cidar çifti (termal hüküm verilir).
 UC_GOVDE = {'chamber_pressure': 20.0, 'propellant_mass': 100.0,
             'chamber_diameter': 0.12, 'wall_thickness': 0.005,
+            # V307/GÜVERTE-ISIL kalem 4: oda sıcaklığı zorunlu (3000 K
+            # varsayılanı kalktı); eski örtük değer açık, sayılar bit-aynı.
+            'chamber_temperature': 3000.0,
             'thrust': 25000.0, 'motor_type': 'liquid',
             'propellant_type': 'liquid_biprop',
             'wall_temperature_hot': 900.0, 'wall_temperature_cold': 600.0}

@@ -625,11 +625,20 @@ class TestISAHelpers:
             'mdot_total': 1.0,
         }
         out = analyzer.calculate_altitude_performance(motor, [0, 5000, 15000])
+        # V307/İRTİFA-TEK: tablo irtifası GEOMETRİK okunur (ana model kararı,
+        # 16 Kas): yardımcı artık isa_pressure_geometric /
+        # isa_temperature_geometric. Eski beklenti isa_pressure(h) (dönüşümsüz)
+        # 5 km'de 54 019,91 Pa, yeni 54 048,29 Pa; 0 m bit-aynı.
+        from hrma.constants import (isa_pressure_geometric,
+                                    isa_temperature_geometric)
         for row in out['altitude_performance']:
             assert row['pressure'] == pytest.approx(
-                isa_pressure(row['altitude']) * BAR_PER_PA, rel=1e-12)
+                isa_pressure_geometric(row['altitude']) * BAR_PER_PA,
+                rel=1e-12)
             assert row['temperature'] == pytest.approx(
-                isa_temperature(row['altitude']), rel=1e-12)
+                isa_temperature_geometric(row['altitude']), rel=1e-12)
+        assert out['altitude_performance'][0]['pressure'] == \
+            isa_pressure(0) * BAR_PER_PA
 
 
 if __name__ == '__main__':

@@ -1466,6 +1466,18 @@ def build_liquid_cea_comparison(engine, results: Dict) -> Dict[str, Any]:
             'mw': _sonlu(results.get('molecular_weight')),
             'gamma': _sonlu(results.get('gamma')),
         }
+        # V307/SIVI-ORTAM: tasarım ortamı deniz seviyesi DEĞİLSE motorun CEA
+        # ortam referansı (``isp_sl_ref``) o ortamın basıncında çözülmüştür;
+        # kıyas da o ortamın Isp'siyle yapılır ve satır adı onu söyler
+        # (deniz seviyesi tasarımında aşağıdaki satırlar eskisiyle aynı).
+        _ortam = results.get('design_ambient')
+        _ortam = _ortam if isinstance(_ortam, dict) else {}
+        _ortam_disi = _ortam.get('is_sea_level') is False
+        _p_ortam = _sonlu(_ortam.get('pressure_bar'))
+        if _ortam_disi:
+            yayim['isp_sl'] = _sonlu(
+                _defter.get('main_chamber_isp_design_ambient_s')
+                if _ana_oda else results.get('isp_design_ambient'))
         eksik = sorted(k for k in ideal if ideal[k] is None or yayim[k] is None)
         if eksik:
             return _unavailable(
@@ -1504,13 +1516,29 @@ def build_liquid_cea_comparison(engine, results: Dict) -> Dict[str, Any]:
              'CEA Isp_vac at the design '
              'expansion ratio', teslim,
              'efficiency_breakdown.applied_delivery_efficiency_pct / 100')
-        ekle('isp_sea_level', 's', 'isp_sl',
-             ('main thrust chamber + nozzle sea-level Isp per main-chamber '
-              'flow (mass_flow_ledger.main_chamber_isp_sea_level_s): '
-              'delivered' if _ana_oda
-              else 'published isp_sea_level: delivered'),
-             'RocketCEA ambient Isp at the design expansion ratio '
-             '(1.01325 bar; Kalt-Badal estimate if the nozzle separates)')
+        _atlanan = []
+        if not _ortam_disi:
+            ekle('isp_sea_level', 's', 'isp_sl',
+                 ('main thrust chamber + nozzle sea-level Isp per '
+                  'main-chamber flow (mass_flow_ledger.'
+                  'main_chamber_isp_sea_level_s): delivered' if _ana_oda
+                  else 'published isp_sea_level: delivered'),
+                 'RocketCEA ambient Isp at the design expansion ratio '
+                 '(1.01325 bar; Kalt-Badal estimate if the nozzle separates)')
+        elif _p_ortam is not None and _p_ortam > 0.0:
+            ekle('isp_design_ambient', 's', 'isp_sl',
+                 ('main thrust chamber + nozzle Isp at the design ambient '
+                  'per main-chamber flow (mass_flow_ledger.'
+                  'main_chamber_isp_design_ambient_s): delivered' if _ana_oda
+                  else 'published isp_design_ambient: delivered'),
+                 'RocketCEA ambient Isp at the design expansion ratio and '
+                 'the design ambient pressure (%g bar; Kalt-Badal estimate '
+                 'if the nozzle separates)' % _p_ortam)
+        else:
+            _atlanan.append({
+                'rows': ['isp_design_ambient'],
+                'reason': ('the design ambient is vacuum: the Isp at the '
+                           'design ambient is the isp_vacuum row')})
         ekle('chamber_temperature', 'K', 'tc',
              'published chamber_temperature', 'CEA chamber temperature',
              iliski='identical_source')
@@ -1539,7 +1567,7 @@ def build_liquid_cea_comparison(engine, results: Dict) -> Dict[str, Any]:
             'cea_source': kunye_cea,
             'delta_definition': DELTA_DEFINITION,
             'rows': satirlar,
-            'rows_omitted': [],
+            'rows_omitted': _atlanan,
             # V306/SIVI-DEFTER: Isp satırları ana itki odası + lüle (yalnız
             # açık çevrim defteri kapandığında yayımlanır).
             **({'isp_rows_basis': 'main_thrust_chamber'} if _ana_oda else {}),

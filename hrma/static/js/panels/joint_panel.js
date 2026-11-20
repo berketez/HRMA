@@ -348,8 +348,12 @@
         endpoint: '/api/bolted-joint',
         motorTypes: ['hybrid', 'liquid', 'solid'],
         fields: [
-            ['pressure_bar', 'Chamber Pressure (bar)', 40, 1, 'common.f.chamberPressureBar', 'panel.joint.help.pressure_bar'],
-            ['seal_diameter_mm', 'Seal / Effective Diameter (mm)', 100, 1, 'panel.joint.fSealDiameter', 'panel.joint.help.seal_diameter_mm'],
+            // V307/SEKME-GÜVERTE (NK3-H-7 ailesi): motordan gelen büyüklüklerin
+            // tanım değeri BOŞ (eskiden gizli bir motor: 40 bar, Ø 100 mm conta). Son hesap
+            // başarısızken (sonuç düşürüldü) alanlar tanım değerine döner; boş
+            // zorunlu alan isteği durdurur ve adıyla söylenir (`required`).
+            ['pressure_bar', 'Chamber Pressure (bar)', '', 1, 'common.f.chamberPressureBar', 'panel.joint.help.pressure_bar'],
+            ['seal_diameter_mm', 'Seal / Effective Diameter (mm)', '', 1, 'panel.joint.fSealDiameter', 'panel.joint.help.seal_diameter_mm'],
             ['bolt_count', 'Bolt Count', 8, 1, 'panel.joint.fBoltCount', 'panel.joint.help.bolt_count'],
             ['size', 'Bolt Size', 'M8', SIZES, 'panel.joint.fBoltSize', 'panel.joint.help.size'],
             ['property_class', 'Property Class', '8.8', CLASSES, 'panel.joint.fPropertyClass', 'panel.joint.help.property_class'],
@@ -361,6 +365,7 @@
             ['external_axial_load_n', 'Extra Axial Load (N, optional)', '', 100,
              'panel.joint.fExtraAxial', 'panel.joint.help.external_axial_load_n'],
         ],
+        required: ['pressure_bar', 'seal_diameter_mm'],
         fromResults: function (r) {
             var m = (r && r.motor) || r || {};
             var out = {};

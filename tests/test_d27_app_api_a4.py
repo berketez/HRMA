@@ -112,9 +112,13 @@ class TestP7B411EnjekteSabitler:
         govde = kaynak[i:kaynak.index('\ndef ', i + 10)]
         assert 'throat_area (m^2) or throat_diameter (m)' in govde
         assert 'expansion_ratio > 1 (or exit_diameter)' in govde
+        # V307/KÜÇÜKLER-2 (kalem 2): modül oda sıcaklığını artık varsaymıyor
+        # (eski 3000 K); kapının üçüncü ikiz koşulu.
+        assert 'chamber_temperature (K) is required' in govde
         assert _APA_REQUIRED_ANY_OF['nozzle_mach'] == (
             ('throat_area', 'throat_diameter'),
-            ('expansion_ratio', 'exit_diameter'))
+            ('expansion_ratio', 'exit_diameter'),
+            ('chamber_temperature',))
 
 
 # ===========================================================================

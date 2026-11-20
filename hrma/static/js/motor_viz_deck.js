@@ -1068,7 +1068,7 @@
                 + T('viz.cfd.stations', 'axial stations');
             if (st.decimated) {
                 txt += '. ' + T('viz.cfd.decimated',
-                    'The endpoint thinned the field before it was sent; the '
+                    'The field was thinned before it was sent; the '
                     + 'scene shows exactly the cells that arrived.');
             }
             return txt;

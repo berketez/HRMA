@@ -1,0 +1,44 @@
+{
+  "schema_version": "1.0",
+  "test_id": "sol-marmureanu2014-s5k-293k",
+  "record_type": "static_fire",
+  "motor_type": "solid",
+  "source": {
+    "citation": "M. I. Mărmureanu, 'Solid Rocket Motor Internal Ballistics Simulation Using Different Burning Rate Models', U.P.B. Scientific Bulletin, Series D, 76(4), s. 49-56, 2014 — Şekil 4-6 altındaki tablolar",
+    "doi": null,
+    "url": "https://scientificbulletin.upb.ro/static/pdfs/rez54a_656199.pdf",
+    "access": "open",
+    "confidence": "medium",
+    "date_checked": "2026-11-16",
+    "data_extraction": "table",
+    "extraction_note": "Deney sütunu (ilk sütun) Şekil 5 altındaki tablodan; 223 K ve 323 K değerleri notlarda. Motor geometrisi ve yanma yasası katsayıları makale METNİNDE yok (yasa Şekil 1'de grafik)."
+  },
+  "propellants": {
+    "propellant": "PRTF 111 çift bazlı (NC %56 / NG %26,7 / DNT %10,5 / EC %3 / CaCO3 %1,7 / vaks %1,2 / PbO %0,9)",
+    "hrma_propellant_key": "double_base"
+  },
+  "geometry": {
+    "grain_geometry": "S-5K (57 mm sınıfı) roket motoru; tane ve boğaz ölçüleri makalede YOK"
+  },
+  "inputs": {
+    "propellant_temperature_k": 293
+  },
+  "measured": {
+    "burn_time_s": 0.675,
+    "chamber_pressure_peak_mpa": 17.739,
+    "chamber_pressure_avg_mpa": 14.935,
+    "pressure_integral_mpas": 10.417
+  },
+  "units_original": "MPa, s, K (makale tabloları)",
+  "digitized": false,
+  "synthetic": false,
+  "tags": [
+    "static_fire",
+    "double_base",
+    "peer_reviewed",
+    "kismi_girdi",
+    "kismi_kayit_kosmaz",
+    "published_literature"
+  ],
+  "notes": "KISMİ KAYIT (V307 karar 3): tam motor koşusu YAPILMAZ; yalnız tanım/kaynak kaydıdır. Kaynak sınıfı: üniversite bülteni (hakemli). Girdi tamlığı DÜŞÜK: geometri ve yanma yasası sayıları yok; yazara/üreticiye sorulmadan tam koşu yapılamaz. Diğer sıcaklıklar (deney): 223 K → 0,819 s / tepe 15,069 / ort. 12,059 MPa / 10,319 MPa·s; 323 K → 0,610 s / 20,530 / 16,695 / 10,492. Yön gösterici bulgu: yazarın 0-B modeli yalın Vieille yasasıyla tepe basıncı %12-18 DÜŞÜK buluyor (erozif yanma eklenince kapanıyor), süreyi ±%5 içinde tutturuyor."
+}

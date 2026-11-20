@@ -855,7 +855,7 @@ class AcousticModeAnalyzer:
             status = self.STATUS_NOT_EVALUATED
             note = ('Chug margin NOT evaluated: supply injector_dp_ratio, or '
                     'both injector_pressure_drop_bar and chamber_pressure '
-                    '[bar]. No verdict is fabricated without the input.')
+                    '[bar]. Without this input no verdict is given.')
         elif ratio >= CHUG_DP_RATIO_RECOMMENDED:
             status = self.STATUS_OK
             note = (f'Injector pressure drop ratio {ratio:.3f} meets the '
@@ -965,7 +965,7 @@ def analyze_from_engine_result(engine_result: Dict,
     if missing:
         raise ValueError(
             "engine_result is missing required fields for the acoustic "
-            f"analysis: {missing}. No defaults are fabricated — supply the "
+            f"analysis: {missing}. No default values are used — supply the "
             "combustion/geometry outputs explicitly.")
 
     mw = float(engine_result['molecular_weight'])  # g/mol = kg/kmol

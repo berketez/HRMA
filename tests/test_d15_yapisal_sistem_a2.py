@@ -421,6 +421,9 @@ class TestP5B2_09MarjTanimi:
             'chamber_pressure': 40.0, 'propellant_mass': 5.0,
             'chamber_diameter': 0.1, 'wall_thickness': 0.002,
             'material': 'steel_4130', 'thrust': 4000.0, 'burn_time': 6.0,
+            # V307/GÜVERTE-ISIL kalem 4: oda sıcaklığı zorunlu (3000 K
+            # varsayılanı kalktı); eski örtük değer açık, sayılar bit-aynı.
+            'chamber_temperature': 3000.0,
             'propellant_type': 'APCP'})
         assert r.status_code == 200
         ps = r.get_json()['safety_analysis']['pressure_safety']
@@ -443,7 +446,10 @@ class TestP5B2_10SifirYakitKapisi:
 
     YUK = {'chamber_pressure': 40.0, 'chamber_diameter': 0.1,
            'wall_thickness': 0.002, 'material': 'steel_4130',
-           'thrust': 4000.0, 'burn_time': 6.0, 'propellant_type': 'APCP'}
+           'thrust': 4000.0, 'burn_time': 6.0, 'propellant_type': 'APCP',
+           # V307/GÜVERTE-ISIL kalem 4: oda sıcaklığı zorunlu; yoksa
+           # eksik-alan kapısı (incomplete) değer kapısından ÖNCE döner.
+           'chamber_temperature': 3000.0}
 
     @pytest.mark.parametrize('kutle', [0.0, -1.0])
     def test_sifir_veya_negatif_yakit_kutlesi_hukum_uretmez(self, istemci,

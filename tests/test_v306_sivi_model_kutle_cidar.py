@@ -160,7 +160,9 @@ def test_plaka_yoksa_motor_ve_cad_tartmaz(ornek):
 
 def test_plaka_boyutlaninca_motor_cad_ve_plaka_ayni_sayi(ornek_plaka):
     ps = ornek_plaka['injector_plate_structural']
-    assert ps['status'] == 'sized'
+    # V307/PLAKA-MARŞ: plaka standart levhaya boyutlanıp DOĞRULANIR
+    # ('analyzed'); tartılan kalınlık ``plate_thickness_mm``dir.
+    assert ps['status'] == 'analyzed'
     cm = ornek_plaka['component_sizing']['component_masses']
     assert cm['injector_assembly'] == pytest.approx(ps['plate_mass_kg'],
                                                     rel=1e-6)
@@ -172,7 +174,7 @@ def test_plaka_boyutlaninca_motor_cad_ve_plaka_ayni_sayi(ornek_plaka):
     a = ps['plate_diameter_mm'] / 2000.0
     n = ps['n_holes']
     dh = ps['hole_diameter_mm'] / 1000.0
-    t = ps['required_thickness_mm'] / 1000.0
+    t = ps['plate_thickness_mm'] / 1000.0
     beklenen = rho * (math.pi * a * a - n * math.pi * (dh / 2) ** 2) * t
     assert cm['injector_assembly'] == pytest.approx(beklenen, rel=1e-9)
     assert ornek_plaka['component_sizing']['not_weighed'] == []

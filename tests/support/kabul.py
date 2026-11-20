@@ -469,7 +469,12 @@ function kur(spec, tur) {
   if (tur === 'dock' && typeof spec.contextFromResults === 'function'
       && !out.missing.length && !Object.keys(out.blocked).length) {
     let baglam = null;
-    try { baglam = spec.contextFromResults(results); } catch (e) { baglam = null; }
+    // 3.0.7 (ana model 20 Kas): sayfanın runPanel'i (analysis_dock.js,
+    // V307/ONARIM-İTKİ-A M7-ITKI-8) kurulan gövdeyi bağlam kancasına İKİNCİ
+    // argüman verir (PERFORMANS: Temel Isp motorun tohumuysa tasarım ortamı);
+    // ayna tek argümanla çağırıyordu — U2 [liquid, hybrid] 'design_ambient
+    // aynada YOK' kırmızısı ayna kaynaklıydı (yerel kabul_ui, rc.6).
+    try { baglam = spec.contextFromResults(results, out.payload); } catch (e) { baglam = null; }
     if (baglam && typeof baglam === 'object') {
       Object.keys(baglam).forEach(k => {
         if (!Object.prototype.hasOwnProperty.call(out.payload, k)

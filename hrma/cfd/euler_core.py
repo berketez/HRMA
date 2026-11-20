@@ -186,7 +186,7 @@ OUTLET_ANCHOR_BASIS = (
     '"Computational Fluid Dynamics: Principles and Applications", 2. '
     'baskı, sınır koşulları bölümü, ses-altı çıkış). Çapa değeri '
     'ÇÖZÜMÜN KENDİSİNDEN okunur (çekirdek süpersoniktir, yani yalnız '
-    'yukarı akıştan belirlenir) — uydurma sabit yoktur. Kapsam: yalnız '
+    'yukarı akıştan belirlenir) — varsayılan sabit yoktur. Kapsam: yalnız '
     'Pb=None (tam dışdeğerleme) çıkışında anlamlıdır; Pb verildiğinde '
     'ses-altı hücreler zaten Pb\'ye bağlanır.')
 

@@ -157,12 +157,15 @@ TPS_VAKALARI = {
                                  'material': 'silica_phenolic'},
     'ablatif_zarf_ICI': {'mode': 'ablative', 'q_net_W_m2': 2e6,
                          'burn_time_s': 10.0, 'material': 'silica_phenolic'},
+    # V307/KÜÇÜKLER kalem 5: T_initial_K zorunlu; eski örtük değer açık yazıldı.
     'heatsink_ERIME': {'mode': 'heat_sink', 'burn_time_s': 10.0,
                        'wall_thickness_m': 0.005, 'material': 'steel_4130',
-                       'h_gas_W_m2K': 3000.0, 'T_recovery_K': 3200.0},
+                       'h_gas_W_m2K': 3000.0, 'T_recovery_K': 3200.0,
+                       'T_initial_K': 300.0},
     'heatsink_SAGLIKLI': {'mode': 'heat_sink', 'burn_time_s': 3.0,
                           'wall_thickness_m': 0.010, 'material': 'copper',
-                          'h_gas_W_m2K': 800.0, 'T_recovery_K': 900.0},
+                          'h_gas_W_m2K': 800.0, 'T_recovery_K': 900.0,
+                          'T_initial_K': 300.0},
 }
 
 

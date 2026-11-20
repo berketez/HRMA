@@ -693,7 +693,7 @@ def _aralik_denetimi(T_history, T_initial, inner_side, outer_side,
             "T_min": T_min, "T_maks": T_maks,
             "beyan": ("sınır koşullarından en az biri dayatılmış AKI "
                       "(Neumann); sürüş sıcaklığı tanımsız olduğu için "
-                      "kabul aralığı ÖLÇÜLEMEZ — uydurma sınır konmaz"),
+                      "kabul aralığı ÖLÇÜLEMEZ — yerine başka sınır konmaz"),
         }
     aday = list(suruş) + [float(T_initial)]
     alt, ust = min(aday), max(aday)

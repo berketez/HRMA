@@ -111,19 +111,106 @@
             .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
     }
 
+    // ------------------------------------------------------------------
+    // V307/GÜVERTE-ORTAM — ORTAMA BAĞLI ÇIKTILARIN ADI ORTAMI SÖYLER
+    // ------------------------------------------------------------------
+    // Sıvı motorda tasarım ortamı deniz seviyesi değilse fabrikanın Isp
+    // çıktısı tasarım ortamının Isp'sidir (uq_adapters.liquid_uq_isp) ve
+    // itki çıktısı o ortamdaki itkidir (girdi). ÖLÇÜLDÜ (olcum/ortam_once.json
+    // K2): eskiden Isp çıktısı vakum tasarımında deniz seviyesi Isp'siydi ya
+    // da (deniz seviyesinde ayrılan nozulda) hiç yoktu, etiket iki hâlde de
+    // yalnız "Isp" diyordu. Ortam, bu sonucu üreten İSTEĞİN kendi tasarım
+    // ortamı alanlarından okunur (fabrika motoru bu alanlarla kurdu; deniz
+    // seviyesinde sayfa bu alanları göndermez → etiket bugünküyle aynı).
+    // Ortam okuyucusu tek kaynaktır (performance_panel.js
+    // window.HRMAIspAmbient).
+    const ORTAMA_BAGLI_CIKTILAR = ['isp', 'thrust'];
+    //: Ekrandaki sonucun tasarım ortamı (deniz seviyesinde null).
+    let ciktiOrtami = null;
+
+    function ciktiOrtaminiKur(gonderilen) {
+        const AMB = window.HRMAIspAmbient;
+        ciktiOrtami = (AMB && typeof AMB.describeInputs === 'function')
+            ? AMB.describeInputs(gonderilen) : null;
+        // Okuyucu yoksa ama istek deniz seviyesi dışında bir ortam taşıyorsa
+        // ortam yok sayılmaz: "beyan edilmedi" adıyla yazılır (fail-closed).
+        const kip = gonderilen && gonderilen.design_ambient_mode;
+        if (!ciktiOrtami && kip && kip !== 'sea_level') {
+            ciktiOrtami = { kind: 'undeclared', key: 'undeclared', p: null, h: null };
+        }
+    }
+
+    function ciktiOrtamiMetni() {
+        if (!ciktiOrtami) return '';
+        const AMB = window.HRMAIspAmbient;
+        return (AMB && typeof AMB.labelText === 'function')
+            ? AMB.labelText(ciktiOrtami)
+            : T('panel.ambient.undeclared', 'design ambient not declared by the result');
+    }
+
     function labelFor(key) {
         const pair = OUTPUT_LABEL_KEYS[key];
-        if (pair) return T(pair[1], pair[0]);
-        return key.replace(/_/g, ' ').replace(/\b\w/g, function (c) {
-            return c.toUpperCase();
-        });
+        let ad;
+        if (pair) ad = T(pair[1], pair[0]);
+        else {
+            ad = key.replace(/_/g, ' ').replace(/\b\w/g, function (c) {
+                return c.toUpperCase();
+            });
+        }
+        if (ciktiOrtami && ORTAMA_BAGLI_CIKTILAR.indexOf(key) !== -1) {
+            ad += ' · ' + ciktiOrtamiMetni();
+        }
+        return ad;
+    }
+
+    // ------------------------------------------------------------------
+    // V307/GRAFİK-BİRİM (kalem 3) — ÇIKTI BİRİMİ sözleşmeden
+    // ------------------------------------------------------------------
+    // ÖLÇÜLDÜ (V307/DİL-EKRAN KALAN O7): kartlar HİÇBİR çıktıda birim
+    // basmıyordu; yanıtta birim alanı yoktu. Birim artık her çıktı bloğunun
+    // ``unit`` alanından (üreticinin birimi, uq_adapters
+    // CONTRACT_OUTPUT_UNITS) okunur; alan yoksa birim basılmaz (uydurulmaz).
+    // EKRAN ÖLÇEĞİ: ortalama regresyon hızı üreticide m/s, aynı sayfanın
+    // raporu (app.js 'Avg Regression Rate') mm/s basıyor (×1000). Ekranda
+    // tek birim: sayfanınki. Ölçek YALNIZ sözleşmenin beyan ettiği birim
+    // tablodaki kaynak birimle aynıysa uygulanır; sayı başka bir birimle
+    // gelirse olduğu gibi, kendi birimiyle basılır.
+    const EKRAN_OLCEGI = {
+        regression_rate_avg: { kaynak: 'm/s', ekran: 'mm/s', carpan: 1000 },
+    };
+    function ekranOlcegi(key, o) {
+        const e = EKRAN_OLCEGI[key];
+        return (e && o && o.unit === e.kaynak) ? e : null;
+    }
+    function ekranDegeri(key, o, x) {
+        const e = ekranOlcegi(key, o);
+        return (e && typeof x === 'number' && isFinite(x)) ? x * e.carpan : x;
+    }
+    function ekranBirimi(key, o) {
+        const e = ekranOlcegi(key, o);
+        const u = e ? e.ekran : ((o && typeof o.unit === 'string') ? o.unit : '');
+        return u.replace(/\*/g, '·').replace(/\^2/g, '²');
+    }
+    function birimEki(key, o) {
+        const u = ekranBirimi(key, o);
+        return u ? ' <span data-uq-unit="1" style="font-size:0.72em;'
+            + ' color:var(--hd-ink-dim, #7d97a5);">' + escapeHtml(u) + '</span>' : '';
     }
 
     // Sayı büyüklüğüne uyumlu biçim (Isp ~200 ile It ~1e5 aynı kartta)
     function fmtVal(x) {
         if (x == null || !isFinite(x)) return '—';
         const a = Math.abs(x);
-        if (a !== 0 && (a >= 1e5 || a < 1e-2)) return x.toExponential(3);
+        // V307/DİL-EKRAN-2 (DİL-HİBRİT O7): üstel gösterim de yerel ayraçla.
+        // `toExponential` çıktısı ECMA-262 gereği hep noktalıdır; TR ekranda
+        // aynı kartta "7.722e-4" ile "212,35" yan yana okunuyordu (ORTALAMA
+        // REGRESYON HIZI). `I18N.decimalText` yalnız ayracı çevirir, basamak
+        // değişmez (cfd_panel / stability_panel `fmtExp` emsali).
+        if (a !== 0 && (a >= 1e5 || a < 1e-2)) {
+            const ust = x.toExponential(3);
+            return (window.I18N && typeof window.I18N.decimalText === 'function')
+                ? window.I18N.decimalText(ust) : ust;
+        }
         // ÖH D31 · OH-D30-06: duyarlık merdiveni aynı, ayraç yerel.
         if (a >= 100) return U.num(x, 1);
         if (a >= 1) return U.num(x, 2);
@@ -255,6 +342,22 @@
     if (window.I18N && typeof window.I18N.onChange === 'function') {
         window.I18N.onChange(function () {
             if (sonDurum) durumYaz(sonDurum.uret, sonDurum.kind);
+            // V307/DİL-EKRAN-2 (NK3-S-5): sonuç bu panelin kendi koşusundan
+            // (`finish`) geliyor; güvertenin `rerenderAll`ı onu görmüyor.
+            // Canlı TR→EN geçişte kartlar eski dilde kalıyor, Türkçe metin
+            // `lang=en` altında büyük harfe çevriliyordu ("DEBISI").
+            // Saklanan yanıt yeni dilde yeniden çizilir (yeni istek yok).
+            const root = document.getElementById('ad_root_' + PANEL_ID);
+            if (lastData && root && root.style.display !== 'none') {
+                try {
+                    U.purgePlots(root);
+                    root.innerHTML = '';
+                    render(lastData, root);
+                    if (window.I18N.applyTo) window.I18N.applyTo(root);
+                } catch (e) {
+                    if (window.console) console.warn('uncertainty rerender:', e);
+                }
+            }
         });
     }
 
@@ -611,6 +714,8 @@
             });
             return;
         }
+        // V307/GÜVERTE-ORTAM: çıktı adları bu sonucu üreten isteğin ortamıyla.
+        ciktiOrtaminiKur(gonderilen);
         finish(data, document.getElementById('uq_run'), root);
         if (lastData === data) {
             gosterilenGirdi = gonderilen;
@@ -735,14 +840,14 @@
                  letter-spacing:0.08em;">${name}</div>
             <div style="font-size:1.2rem; font-family:var(--hd-mono);
                  color:var(--hd-ink-dim, #7d97a5); margin-top:2px;">
-                ${fmtVal(ornekDisi ? o.nominal : o.p50)}</div>
+                ${fmtVal(ekranDegeri(key, o, ornekDisi ? o.nominal : o.p50))}${birimEki(key, o)}</div>
             <div style="font-family:var(--hd-mono); font-size:0.72rem;
                  color:var(--hd-ink-dim, #7d97a5); margin-top:4px;">
                 ${escapeHtml(degenerateNote(o))}</div>
             <div style="font-family:var(--hd-mono); font-size:0.7rem;
                  color:var(--hd-ink-dim, #7d97a5); margin-top:4px;">
-                ${T('panel.uncertainty.nominal', 'nominal')} ${fmtVal(o.nominal)}${
-                    ornekDisi ? '' : ' · σ ' + fmtVal(o.std)}</div>
+                ${T('panel.uncertainty.nominal', 'nominal')} ${fmtVal(ekranDegeri(key, o, o.nominal))}${
+                    ornekDisi ? '' : ' · σ ' + fmtVal(ekranDegeri(key, o, o.std))}${birimEki(key, o)}</div>
         </div>`;
     }
 
@@ -760,14 +865,14 @@
             <div style="font-size:1.2rem; font-family:var(--hd-mono);
                  color:var(--hd-ink-strong, #eaf7fb); margin-top:2px;"
                  title="${T('panel.uncertainty.p50Tip', 'Median of the Monte Carlo sample (P50)')}">
-                ${fmtVal(o.p50)}</div>
+                ${fmtVal(ekranDegeri(key, o, o.p50))}${birimEki(key, o)}</div>
             <div style="font-family:var(--hd-mono); font-size:0.72rem;
                  color:var(--hd-cyan, #00e5ff);"
                  title="${T('panel.uncertainty.bandTip', '90% band: 5th to 95th percentile')}">
-                [${fmtVal(o.p5)}, ${fmtVal(o.p95)}]</div>
+                [${fmtVal(ekranDegeri(key, o, o.p5))}, ${fmtVal(ekranDegeri(key, o, o.p95))}]${birimEki(key, o)}</div>
             <div style="font-family:var(--hd-mono); font-size:0.7rem;
                  color:var(--hd-ink-dim, #7d97a5); margin-top:4px;">
-                ${T('panel.uncertainty.nominal', 'nominal')} ${fmtVal(o.nominal)} · σ ${fmtVal(o.std)}</div>
+                ${T('panel.uncertainty.nominal', 'nominal')} ${fmtVal(ekranDegeri(key, o, o.nominal))} · σ ${fmtVal(ekranDegeri(key, o, o.std))}${birimEki(key, o)}</div>
         </div>`;
     }
 
@@ -822,7 +927,7 @@
             html += U.statCard(T('panel.uncertainty.cardSampler', 'SAMPLER'),
                 escapeHtml(String(data.sampler)), '', 'info',
                 T('panel.uncertainty.cardSamplerTip',
-                  'Sampling scheme the endpoint used to draw the inputs'));
+                  'Sampling scheme the calculation used to draw the inputs'));
         }
         if (data.uq_version) {
             html += U.statCard(T('panel.uncertainty.cardUqVersion', 'UQ CORE'),
@@ -1088,8 +1193,11 @@
             return;
         }
         const o = data.outputs[key];
-        const edges = o.histogram.edges;
+        // V307/GRAFİK-BİRİM (kalem 3): eksen kartla AYNI birimde (ekran ölçeği).
+        const edges = o.histogram.edges.map(function (x) { return ekranDegeri(key, o, x); });
         const counts = o.histogram.counts;
+        const birim = ekranBirimi(key, o);
+        const eksenAdi = labelFor(key) + (birim ? ' (' + birim + ')' : '');
         const centers = [];
         const widths = [];
         for (let i = 0; i < counts.length; i++) {
@@ -1098,7 +1206,7 @@
         }
         const shapes = [];
         [['p5', 'dot'], ['p50', 'solid'], ['p95', 'dot']].forEach(function (m) {
-            const x = o[m[0]];
+            const x = ekranDegeri(key, o, o[m[0]]);
             if (typeof x === 'number' && isFinite(x)) {
                 shapes.push({ type: 'line', x0: x, x1: x, y0: 0, y1: 1,
                     yref: 'paper', line: { width: 1, dash: m[1] } });
@@ -1112,12 +1220,12 @@
             y: counts,
             width: widths,
             hovertemplate: labelFor(key)
-                + ': %{x:.4g}<br>' + T('panel.uncertainty.count', 'count')
+                + ': %{x:.4g}' + (birim ? ' ' + birim : '') + '<br>' + T('panel.uncertainty.count', 'count')
                 + ': %{y}<extra></extra>',
         }], {
             title: U.tf('panel.uncertainty.chartHistogram', { name: labelFor(key) },
                         '{name} — Monte Carlo Distribution'),
-            xaxis: { title: labelFor(key) },
+            xaxis: { title: eksenAdi },
             yaxis: { title: T('panel.uncertainty.axisSampleCount', 'Sample count') },
             bargap: 0.05,
             shapes: shapes,
@@ -1395,7 +1503,13 @@
         _render: render,
         _collectInputs: collectInputs,
         _labelFor: labelFor,
+        // V307/GÜVERTE-ORTAM — çıktı adlarının ortamını istek girdisinden kur
+        // (bekçiler `_render` öncesi çağırır; koşu yolu sonucuGoster'de).
+        _setOutputAmbientFromInputs: ciktiOrtaminiKur,
+        get outputAmbient() { return ciktiOrtami; },
         _fmtVal: fmtVal,
+        // V307/GRAFİK-BİRİM (kalem 3): kartın birim/ölçek bekçisi.
+        _ciCard: ciCard,
         _augmentSection: augmentSection,
         _conditionalityHtml: conditionalityHtml,
         // Duyarlılık saf katmanı (bekçiler izleri yanıtla karşılaştırsın)

@@ -344,6 +344,24 @@
         return Object.keys(out).length ? out : null;
     }
 
+    // V307/ONARIM-İTKİ-A (M7-ITKI-16): özetteki Isp'nin ortamı ADIYLA.
+    // Motorun `design_ambient` bloğu deniz seviyesi DIŞINDAysa kip ve sayıları
+    // (yanıtın kendi beyanı; hiçbir sayı türetilmez) özete yazılır; liste
+    // satırı "(vakum)" / "(20000 m tasarım irtifası (0,0553 bar))" der.
+    // Eskiden "(tasarım noktası)" yazıyordu: vakum Isp'si deniz seviyesi
+    // Isp'lerinin yanında ortamsız duruyordu.
+    // Proje dosyasının `results_summary`ı yalnız SKALER değer kabul eder
+    // (hrma/utils/projects.py::_validate_results_summary): ortam düz
+    // anahtarlarla yazılır.
+    function ozetOrtami(da) {
+        if (!da || typeof da !== 'object' || da.is_sea_level !== false
+                || typeof da.mode !== 'string') return null;
+        var o = { isp_ambient_mode: da.mode };
+        if (typeof da.pressure_bar === 'number' && isFinite(da.pressure_bar)) o.isp_ambient_pressure_bar = da.pressure_bar;
+        if (typeof da.altitude_m === 'number' && isFinite(da.altitude_m)) o.isp_ambient_altitude_m = da.altitude_m;
+        return o;
+    }
+
     // Küçük sonuç özeti — yalnız liste kartları için; panellere geri basılmaz
     function serializeResultsSummary() {
         var cr = window.currentResults;
@@ -359,7 +377,21 @@
             put('burn_time_s', m.burn_time);
             put('chamber_pressure_bar', m.chamber_pressure);
             put('total_impulse_Ns', m.total_impulse);
-            if ('isp_s' in out) out.isp_basis = 'design_point';
+            if ('isp_s' in out) {
+                // V307/ONARIM-İTKİ-A (M7-ITKI-16): hibritin tasarım noktası
+                // ortamı bloğundan: ISA deniz seviyesiyse 'sea_level',
+                // değilse ortamın adı; blok yoksa (eski yanıt) eskisi gibi.
+                var hda = m.design_ambient;
+                var hOrtam = ozetOrtami(hda);
+                if (hOrtam) {
+                    out.isp_basis = 'design_ambient';
+                    Object.keys(hOrtam).forEach(function (k) { out[k] = hOrtam[k]; });
+                } else if (hda && typeof hda === 'object' && hda.is_sea_level === true) {
+                    out.isp_basis = 'sea_level';
+                } else {
+                    out.isp_basis = 'design_point';
+                }
+            }
         } else if (motorType === 'solid') {
             put('total_impulse_Ns', cr.total_impulse);
             put('burn_time_s', cr.burn_time);
@@ -372,8 +404,24 @@
             }
         } else if (motorType === 'liquid') {
             put('thrust_N', cr.thrust);
-            put('isp_s', cr.isp_sea_level);
-            if ('isp_s' in out) out.isp_basis = 'sea_level';
+            // V307/SIVI-ORTAM: tasarım ortamı deniz seviyesi değilse özetin
+            // Isp'si o ortamın Isp'sidir (itki de o ortamın itkisi); taban
+            // 'design_point' diye yazılır. Deniz seviyesi tasarımı eskisi gibi.
+            if (cr.design_ambient && cr.design_ambient.is_sea_level === false) {
+                put('isp_s', cr.isp_design_ambient);
+                if ('isp_s' in out) {
+                    var sOrtam = ozetOrtami(cr.design_ambient);
+                    if (sOrtam) {
+                        out.isp_basis = 'design_ambient';
+                        Object.keys(sOrtam).forEach(function (k) { out[k] = sOrtam[k]; });
+                    } else {
+                        out.isp_basis = 'design_point';
+                    }
+                }
+            } else {
+                put('isp_s', cr.isp_sea_level);
+                if ('isp_s' in out) out.isp_basis = 'sea_level';
+            }
             put('isp_vacuum_s', cr.isp_vacuum);
             put('chamber_pressure_bar', cr.chamber_pressure);
             // ÖH D37 · A1b dil-cozucu-nesri · CW-D4 — SIVI SATIRINDA It.
@@ -1129,6 +1177,24 @@
             : value.toFixed(digits);
     }
 
+    // M7-ITKI-16: ortam etiketi güverte panellerinin AYNI anahtarlarıyla
+    // (panel.ambient.*; tek adlandırma). Kayıt bozuksa etiket uydurulmaz.
+    function ozetOrtamEtiketi(o) {
+        if (!o || typeof o !== 'object') return null;
+        var p = (typeof o.isp_ambient_pressure_bar === 'number' && isFinite(o.isp_ambient_pressure_bar))
+            ? o.isp_ambient_pressure_bar : null;
+        var h = (typeof o.isp_ambient_altitude_m === 'number' && isFinite(o.isp_ambient_altitude_m))
+            ? o.isp_ambient_altitude_m : null;
+        if (o.isp_ambient_mode === 'vacuum' || p === 0) return T('panel.ambient.vacuum', 'vacuum');
+        if (o.isp_ambient_mode === 'altitude' && h !== null) {
+            return (p !== null)
+                ? TF('panel.ambient.altitudeP', { h: Math.round(h), p: nf(p, 4) }, '{h} m design altitude ({p} bar)')
+                : TF('panel.ambient.altitude', { h: Math.round(h) }, '{h} m design altitude');
+        }
+        if (p !== null) return TF('panel.ambient.pressure', { p: nf(p, 4) }, '{p} bar design ambient');
+        return null;
+    }
+
     function summaryMini(summary, motorTypeOfSummary) {
         if (!summary) return '';
         var bits = [];
@@ -1149,10 +1215,15 @@
             var ispTaban = (summary.isp_basis === 'sea_level'
                             || summary.isp_basis === 'design_point')
                 ? summary.isp_basis
+                : (summary.isp_basis === 'design_ambient') ? 'design_point'
                 : ({ solid: 'sea_level', liquid: 'sea_level',
                      hybrid: 'design_point' })[motorTypeOfSummary] || null;
             var ispMetni = 'Isp ' + nf(summary.isp_s, 1) + ' s';
-            if (ispTaban === 'sea_level') {
+            var ortamAdi = (summary.isp_basis === 'design_ambient')
+                ? ozetOrtamEtiketi(summary) : null;
+            if (ortamAdi) {
+                ispMetni += ' (' + ortamAdi + ')';
+            } else if (ispTaban === 'sea_level') {
                 ispMetni += ' (' + T('proj.ispBasisSeaLevel', 'sea level') + ')';
             } else if (ispTaban === 'design_point') {
                 ispMetni += ' (' + T('proj.ispBasisDesign', 'design point') + ')';
@@ -1749,6 +1820,12 @@
         // kullanıcı düzenlemesi değildir (sayfaların override sayımı okur).
         isRestoring: function () {
             return !!state.restoring;
+        },
+        // 3.0.7 (M7-FS-6 kalanı, ana model 20 Kas): yüklenen ya da kaydedilen
+        // projenin adı (kaydedilmemiş yazım değil); yoksa null. Fırlatma
+        // Sahası'na giden oturum aracı adını buradan alır (flight_handoff.js).
+        currentName: function () {
+            return state.savedName ? String(state.savedName) : null;
         },
         // Test / hata ayıklama kancaları (saf yardımcılar)
         _validName: validName,

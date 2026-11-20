@@ -707,7 +707,7 @@ def ic_kose_yuvarlatma(contour: np.ndarray, thickness: np.ndarray,
             "Çember üzerindeki üç nokta için çevrel yarıçap TAM çemberin "
             "yarıçapı olduğundan Rao boğaz yayı bire bir geri gelir; pürüzsüz "
             "ama daire olmayan parçalarda gerçek eğrilik yarıçapına O(h²) "
-            "yakınsar — yani bu bir uydurma geometri değil, poligonun geldiği "
+            "yakınsar — yani bu bir varsayılan geometri değil, poligonun geldiği "
             "C1 eğrinin yeniden kurulmasıdır (M. L. Williams 1952: yeniden-"
             "giren köşe gerilme tekilliği; köşe kalkınca tekillik de kalkar). "
             "n_axial'dan BAĞIMSIZDIR: her inceltme turu aynı limit geometriyi "

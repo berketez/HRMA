@@ -84,3 +84,67 @@ Library Exception) and libquadmath (LGPL-2.1); Shapely carries GEOS
 (LGPL-2.1); Pillow carries its image codecs. Each wheel ships these notices
 and licence texts in its own dist-info directory (see
 licenses/PYTHON_PACKAGES.txt).
+
+== GeoNames gazetteer (place names, close-range map labels) ==
+Data: hrma/static/map/places_detail.json
+Licence: Creative Commons Attribution 4.0 International (CC BY 4.0),
+  https://creativecommons.org/licenses/by/4.0/
+Attribution: GeoNames (www.geonames.org), CC BY 4.0. The map shows this
+  attribution on screen whenever a GeoNames place name is displayed.
+Source: https://download.geonames.org/export/dump/cities5000.zip
+  (downloaded 2026-11-09T14:28:57Z, archive sha256
+  550ec920954e46b7d2ff004354857383db49db4b07d848a0de80cb07b13117dd)
+Changes: reduced to name, latitude, longitude, population, country code and
+  feature code; coordinates rounded to 5 decimals; rows ordered by population.
+  Names are GeoNames' own (local or common) names; no translation is added.
+  The data is provided "as is" without warranty of accuracy, timeliness or
+  completeness (GeoNames readme).
+
+== Map packs: OpenStreetMap vectors and Copernicus Sentinel-2 imagery (optional download, launch site globe) ==
+Data: hrma/static/map/harita_paketleri.json
+Pack-Licence: ODbL-1.0
+Pack-Licence: Copernicus-Sentinel-Data-Legal-Notice
+Licence: Open Data Commons Open Database License 1.0 (ODbL 1.0),
+  https://opendatacommons.org/licenses/odbl/1-0/
+Attribution: (c) OpenStreetMap contributors. The map shows this attribution on
+  screen whenever map pack data is drawn.
+Source: Protomaps Basemap planet build 20261115 (version 4.15.2, OpenStreetMap
+  replication time 2026-11-15T04:00:00Z), https://build.protomaps.com/; tile
+  schema and build tooling by the Protomaps project (github.com/protomaps/basemaps;
+  the project states "BSD and ODbL licenses"). Low zoom levels (z0-z5) also carry
+  Natural Earth data (public domain).
+What ships: the installer contains only the pack list (file names, sizes, sha256).
+  The packs themselves are separate files that the user may choose to download
+  from the HRMA GitHub release named in that list.
+Changes: each pack is a region extract (100 km around a launch site) of the
+  source build, z0-z15; the 'landcover' layer (Daylight landcover, derived from
+  ESA WorldCover; present only at z0-z7) is removed because it is not
+  OpenStreetMap data; all other tiles are byte-identical to the source build.
+  The packs are a derivative database and are offered under ODbL 1.0: the pack
+  files are published as release assets of the HRMA repository.
+Imagery component (launch site packs; listed in the same pack list as a second file
+  of the pack, kind "imagery"): a cloud-free true-colour mosaic produced by HRMA
+  (tools/harita_goruntu_uret.py) from Copernicus Sentinel-2 Level-2A scenes
+  (true-colour image TCI, 10 m, and scene classification SCL, 20 m), found through
+  the Element 84 Earth Search STAC catalogue, collection "sentinel-2-l2a", and read
+  from the AWS Open Data bucket "sentinel-cogs".
+Imagery licence: "Legal notice on the use of Copernicus Sentinel Data and Service
+  Information" (European Commission, DG for Internal Market, Industry,
+  Entrepreneurship and SMEs; Regulation (EU) No 377/2014 and Commission Delegated
+  Regulation (EU) No 1159/2013): free, full and open access; reproduction,
+  distribution, communication to the public, adaptation, modification and
+  combination with other data and information are permitted. The data is provided
+  without any express or implied warranty, including as regards quality and
+  suitability for any purpose.
+  https://sentinels.copernicus.eu/documents/247904/690755/Sentinel_Data_Legal_Notice
+Imagery attribution: "Contains modified Copernicus Sentinel data <years>", the
+  notice that the legal notice prescribes for adapted or modified data. The years
+  and the identifiers of every contributing scene are stored in the imagery file
+  (metadata "attribution" and "scenes") and in the pack list; the map shows the
+  notice on screen whenever an installed imagery component is in view.
+Imagery changes: clouds, cloud shadows and saturated pixels are masked with the
+  scene classification; scenes are combined per pixel in a fixed order, colour-
+  balanced between acquisition dates on land pixels, resampled to the HRMA globe
+  grid (EPSG:4326, 288/2^z degrees per 512 px tile, levels z9-z13) and stored as
+  WebP tiles in one SQLite file. Areas without a clear observation are left
+  transparent (no synthetic fill).

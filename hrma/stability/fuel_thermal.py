@@ -306,7 +306,7 @@ FUEL_THERMAL_RECORDS = {
                 'the measurement, publishes no numbers. Ingredient-level '
                 'model constants exist (Sun et al. 2023: c_p,AP = 1602 '
                 'J/kgK, temperature-blind) but mixing-rule synthesis of a '
-                'propellant value would be fabrication. '
+                'propellant value would be an unsourced estimate. '
                 + _HANSON_PARR_LEAD),
         ),
         thermal_conductivity=MissingProperty(

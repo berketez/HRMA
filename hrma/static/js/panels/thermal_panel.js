@@ -76,7 +76,271 @@
         ['natural', 'Natural (heat sink)', 'cool.natural'],
         ['forced', 'Forced convection', 'cool.forced'],
         ['regenerative', 'Regenerative', 'cool.regenerative'],
+        // V307/SEKME-GÜVERTE (NK3-S-3): motorun ablatif soğutması. ÖLÇÜLDÜ
+        // (olcum_once_A.json, sıvı L1 'ablative'): seçenek yoktu, alan
+        // "Doğal (ısı emici)" varsayımında kalıyor ve sekme "SOĞUTMA:
+        // NATURAL · Gereken soğutma alanı 266,26 m²" basıyordu. Uç bu sınıfı
+        // astar yoluyla değerlendirir (heat_transfer_analysis.
+        // LINER_PROTECTED_COOLING_TYPES) ve soğutma bütçesi yayımlamaz.
+        ['ablative', 'Ablative Liner', 'panel.thermal.motorCooling.ablative'],
+        // V307/GÜVERTE-ISIL (kalem 2): sıvı motorun öbür soğutma tipleri.
+        // ÖLÇÜLDÜ (docs/scofield/raw/OH/V307/guverte-isil/olcum_once.json,
+        // örnek sıvı film / ışınım / dump): seçenek olmadığı için alan
+        // "Doğal (ısı emici)" varsayımında kalıyor, sekme o motor için doğal
+        // taşınımın hükmünü ("SOĞUTMA: Doğal") basıyordu. Tip artık motordan
+        // taşınır; bu sekmenin (ve ucunun) bu tipler için modeli YOK, o
+        // yüzden hesap yapılmaz (`SOGUTMA_MODELSIZ`, `localResult`).
+        ['film_cooling', 'Film Cooling', 'panel.thermal.motorCooling.film_cooling'],
+        ['radiative', 'Radiation Cooling', 'panel.thermal.motorCooling.radiative'],
+        ['dump_cooling', 'Dump Cooling', 'panel.thermal.motorCooling.dump_cooling'],
     ];
+
+    // Bu sekmenin MODELLEMEDİĞİ soğutma tipleri (sıvı motorun kendi adlarıyla;
+    // uç bu adları 422 `unsupported_cooling_type` ile reddeder). Sekme bu
+    // tiplerde istek göndermez; motor sonucunun soğutma bloğunu gösterir.
+    const SOGUTMA_MODELSIZ = ['film_cooling', 'radiative', 'dump_cooling'];
+
+    /* V307/GÜVERTE-ISIL (kalem 2) — MOTORUN KENDİ SOĞUTMA SONUCU (sıvı motor,
+       Motor Alt Sistemleri → Soğutma Sistemi; `cooling_system` ve pasif ısıl
+       koruma bloğu). Sayılar motor sonucundan AYNEN okunur, burada hesap
+       yapılmaz; alan yoksa null kalır ve satırı basılmaz. */
+    function motorSogutmaOku(m) {
+        const cs = (m && m.cooling_system) || null;
+        if (!cs || typeof cs !== 'object') return null;
+        const sayi = function (v) {
+            return (typeof v === 'number' && Number.isFinite(v)) ? v : null;
+        };
+        const metin = function (v) { return (typeof v === 'string') ? v : ''; };
+        const rad = yolOku(m, 'thermal_protection.passive_thermal_protection.radiation_equilibrium');
+        return {
+            tip: ilkMetin(m, SOGUTMA_YOLLARI) || '',
+            toplamKw: sayi(cs.total_heat_load),
+            odaKw: sayi(cs.chamber_heat_load),
+            nozulKw: sayi(cs.nozzle_heat_load),
+            cidarK: sayi(cs.wall_temperature_hot),
+            cidarKaynak: metin(cs.wall_temperature_source),
+            cozulenK: sayi(cs.wall_temperature_solved_K),
+            cozumDurumu: metin(cs.wall_temperature_solved_status),
+            sinirK: sayi(cs.wall_temperature_limit_K),
+            sinirDurumu: metin(cs.wall_temperature_limit_status),
+            filmDebisi: sayi(cs.film_cooling_flow),
+            dumpCeketi: metin(cs.dump_cooling_jacket_status),
+            isinim: (rad && typeof rad === 'object' && rad.status === 'modelled') ? {
+                dengeK: sayi(rad.T_wall_eq_K),
+                servisK: sayi(rad.service_limit_K),
+                payK: sayi(rad.margin_K),
+                sinirIci: (typeof rad.within_limit === 'boolean') ? rad.within_limit : null,
+                malzeme: metin(rad.material_name),
+            } : null,
+        };
+    }
+
+    // Güvertenin `localResult` kancası: modellenmeyen soğutma tipinde uca
+    // gidilmez; panel bu nesneyi çizer (motor sonucu o an okunur ve nesneyle
+    // saklanır: dil değişiminde aynı sayılarla yeniden çizilir).
+    function modelsizSogutmaSonucu(payload) {
+        const tip = payload && payload.cooling_type;
+        if (SOGUTMA_MODELSIZ.indexOf(tip) === -1) return null;
+        let motor = null;
+        try {
+            const mt = (window.AnalysisDock && typeof window.AnalysisDock.getMotorType === 'function')
+                ? window.AnalysisDock.getMotorType() : null;
+            if (mt === 'liquid' && window.currentResults) {
+                motor = motorSogutmaOku(U.motorDict(window.currentResults));
+            }
+        } catch (e) { motor = null; }
+        return { cooling_not_modelled_here: true, cooling_type: tip,
+                 motor_cooling: motor };
+    }
+
+    function renderModelsizSogutma(data, root) {
+        const tip = String(data.cooling_type || '');
+        const ad = sogutmaAdi(tip);
+        const mc = data.motor_cooling;
+        const sonlu = function (v) { return typeof v === 'number' && Number.isFinite(v); };
+        const kutu = document.createElement('div');
+        let h = '<div style="display:flex; flex-wrap:wrap; gap:8px; margin:8px 0;">'
+            + U.badge(U.tf('panel.thermal.notModelled.badge', { type: ad },
+                'NOT MODELLED IN THIS TAB: {type}'), 'warn')
+            + '</div>'
+            + '<p data-thermal-cooling-not-modelled="' + U.esc(tip) + '"'
+            + ' style="margin:8px 0; white-space:normal;">'
+            + U.esc(U.tf('panel.thermal.notModelled.text', { type: ad },
+                'This tab solves natural convection, forced convection, '
+                + 'regenerative cooling and the ablative liner. It has no model '
+                + 'for {type}, so nothing was computed and no request was sent. '
+                + 'The cooling result of the motor result governs '
+                + '(motor page: Engine Subsystems, Cooling System).'))
+            + '</p>';
+        const ayniTip = !!(mc && mc.tip === tip);
+        if (!ayniTip) {
+            h += '<p data-thermal-motor-cooling="absent" style="margin:8px 0;'
+                + ' white-space:normal; color:var(--hd-ink-dim, #7d97a5);">'
+                + U.esc(T('panel.thermal.notModelled.noMotor',
+                    'The last motor result was not computed with this cooling '
+                    + 'type, so there is no motor cooling result to show here.'))
+                + '</p>';
+            kutu.innerHTML = h;
+            root.appendChild(kutu);
+            return;
+        }
+        const rows = [[T('common.f.coolingType', 'Cooling Type'), U.esc(ad), '']];
+        if (sonlu(mc.toplamKw)) {
+            const parca = (sonlu(mc.odaKw) && sonlu(mc.nozulKw))
+                ? ' ' + U.tf('panel.thermal.motorHeatLoadSplit',
+                             { c: numL(mc.odaKw, 1), n: numL(mc.nozulKw, 1) },
+                             '(chamber {c} + nozzle {n} kW)')
+                : '';
+            rows.push([T('panel.thermal.motorHeatLoad', 'Heat load — motor result (engine subsystems)'),
+                '<span data-thermal-motor-heat-load="1">' + numL(mc.toplamKw, 1)
+                + ' kW' + U.esc(parca) + '</span>', '']);
+        }
+        if (sonlu(mc.cidarK)) {
+            const kaynak = /solved/i.test(mc.cidarKaynak)
+                ? T('panel.thermal.motorWallSolved', 'the wall the motor solved')
+                : (/max wall temperature/i.test(mc.cidarKaynak)
+                   ? T('panel.thermal.motorWallUserMax', 'your maximum wall temperature')
+                   : T('panel.thermal.motorWallAssumed', 'the motor\'s wall temperature assumption'));
+            rows.push([T('panel.thermal.notModelled.loadWall',
+                         'Wall temperature the heat load is taken at'),
+                numL(mc.cidarK, 1) + ' K (' + U.esc(kaynak) + ')', '']);
+        }
+        if (mc.isinim && sonlu(mc.isinim.dengeK)) {
+            const r = mc.isinim;
+            let durum = '';
+            if (r.sinirIci === true) {
+                durum = T('panel.thermal.notModelled.withinLimit', 'within the service limit');
+            } else if (r.sinirIci === false) {
+                durum = T('panel.thermal.notModelled.limitExceeded', 'service limit exceeded');
+            }
+            rows.push([T('panel.thermal.notModelled.radWall',
+                         'Wall temperature — motor result (radiation equilibrium)'),
+                '<span data-thermal-motor-wall="solved" style="white-space:normal;">'
+                + numL(r.dengeK, 1) + ' K'
+                + (sonlu(r.servisK)
+                    ? U.esc(' · ' + U.tf('panel.thermal.notModelled.radLimit',
+                        { lim: numL(r.servisK, 0), m: numL(r.payK, 0) },
+                        'service limit {lim} K, margin {m} K'))
+                    : '')
+                + (durum ? U.esc(' · ' + durum) : '')
+                + '</span>', '']);
+        } else if (sonlu(mc.cozulenK)) {
+            rows.push([T('panel.thermal.notModelled.solvedWall',
+                         'Wall temperature — motor result (solved)'),
+                '<span data-thermal-motor-wall="solved">' + numL(mc.cozulenK, 1)
+                + ' K</span>', '']);
+        } else {
+            rows.push([T('panel.thermal.notModelled.wall', 'Wall temperature — motor result'),
+                '<span data-thermal-motor-wall="not-solved" style="white-space:normal;">'
+                + U.esc(T('panel.thermal.notModelled.wallNotSolved',
+                    'not solved: the motor chain has no wall temperature solver '
+                    + 'for this cooling type; the heat load above is taken at '
+                    + 'the wall temperature shown'))
+                + '</span>', '']);
+        }
+        if (tip === 'film_cooling' && sonlu(mc.filmDebisi)) {
+            rows.push([T('panel.thermal.notModelled.filmFlow',
+                         'Film coolant flow — motor result'),
+                numL(mc.filmDebisi, 3) + ' kg/s', '']);
+        }
+        if (tip === 'dump_cooling' && mc.dumpCeketi === 'NOT_MODELLED') {
+            rows.push([T('panel.thermal.notModelled.dumpJacket',
+                         'Dump cooling jacket — motor result'),
+                U.esc(T('panel.thermal.notModelled.dumpJacketNot',
+                        'not modelled in the motor result')), '']);
+        }
+        h += U.sectionTitle(T('panel.thermal.notModelled.title',
+                              'Cooling Result of the Motor Result'))
+            + '<div data-thermal-motor-cooling="shown">' + U.kvTable(rows) + '</div>';
+        kutu.innerHTML = h;
+        root.appendChild(kutu);
+    }
+
+    // V307/SEKME-GÜVERTE (NK3-S-9): motorun KENDİ ısı yükü (sıvı motorun
+    // Motor Alt Sistemleri → Soğutma Sistemi bloğu, cooling_system). Bu
+    // sekmenin "Toplam ısı gücü" ile AYNI tanım değildir (cidar sıcaklığı
+    // tabanı, gaz ışınımı, Bartz katsayısının uygulanışı): iki sayı yan yana,
+    // farkın nedeniyle basılır. Son motor sonucundan; yoksa null.
+    let motorIsiYuku = null;
+
+    function motorIsiYukuOku(m) {
+        const cs = (m && m.cooling_system) || {};
+        const sayi = function (v) {
+            return (typeof v === 'number' && Number.isFinite(v)) ? v : null;
+        };
+        const toplam = sayi(cs.total_heat_load);
+        if (toplam === null) return null;
+        return {
+            toplam: toplam,                                   // kW
+            oda: sayi(cs.chamber_heat_load),                  // kW
+            nozul: sayi(cs.nozzle_heat_load),                 // kW
+            cidarK: sayi(cs.wall_temperature_hot),            // K
+            cidarKaynak: (typeof cs.wall_temperature_source === 'string')
+                ? cs.wall_temperature_source : '',
+        };
+    }
+
+    /* V307/GÜVERTE-ISIL (kalem 1) — MOTORUN KENDİ HAZNE ASTARI (sıvı,
+       ablatif). ÖLÇÜLDÜ (docs/scofield/raw/OH/V307/guverte-isil/
+       olcum_once.json): motor sonucu hazne astarını kendi Bartz zincirinin
+       hazne katsayısıyla boyutlandırıyor (L1: 1,59 mm, gerileme 0,1375 mm/s);
+       bu sekme aynı istasyonu ucun kendi ısı zincirinden yeniden türetiyordu
+       (7,78 mm, 0,2080 mm/s) — aynı çekirdek, iki girdi, iki sayı; 50 bar
+       örnekte iki ayrı ret (0,367 ⟷ 0,405 mm/s). Sekme artık motorun astar
+       istasyonu girdilerini gövdeye koyar (form dışı bağlam): gerileme hızı,
+       gerileme payı ve zarf hükmü motor sonucuyla aynıdır; bu sekmenin
+       eklediği iletim payı ayrı satırda, adıyla durur. Son motor sonucundan;
+       yoksa null. */
+    let motorAstar = null;
+
+    // `hibrit`: hibrit motorun astar bloğu ısıl koruma bloğunun kökündedir ve
+    // kalınlığı iletim payını İÇERİR (hybrid_liner_sizing; bu sekmenin
+    // kuralıyla aynı işlev).
+    function motorAstarOku(m, hibrit) {
+        const tp = (m && m.thermal_protection) || null;
+        const p = hibrit ? tp : (tp && tp.passive_thermal_protection) || null;
+        if (!p || typeof p !== 'object' || p.status !== 'modelled') return null;
+        const cl = p.chamber_liner;
+        if (!cl || typeof cl !== 'object') return null;
+        const sayi = function (v) {
+            return (typeof v === 'number' && Number.isFinite(v)) ? v : null;
+        };
+        return {
+            iletimDahil: sayi(cl.conduction_allowance_mm) !== null,
+            kalinlikMm: sayi(cl.thickness),                    // mm
+            durum: (typeof cl.thickness_status === 'string') ? cl.thickness_status : '',
+            gerilemeMmS: sayi(cl.recession_rate_mm_s),
+            hGaz: sayi(cl.h_gas_W_m2K),                        // W/m²K
+            tSurucu: sayi(cl.T_recovery_K),                    // K
+            cpGaz: sayi(cl.gas_cp_J_kgK),                      // J/kgK
+        };
+    }
+
+    // Soğutma sınıfının okunur adı (rozet ve satırlar; ham değer basılmaz).
+    function sogutmaAdi(v) {
+        for (let i = 0; i < COOLING.length; i++) {
+            if (COOLING[i][0] === v) return T(COOLING[i][2], COOLING[i][1]);
+        }
+        return coolingTypeName(v);
+    }
+
+    // V307/SEKME-GÜVERTE (NK3-S-3): soğutma bütçesi geri çekme kodları
+    // (heat_transfer_analysis.COOLING_BUDGET_WITHHELD_*) -> okunur neden.
+    const SOGUTMA_BUTCESI_GERI = {
+        liner_protected_wall: ['panel.thermal.coolBudget.liner',
+            'Not published: the ablative liner verdict governs. The liner '
+            + 'absorbs the hot-gas heat, so a steady convection area budget of '
+            + 'the bare wall does not describe this wall.'],
+        supplied_wall_temperature: ['panel.thermal.coolBudget.supplied',
+            'Not published: the supplied wall temperatures govern (the case '
+            + 'temperature the motor solved behind its insulation). A steady '
+            + 'natural-convection area budget of the bare wall does not '
+            + 'describe this wall.'],
+        ablative_cooling_class: ['panel.thermal.coolBudget.ablative',
+            'Not published: ablative cooling. The liner absorbs the hot-gas '
+            + 'heat by recession and conduction; a convection area budget and '
+            + 'a cooling-class efficiency do not apply.'],
+    };
 
     // V301/ÖRNEK-PANEL — cidar koruması (heat_transfer_analysis.
     // SUPPORTED_WALL_PROTECTIONS ile aynı değerler; uç başka değeri 422 ile
@@ -255,9 +519,14 @@
 
         const cats = [];
         const vals = [];
+        // V307/SEKME-GÜVERTE: ÖLÇÜLDÜ (tarayici/hibrit_L1_tr_1440.json, yazı
+        // çakışması ölçümü): TR'de uzun kategori etiketleri ("Cidar iç
+        // (çıplak, astarsız)" ⟷ "Cidar dış (çıplak, astarsız)") 1440 px'te
+        // üst üste biniyordu. Parantezli niteleme ikinci satıra alınır
+        // (metin aynı, yalnız satır kırılır).
         function push(label, v) {
             if (typeof v === 'number' && Number.isFinite(v)) {
-                cats.push(label);
+                cats.push(String(label).replace(' (', '<br>('));
                 vals.push(v);
             }
         }
@@ -377,6 +646,156 @@
         const eps = ilkSayi(m, ['expansion_ratio', 'motor_geometry.expansion_ratio']);
         if (eps !== undefined && eps > 1) out.expansion_ratio = eps;
         return out;
+    }
+
+    /* V307/GÜVERTE-ISIL (kalem 1) — ASTAR İSTASYONU BAĞLAMI. Motorun hazne
+       astarı istasyonunun gaz tarafı girdileri (katsayı, sürücü sıcaklık,
+       kenar gazı c_p'si) formda kutu değildir; gövdeye form dışı bağlam
+       olarak girer. Yalnız (a) sıvı ablatif motorun astar bloğu bu çifti
+       yayımladıysa, (b) formda astar yolu seçiliyse ve (c) istasyonu
+       belirleyen kutular ELLE değiştirilmediyse: kullanıcı basıncı, sıcaklığı
+       ya da geometriyi değiştirdiyse motorun istasyonu o motora ait değildir,
+       gönderilmez ve uç istasyonu kendi zincirinden türetir (ekranda adıyla). */
+    const ASTAR_ISTASYONU_KUTULARI = ['chamber_pressure', 'chamber_temperature',
+        'chamber_diameter', 'throat_diameter', 'mdot_total', 'c_star', 'gamma',
+        'molecular_weight'];
+    // Formdaki seçicinin O ANKİ değeri; kutu çizilmediyse (form yok)
+    // undefined — o zaman motorun tohumu geçerlidir.
+    function kutuDegeri(alan) {
+        const el = document.getElementById('ad_f_thermal_' + alan);
+        return (el && el.tagName === 'SELECT' && typeof el.value === 'string')
+            ? el.value : undefined;
+    }
+    function astarIstasyonu(r) {
+        const mt = (window.AnalysisDock && typeof window.AnalysisDock.getMotorType === 'function')
+            ? window.AnalysisDock.getMotorType() : null;
+        if (mt !== 'liquid') return {};
+        const m = U.motorDict(r);
+        if (ilkMetin(m, SOGUTMA_YOLLARI) !== 'ablative') return {};
+        const a = motorAstarOku(m, false);
+        if (!a || a.hGaz === null || a.tSurucu === null) return {};
+        const koruma = kutuDegeri('wall_protection');
+        if (koruma !== undefined && koruma !== 'ablative_liner') return {};
+        if (ASTAR_ISTASYONU_KUTULARI.some(kutuKirli)) return {};
+        const out = { liner_h_gas_W_m2K: a.hGaz, liner_T_recovery_K: a.tSurucu };
+        if (a.cpGaz !== null) out.liner_gas_cp_J_kgK = a.cpGaz;
+        return out;
+    }
+
+    /* V307/GÜVERTE-ISIL (kalem 1) — ASTAR HÜKMÜNÜN DÖKÜMÜ. Toplam kalınlık =
+       gerileme payı (Seviye-1 Q*) + iletim payı; istasyon girdilerinin
+       kaynağı; motor sonucunun kendi astar sayısı yan yana. Boyutlanamadıysa
+       neden sayılarıyla (gerileme hızı ⟷ model tavanı) ve motorun aynı
+       istasyon için ne dediği. Ucun İngilizce cümlesi satır etiketinin
+       ipucunda aynen durur. */
+    function astarDokumu(ps, ma) {
+        if (ps.kind !== 'liner' && ps.kind !== 'liner_not_sized') return '';
+        const b = ps.block || {};
+        const sz = b.sizing || {};
+        const gi = b.inputs || {};
+        const sonlu = function (v) { return typeof v === 'number' && Number.isFinite(v); };
+        const kucuk = function (t) {
+            return '<span style="font-size:0.72rem; white-space:normal;'
+                + ' color:var(--hd-ink-dim, #7d97a5);"> · ' + U.esc(t) + '</span>';
+        };
+        const ayni = function (a, c) {
+            return sonlu(a) && sonlu(c)
+                && Math.abs(a - c) <= 1e-9 * Math.max(1, Math.abs(a));
+        };
+        const rows = [];
+        if (ps.kind === 'liner') {
+            rows.push([T('panel.thermal.liner.total', 'Liner thickness (total)'),
+                '<span data-thermal-liner-total="1">'
+                + numL(b.required_thickness_mm, 2) + ' mm</span>', '']);
+            if (sonlu(sz.recession_allowance_mm)) {
+                rows.push([T('panel.thermal.liner.recession',
+                             'Recession allowance (Level-1 Q*)'),
+                    '<span data-thermal-liner-recession="1">'
+                    + numL(sz.recession_allowance_mm, 2) + ' mm</span>'
+                    + (sonlu(sz.recession_rate_mm_s) && sonlu(sz.design_margin)
+                        ? kucuk(U.tf('panel.thermal.liner.recessionHow',
+                            { v: numL(sz.recession_rate_mm_s, 3),
+                              t: numL(sz.burn_time_s, 2),
+                              m: numL(sz.design_margin, 2) },
+                            'recession rate {v} mm/s × burn time {t} s × design margin {m}'))
+                        : ''), '']);
+            }
+            if (sonlu(sz.conduction_allowance_mm)) {
+                rows.push([T('panel.thermal.liner.conduction', 'Conduction allowance'),
+                    '<span data-thermal-liner-conduction="1">'
+                    + numL(sz.conduction_allowance_mm, 2) + ' mm</span>'
+                    + kucuk(T('panel.thermal.liner.conductionHow',
+                        'insulation depth for the burn time')),
+                    typeof sz.conduction_basis === 'string' ? U.esc(sz.conduction_basis) : '']);
+            }
+        } else {
+            const hiz = b.recession_rate_mm_s;
+            const tavan = b.recession_validity_max_mm_s;
+            rows.push([T('panel.thermal.liner.notSized', 'Liner not sized'),
+                '<span data-thermal-liner-not-sized="1" style="white-space:normal;">'
+                + U.esc((sonlu(hiz) && sonlu(tavan) && hiz > tavan)
+                    ? U.tf('panel.thermal.liner.rateAboveCeiling',
+                        { v: numL(hiz, 3), max: numL(tavan, 2) },
+                        'The recession rate {v} mm/s is above the {max} mm/s '
+                        + 'validity ceiling of the Level-1 Q* model, so no '
+                        + 'thickness is published.')
+                    : T('panel.thermal.liner.notSizedOther',
+                        'The Level-1 Q* model could not size this liner; no '
+                        + 'thickness is published.'))
+                + '</span>',
+                typeof b.reason === 'string' ? U.esc(b.reason) : '']);
+        }
+        if (sonlu(gi.h_gas_W_m2K) && sonlu(gi.T_recovery_K)) {
+            const verilmis = gi.liner_station_source === 'supplied';
+            rows.push([T('panel.thermal.liner.station', 'Liner station inputs'),
+                '<span data-thermal-liner-station="' + (verilmis ? 'supplied' : 'derived')
+                + '" style="white-space:normal;">'
+                + U.esc(U.tf(verilmis ? 'panel.thermal.liner.stationSupplied'
+                                      : 'panel.thermal.liner.stationDerived',
+                    { h: numL(gi.h_gas_W_m2K, 0), t: numL(gi.T_recovery_K, 0) },
+                    verilmis
+                        ? "motor result's chamber liner station: gas-side "
+                          + 'coefficient {h} W/m²·K, driving temperature {t} K'
+                        : "this tab's own heat chain (reference cooled wall): "
+                          + 'gas-side coefficient {h} W/m²·K, driving temperature {t} K'))
+                + '</span>',
+                typeof gi.h_gas_source === 'string' ? U.esc(gi.h_gas_source) : '']);
+        }
+        if (ma) {
+            let motorMetin;
+            if (ma.kalinlikMm !== null && ma.iletimDahil) {
+                motorMetin = U.tf('panel.thermal.liner.motorSizedTotal',
+                    { mm: numL(ma.kalinlikMm, 2), v: numL(ma.gerilemeMmS, 3) },
+                    '{mm} mm (recession allowance + conduction allowance, '
+                    + 'recession rate {v} mm/s)');
+                if (ps.kind === 'liner' && ayni(ma.kalinlikMm, b.required_thickness_mm)) {
+                    motorMetin += ' · ' + T('panel.thermal.liner.sameTotal',
+                        "equal to this tab's total");
+                }
+            } else if (ma.kalinlikMm !== null) {
+                motorMetin = U.tf('panel.thermal.liner.motorSized',
+                    { mm: numL(ma.kalinlikMm, 2), v: numL(ma.gerilemeMmS, 3) },
+                    '{mm} mm (recession allowance only, recession rate {v} mm/s; '
+                    + 'the motor result adds no conduction allowance)');
+                if (ps.kind === 'liner' && ayni(ma.kalinlikMm, sz.recession_allowance_mm)) {
+                    motorMetin += ' · ' + T('panel.thermal.liner.sameRecession',
+                        "equal to this tab's recession allowance");
+                }
+            } else {
+                motorMetin = U.tf('panel.thermal.liner.motorNotSized',
+                    { v: numL(ma.gerilemeMmS, 3) },
+                    'not sized (recession rate {v} mm/s)');
+                if (ps.kind === 'liner_not_sized' && ayni(ma.gerilemeMmS, b.recession_rate_mm_s)) {
+                    motorMetin += ' · ' + T('panel.thermal.liner.sameRefusal',
+                        'the same station and the same reason as this tab');
+                }
+            }
+            rows.push([T('panel.thermal.liner.motor', 'Chamber liner — motor result'),
+                '<span data-thermal-liner-motor="1" style="white-space:normal;">'
+                + U.esc(motorMetin) + '</span>', '']);
+        }
+        return U.sectionTitle(T('panel.thermal.liner.title', 'Ablative Liner Sizing'))
+            + U.kvTable(rows);
     }
 
     // Dock buildPayload aynası: gövde formdan okunur; termal formda
@@ -680,6 +1099,12 @@
     }
 
     function render(data, root) {
+        // V307/GÜVERTE-ISIL (kalem 2): modellenmeyen soğutma tipi — uca
+        // gidilmedi; motor sonucunun soğutma bloğu basılır.
+        if (data && data.cooling_not_modelled_here === true) {
+            renderModelsizSogutma(data, root);
+            return;
+        }
         const ta = data.thermal_analysis || {};
         const htc = ta.heat_transfer_coefficients || {};
         const gsa = ta.gas_side_analysis || {};
@@ -703,7 +1128,7 @@
            cidar da uygulanmadıysa, hüküm motorun cidarına ait değildir —
            başlıkta adıyla söylenir (motorun tipi kendi sözlük adıyla). */
         const motorSog = motorCoolingType();
-        if (motorSog && !COOLING.some(function (o) { return o[0] === motorSog; })
+        if (motorSog && SOGUTMA_MODELSIZ.indexOf(motorSog) !== -1
                 && !superseded) {
             badges += U.badge(U.tf('panel.thermal.badgeMotorCoolingNotModelled',
                 { type: coolingTypeName(motorSog) },
@@ -713,10 +1138,15 @@
                   + 'The verdict below is the bare-wall check and is not the '
                   + 'motor\'s own cooling result; the motor result page carries that.'));
         }
+        // V307/SEKME-GÜVERTE (NK3-S-3): rozet soğutma sınıfının okunur adını
+        // basar (ham değer büyük harfle basılmıyordu: "NATURAL"); bütçe geri
+        // çekildiyse ipucu nedenini söyler.
+        const butceGeri = SOGUTMA_BUTCESI_GERI[cool.required_cooling_area_withheld_code];
         badges += U.badge(T('panel.thermal.badgeCooling', 'COOLING') + ': '
-            + String(dpp.cooling_type || '—').toUpperCase(), 'info',
-            U.tf('panel.thermal.coolingEffTip', { value: numL(cool.cooling_efficiency, 2) },
-                 'Cooling efficiency {value}'));
+            + (dpp.cooling_type ? sogutmaAdi(String(dpp.cooling_type)) : '—'), 'info',
+            butceGeri ? T(butceGeri[0], butceGeri[1])
+                : U.tf('panel.thermal.coolingEffTip', { value: numL(cool.cooling_efficiency, 2) },
+                       'Cooling efficiency {value}'));
         if (htc.correlation) {
             badges += U.badge(T('panel.thermal.badgeModel', 'MODEL: BARTZ'), 'info', htc.correlation);
         }
@@ -790,6 +1220,14 @@
                 numL(gsa.adiabatic_wall_temperature, 0), 'K')
             + '</div>';
         root.appendChild(head);
+
+        // ---- Astar hükmünün dökümü (V307/GÜVERTE-ISIL kalem 1) ----
+        const astarHtml = astarDokumu(ps, motorAstar);
+        if (astarHtml) {
+            const astarDiv = document.createElement('div');
+            astarDiv.innerHTML = astarHtml;
+            root.appendChild(astarDiv);
+        }
 
         // ---- Plotly çubuk ----
         temperaturePlot(root, ta, ps);
@@ -968,15 +1406,70 @@
                + ' color:var(--hd-ink-dim, #7d97a5);"> · '
                + U.esc(konturKaynakOkunur) + '</span>')
             : '';
+        // V307/SEKME-GÜVERTE (NK3-S-9): motorun KENDİ ısı yükü yan yana,
+        // tanım farkıyla. ÖLÇÜLDÜ (sıvı L1): motor 267,1 kW (oda 208,9 +
+        // nozul 58,1) — 800 K sıcak cidarda (kullanıcının azami cidar
+        // sıcaklığı), boğaz Bartz katsayısı odaya ölçeklenmiş, yalnız
+        // taşınım; bu sekme 332,8 kW — 1073 K referans soğutulmuş cidarda
+        // (malzemenin izin verilen sıcaklığı), yerel Bartz ıslak alan
+        // integrali + Leckner gaz ışınımı. İki tanım aynı büyüklüğü farklı
+        // tabanda anlatır; ikisi de adıyla ekranda.
+        const mIsi = motorIsiYuku;
+        const isiSatirlari = [];
+        if (mIsi) {
+            const parca = (Number.isFinite(mIsi.oda) && Number.isFinite(mIsi.nozul))
+                ? ' ' + U.tf('panel.thermal.motorHeatLoadSplit',
+                             { c: numL(mIsi.oda, 1), n: numL(mIsi.nozul, 1) },
+                             '(chamber {c} + nozzle {n} kW)')
+                : '';
+            const motorCidar = /solved/i.test(mIsi.cidarKaynak)
+                ? T('panel.thermal.motorWallSolved', 'the wall the motor solved')
+                : (/max wall temperature/i.test(mIsi.cidarKaynak)
+                   ? T('panel.thermal.motorWallUserMax', 'your maximum wall temperature')
+                   : T('panel.thermal.motorWallAssumed', 'the motor\'s wall temperature assumption'));
+            isiSatirlari.push([
+                T('panel.thermal.motorHeatLoad', 'Heat load — motor result (engine subsystems)'),
+                '<span data-thermal-motor-heat-load="1">'
+                + numL(mIsi.toplam, 1) + ' kW' + U.esc(parca) + '</span>',
+                '']);
+            isiSatirlari.push([
+                T('panel.thermal.heatLoadWhyDiffer', 'Why the two heat loads differ'),
+                '<span data-thermal-heat-load-basis="1" style="font-size:0.74rem;'
+                + ' white-space:normal;">'
+                + U.esc(U.tf('panel.thermal.heatLoadBasis', {
+                    tm: numL(mIsi.cidarK, 1), mk: motorCidar,
+                    tr: numL(gsa.reference_wall_temperature, 1) },
+                    'Wall temperature: the motor result takes the heat load at '
+                    + '{tm} K ({mk}); this tab at the reference cooled wall '
+                    + '{tr} K (the material\'s allowable temperature). Model: '
+                    + 'the motor\'s bulk chain scales the throat Bartz '
+                    + 'coefficient to the chamber and counts convection only; '
+                    + 'this tab integrates the local Bartz coefficient along '
+                    + 'the nozzle contour and adds gas radiation (Leckner).'))
+                + '</span>', '']);
+        }
         thtml += U.kvTable([
             [T('panel.thermal.totalHeatRate', 'Total heat rate'),
              numL(cool.peak_heat_rate, 1) + ' kW' + derivedMark, derivedNote],
+        ].concat(isiSatirlari).concat([
             [T('panel.thermal.totalHeatEnergy', 'Total heat energy (burn)'),
              numL(cool.total_heat_energy, 1) + ' MJ' + derivedMark, derivedNote],
-            [T('panel.thermal.coolingEfficiency', 'Cooling efficiency'), numL(cool.cooling_efficiency, 2)
-                + ' (' + String(dpp.cooling_type || '—') + ')'],
-            [T('panel.thermal.requiredArea', 'Required cooling area'),
-             numL(cool.required_cooling_area, 2) + ' m²'],
+            // V307/SEKME-GÜVERTE (NK3-S-3): korunan cidarda (astar / verilmiş
+            // cidar sıcaklığı) ya da ablatif sınıfta uç bütçeyi yayımlamaz;
+            // satır sayı yerine nedenini basar.
+            butceGeri
+                ? [T('panel.thermal.coolingEfficiency', 'Cooling efficiency'), '—',
+                   T(butceGeri[0], butceGeri[1])]
+                : [T('panel.thermal.coolingEfficiency', 'Cooling efficiency'), numL(cool.cooling_efficiency, 2)
+                    + ' (' + U.esc(dpp.cooling_type ? sogutmaAdi(String(dpp.cooling_type)) : '—') + ')'],
+            butceGeri
+                ? [T('panel.thermal.requiredArea', 'Required cooling area'),
+                   '<span data-thermal-cooling-budget="'
+                   + U.esc(String(cool.required_cooling_area_withheld_code)) + '"'
+                   + ' style="font-size:0.74rem; white-space:normal;">'
+                   + U.esc(T(butceGeri[0], butceGeri[1])) + '</span>', '']
+                : [T('panel.thermal.requiredArea', 'Required cooling area'),
+                   numL(cool.required_cooling_area, 2) + ' m²'],
             heatSinkRow,
             [T('panel.thermal.hotGasArea', 'Hot-gas surface area'),
              numL(gsa.surface_area, 3) + ' m²'
@@ -998,7 +1491,7 @@
                 : '')
              + konturKaynakMark,
              derivedNote || konturKaynakOkunur],
-        ]);
+        ]));
 
         thtml += U.sectionTitle(T('panel.thermal.secSafety', 'Thermal Safety Factors')
             + (ps.kind === 'liner'
@@ -1068,13 +1561,18 @@
         endpoint: '/analyze_thermal_safety',
         motorTypes: ['hybrid', 'liquid', 'solid'],
         fields: [
-            ['chamber_pressure', 'Chamber Pressure (bar)', 40, 1, 'common.f.chamberPressureBar', 'panel.thermal.help.chamber_pressure'],
-            ['chamber_temperature', 'Chamber Temperature (K)', 3000, 10, 'common.f.chamberTemperatureK', 'panel.thermal.help.chamber_temperature'],
-            ['chamber_diameter', 'Chamber Diameter (m)', 0.1, 0.005, 'common.f.chamberDiameterM', 'panel.thermal.help.chamber_diameter'],
-            ['chamber_length', 'Chamber Length (m)', 0.5, 0.01, 'common.f.chamberLengthM', 'panel.thermal.help.chamber_length'],
+            // V307/SEKME-GÜVERTE (NK3-H-7 ailesi, M-HIBRIT-40): motordan
+            // gelen büyüklüklerin tanım değeri BOŞ (eskiden 40 bar / 3000 K /
+            // 0,1 m / 0,5 m / 1 kg/s / 5 mm — son hesap başarısızken sekme
+            // o gizli motoru değerlendiriyordu). Boşsa istek gönderilmez,
+            // alan adıyla söylenir (`required`).
+            ['chamber_pressure', 'Chamber Pressure (bar)', '', 1, 'common.f.chamberPressureBar', 'panel.thermal.help.chamber_pressure'],
+            ['chamber_temperature', 'Chamber Temperature (K)', '', 10, 'common.f.chamberTemperatureK', 'panel.thermal.help.chamber_temperature'],
+            ['chamber_diameter', 'Chamber Diameter (m)', '', 0.005, 'common.f.chamberDiameterM', 'panel.thermal.help.chamber_diameter'],
+            ['chamber_length', 'Chamber Length (m)', '', 0.01, 'common.f.chamberLengthM', 'panel.thermal.help.chamber_length'],
             ['burn_time', 'Burn Time (s)', '', 0.5, 'common.f.burnTimeS', 'panel.thermal.help.burn_time'], // OH-D37-S6: süre uydurulmaz — boşsa gövdeye girmez (safety_panel.js deseni)
-            ['mdot_total', 'Total Mass Flow (kg/s)', 1.0, 0.05, 'common.f.mdotTotal', 'panel.thermal.help.mdot_total'],
-            ['wall_thickness', 'Wall Thickness (m)', 0.005, 0.001, 'common.f.wallThicknessM', 'panel.thermal.help.hotWallThickness'],
+            ['mdot_total', 'Total Mass Flow (kg/s)', '', 0.05, 'common.f.mdotTotal', 'panel.thermal.help.mdot_total'],
+            ['wall_thickness', 'Wall Thickness (m)', '', 0.001, 'common.f.wallThicknessM', 'panel.thermal.help.hotWallThickness'],
             ['material', 'Wall Material', 'steel', MATERIALS, 'common.f.wallMaterial', 'panel.thermal.help.hotWallMaterial'],
             ['cooling_type', 'Cooling Type', 'natural', COOLING, 'common.f.coolingType', 'panel.thermal.help.cooling_type'],
             // V301/ÖRNEK-PANEL — motorun ısı zincirine verdiği gaz girdileri
@@ -1097,7 +1595,9 @@
         // süreyi nereye gireceğini söyler. Eskiden boş alan gövdeye girmiyor,
         // uç 422 incomplete_thermal_input dönüyordu (ölçüldü: örnek sıvı,
         // olcum/once_liquid.json — motorda yanma süresi girdisi yok).
-        required: ['burn_time'],
+        required: ['burn_time', 'chamber_pressure', 'chamber_temperature',
+                   'chamber_diameter', 'chamber_length', 'mdot_total',
+                   'wall_thickness'],
         fromResults: function (r) {
             const m = U.motorDict(r);
             const mt = (window.AnalysisDock && typeof window.AnalysisDock.getMotorType === 'function')
@@ -1113,6 +1613,13 @@
                Astar kaydı eksikse kabuğa DÜŞÜLMEZ: alan önerilmez. */
             const astar = sicakGazAstari(m, mt);
             const sogutma = ilkMetin(m, SOGUTMA_YOLLARI);
+            // V307/SEKME-GÜVERTE (NK3-S-9): yalnız sıvı motor bu bloğu
+            // yayımlıyor (hibrit motorun ısı yükü bu sekmeyle aynı modülden
+            // bit-aynı gelir; katı motor ısı yükü yayımlamaz — ölçüldü).
+            motorIsiYuku = (mt === 'liquid') ? motorIsiYukuOku(m) : null;
+            motorAstar = (mt === 'liquid' && sogutma === 'ablative')
+                ? motorAstarOku(m, false)
+                : (mt === 'hybrid' ? motorAstarOku(m, true) : null);
             const ek = {
                 throat_diameter: U.readLengthM(r, 'throat_diameter'),
                 c_star: ilkSayi(m, ['c_star']),
@@ -1212,8 +1719,12 @@
         // V306/TERMAL-KONTUR (K-P4): `fromResults` yalnız form kutularını
         // doldurur (güverte kutusu olmayan anahtarı yutar); motorun nozul
         // geometrisi form dışı bağlamdır. Gerekçe ve yollar: nozulGeometrisi.
+        // V307/GÜVERTE-ISIL (kalem 2): modellenmeyen soğutma tipinde uca
+        // gidilmez (güvertenin `localResult` kancası).
+        localResult: modelsizSogutmaSonucu,
+        // V307/GÜVERTE-ISIL (kalem 1): + motorun astar istasyonu girdileri.
         contextFromResults: function (r) {
-            return nozulGeometrisi(r);
+            return Object.assign(nozulGeometrisi(r), astarIstasyonu(r));
         },
         render: render,
     });
@@ -1233,5 +1744,8 @@
         _renderAxialCharts: renderAxialCharts,
         _mountAxialSection: mountAxialSection,
         _readAxialPayload: readAxialPayload,
+        // Bekçi yüzeyi (V307/GÜVERTE-ISIL kalem 2).
+        _unmodelledCooling: SOGUTMA_MODELSIZ.slice(),
+        _localResult: modelsizSogutmaSonucu,
     };
 })();

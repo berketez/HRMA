@@ -31,6 +31,9 @@
     const T = U.t;                       // çeviri kısayolu
     // V301/PANEL-SAYI (KILAVUZ P4) — ekrandaki sayı dile göre ayraçla
     // (TR virgül). Sayı yoksa EM TİRE (U.fmt sözleşmesi); sayı DEĞİŞMEZ.
+    function fmtS(x, s) {
+        return (typeof x !== 'number' || !Number.isFinite(x)) ? '—' : U.num(Number(x.toPrecision(s)));
+    }
     function fmtL(x, d) {
         return (typeof x !== 'number' || !Number.isFinite(x)) ? '—' : U.num(x, d);
     }
@@ -61,6 +64,17 @@
             + U.esc(U.tf('panel.feed.proseUntranslated', { title: baslik, n: liste.length },
                          '{title} - {n} solver statement(s), untranslated'))
             + '</summary>' + blok + '</details>';
+    }
+    /* ONARIM2-ÇALK-SEKME (M7-CALK-14): tek tank formunun iki çözücü cümlesi
+       (model notu, büyüklük zarfı beyanının dayanağı) TR ekranda "çevrilmedi"
+       kutusundaydı. Sunucu cümlesi bu sabitlerle AYNIYSA sözlükten (EN + TR)
+       basılır; farklıysa (sunucu metni değişti) eski yol. Bekçi sabitlerin
+       sunucu metniyle eşitliğini sınar. */
+    const SLOSH_MODEL_NOTU_EN = 'Linear small-amplitude slosh (NASA SP-106 / Dodge 2000, upright rigid cylinder). Frequency and slosh-mass are analytic; baffle damping (Miles 1958) is approximate.';
+    const SLOSH_ZARF_DAYANAGI_EN = 'No canonical tank-radius band is declared by the source literature. NASA SP-106 (Abramson 1966, Ch. 2) and Dodge (2000, Ch. 1) give no upper or lower radius limit for the linear cylindrical slosh relations: Eqs. (1)-(3) are scale-free in R, so no radius gate is applied. The one size-dependent validity criterion the sources DO state is the Bond number Bo = rho * g_eff * R^2 / sigma (NASA SP-8009 Sec. 2.3): below Bo ~ 10 surface tension governs the free surface and this gravity-wave model no longer applies. It is evaluated only when the liquid surface tension (sigma) is supplied; without it the low-gravity / small-radius limit is NOT checked. Results at extreme radii are then a scale-free extrapolation of the theory, not a validated regime.';
+    function sozlukluCumle(baslik, metin, key, en, kind) {
+        if (metin === en) return U.listBlock(baslik, [T(key, en)], kind);
+        return duzyaziBlok(baslik, [metin], kind);
     }
     const PANEL_ID = 'feed';
     const lastTabData = {};              // sekme -> son yanıt (dil değişiminde yeniden çizilir)
@@ -130,7 +144,7 @@
                     + 'the product'))
             + '  ·  ' + U.esc(String(z.radius_band_status)),
             T('panel.feed.szBandTip',
-              'This status string is the declaration made by the endpoint; '
+              'This status string is the declaration made by the calculation; '
               + 'the panel does not classify it')]);
         rows.push([
             T('panel.feed.szGate', 'Radius gate applied to this run'),
@@ -155,11 +169,12 @@
                 U.esc(String(z.missing_input_for_bond_number))]);
         }
         let html = U.sectionTitle(T('panel.feed.secSizeEnvelope',
-            'Size envelope — what the endpoint could and could NOT judge'))
+            'Size envelope — what the calculation could and could NOT judge'))
             + U.kvTable(rows);
         if (z.basis) {
-            html += duzyaziBlok(T('panel.feed.szBasis',
-                'Basis of the size-envelope declaration'), [z.basis], 'dim');
+            html += sozlukluCumle(T('panel.feed.szBasis',
+                'Basis of the size-envelope declaration'), z.basis,
+                'panel.feed.slosh.zarfDayanagi', SLOSH_ZARF_DAYANAGI_EN, 'dim');
         }
         return html;
     }
@@ -178,7 +193,7 @@
                 T('panel.feed.cardSloshMassTip', 'Absolute fundamental slosh mass (needs density/mass)'))
             + U.statCard(T('panel.feed.cardPendulum', 'PENDULUM LENGTH'), fmtL(s.pendulum_length, 3), 'm', 'dim',
                 T('panel.feed.cardPendulumTip', 'Equivalent-pendulum length of the slosh mass'))
-            + U.statCard(T('panel.feed.cardFill', 'FILL RATIO h/R'), fmtL(s.fill_ratio, 2), '', 'dim', '')
+            + U.statCard(T('panel.feed.cardFill', 'LIQUID HEIGHT / RADIUS h/R'), fmtL(s.fill_ratio, 2), '', 'dim', '')
             + '</div>';
 
         const head = document.createElement('div');
@@ -219,7 +234,7 @@
             }
             Plotly.newPlot(div, traces, {
                 title: T('panel.feed.chartSlosh', 'Slosh Frequency & Mass Fraction vs Fill Level'),
-                xaxis: { title: T('panel.feed.axisFill', 'Fill ratio h/R') },
+                xaxis: { title: T('panel.feed.axisFill', 'Liquid height / radius h/R') },
                 yaxis: { title: T('panel.feed.axisF1', 'Frequency f1 (Hz)'), rangemode: 'tozero' },
                 yaxis2: { title: T('panel.feed.sMassFrac', 'Slosh mass fraction'),
                           overlaying: 'y', side: 'right', showgrid: false },
@@ -239,11 +254,31 @@
         const tail = document.createElement('div');
         let html = '';
         const rows = [];
+        // 3.0.7 ONARIM-ÇALK (M7-CALK-13, M7-CALK-2): geçerlilik kodları
+        // ekranda; perde sıvının dışındaysa (d/R > h/R) sunucu sönümü
+        // yayımlamaz (null) ve bu satır nedenini yazar. Tasarım genliği η/R
+        // (sönüm √(η/R) ile değişir) her iki dalda yazılır.
+        const bkod = Array.isArray(baffle.validity_codes) ? baffle.validity_codes : [];
+        const BKOD = {
+            BAFL_GECERLILIK_DISI: ['panel.calkanti.kod.BAFL_GECERLILIK_DISI',
+                'Outside the validity range of the baffle damping relation (h/R ≤ 2, or the baffle is shallower than the wave amplitude).'],
+            BAFL_SIVI_DISINDA: ['panel.calkanti.kod.BAFL_SIVI_DISINDA',
+                'The baffle is deeper below the surface than the liquid depth (d/R > h/R): at this fill it lies below the tank bottom, outside the liquid; its damping is not reported.'],
+            GENLIK_DOGRUSAL_SINIR_DISI: ['panel.calkanti.kod.GENLIK_DOGRUSAL_SINIR_DISI',
+                'Wave amplitude outside the linear-theory limit (η/R > 0.2).'],
+        };
+        if (baffle.damping_ratio == null && bkod.indexOf('BAFL_SIVI_DISINDA') >= 0) {
+            rows.push([T('panel.feed.baffleDamping', 'Ring-baffle damping ratio'),
+                T('panel.feed.baffleNotReported', 'not reported (reason below)')]);
+        }
         if (baffle.damping_ratio != null) {
             rows.push([T('panel.feed.baffleDamping', 'Ring-baffle damping ratio'),
                 U.tf('panel.feed.baffleBand',
-                     { v: fmtL(baffle.damping_ratio, 4), lo: fmtL(baffle.damping_ratio_low, 4),
-                       hi: fmtL(baffle.damping_ratio_high, 4) },
+                     // ONARIM2-ÇALK-SEKME (M7-CALK-4): perde sönümü 3 anlamlı
+                     // basamak (Çalkantı bölümündeki "motorun kendi halka perde
+                     // sönümü" ile aynı kural; ölçüldü: 0,0008 ⟷ 0,00085).
+                     { v: fmtS(baffle.damping_ratio, 3), lo: fmtS(baffle.damping_ratio_low, 3),
+                       hi: fmtS(baffle.damping_ratio_high, 3) },
                      '{v} (band {lo}-{hi})'),
                 T('panel.feed.baffleTip',
                   'Miles (1958) single flat ring baffle — approximate (factor ~2 band)')]);
@@ -255,9 +290,23 @@
             rows.push([T('panel.feed.targetDamping', 'Target damping ratio'),
                        fmtL(baffle.target_damping_ratio, 4)]);
         }
+        if (rows.length && baffle.amplitude_ratio != null) {
+            rows.push([T('panel.feed.baffleAmplitude', 'Design wave amplitude η/R (HRMA choice)'),
+                fmtL(baffle.amplitude_ratio, 3),
+                T('panel.feed.baffleAmplitudeTip', 'The Miles damping scales with √(η/R); the value above holds at this amplitude only (Dodge 2000 Eq. (2.16)).')]);
+        }
         if (rows.length) {
             html += U.sectionTitle(T('panel.feed.secBaffle',
                 'Ring-Baffle Damping (Miles, approximate)')) + U.kvTable(rows);
+            const bilinen = bkod.filter(function (k) { return BKOD[k]; });
+            if (bilinen.length) {
+                html += '<div class="feed-baffle-codes" style="font-size:0.8rem; margin:4px 0;">'
+                    + U.esc(bilinen.map(function (k) { return T(BKOD[k][0], BKOD[k][1]); }).join(' ')) + '</div>';
+            }
+            if (bkod.some(function (k) { return !BKOD[k]; })) {
+                html += '<div style="font-size:0.8rem; margin:4px 0;">' + U.esc(T('panel.calkanti.kodTaninmadi',
+                    'A reason code this screen does not know was returned; the result is not shown as valid.')) + '</div>';
+            }
         }
         if (Array.isArray(s.coincidence_warnings) && s.coincidence_warnings.length) {
             html += U.listBlock(T('panel.feed.coincidenceWarnings', 'Frequency-coincidence warnings'),
@@ -288,8 +337,9 @@
         }
         html += sizeEnvelopeHtml(s);
         html += defaultsAppliedHtml(data, 'slosh');   // V301/PANEL-SAYI
-        if (s.model_note) html += duzyaziBlok(T('common.modelAssumptions',
-            'Model assumptions & limits'), [s.model_note], 'dim');
+        if (s.model_note) html += sozlukluCumle(T('common.modelAssumptions',
+            'Model assumptions & limits'), s.model_note,
+            'panel.feed.slosh.modelNotu', SLOSH_MODEL_NOTU_EN, 'dim');
         html += confidenceHtml(data, s);
         tail.innerHTML = html;
         root.appendChild(tail);
@@ -322,9 +372,11 @@
                 ? data.confidence : null);
         if (c === null) return '';
         const metin = (typeof c === 'object') ? JSON.stringify(c) : String(c);
-        return U.kvTable([['confidence',
+        // V307/DİL-EKRAN (DİL-HİBRİT O6): satır etiketi kullanıcı dilinde;
+        // makine adı ipucunda (kvTable üçüncü sütunu = title).
+        return U.kvTable([[T('panel.feed.lblConfidence', 'Confidence'),
             '<span style="font-family:var(--hd-mono); font-size:0.75rem;">'
-            + U.esc(metin) + '</span>']]);
+            + U.esc(metin) + '</span>', 'confidence']]);
     }
 
     /* ÖH D28 / arayuz a1 (OH-D27-16) — KÜTLEYİ ÖLÇEKLEYEN VARSAYIM EKRANDA.
@@ -1023,13 +1075,59 @@
             const f = tab.fields.filter(function (x) { return x[0] === zorunlu[1]; })[0];
             const etiket = f ? T(f[4], f[1]) : zorunlu[1];
             return U.tf('panel.feed.requiredEmpty', { field: etiket },
-                'Required field is empty: {field}. The endpoint rejected the '
-                + 'request; nothing was computed.');
+                'Required field is empty: {field}. The request was refused; '
+                + 'nothing was computed.');
         }
+        const alanRet = sloshAlanRetMetni(tab, govde);
+        if (alanRet) return alanRet;
         const cumle = (/^[a-z][a-z0-9_]*$/.test(ham) && govde.message)
             ? String(govde.message) : ham;
         return (window.I18N && typeof window.I18N.serverText === 'function')
             ? window.I18N.serverText(cumle) : cumle;
+    }
+
+    /* ONARIM2-ÇALK-SEKME (M7-CALK-14): tek tank formunun (çalkantı sekmesi)
+       değer reddi alan adıyla ve DOĞRU gerekçeyle, ekran dilinde. ÖLÇÜLDÜ:
+       TR ekranda "HATA: fill_height must be positive (got 0.0) … would
+       publish a negative liquid mass"; eksenel ivme 0 için de aynı (yanlış)
+       gerekçe. Uç gövdesinin makine okur künyesinden (alan + sebep kodu +
+       gönderilen değer) kurulur; tanınmayan alan/sebep eski yola düşer. */
+    const SLOSH_RET_SEBEPLERI = ['not_positive', 'not_finite', 'not_a_number'];
+    // Anahtarlar düz yazılı (sözlük bekçisi kullanılmayan anahtarı arar).
+    const SLOSH_RET_NEDENI = {
+        radius: ['panel.feed.slosh.retNeden.radius',
+            'a non-positive radius describes no tank volume, so there is no liquid and no slosh mode'],
+        fill_height: ['panel.feed.slosh.retNeden.fill_height',
+            'a non-positive liquid height means no liquid in the tank, so there is no slosh mode'],
+        g_eff: ['panel.feed.slosh.retNeden.g_eff',
+            'without a positive axial acceleration nothing restores the liquid surface, so the slosh frequency (ω1 = √(κ1·g_eff)) is not defined'],
+        fluid_density: ['panel.feed.slosh.retNeden.fluid_density',
+            'a non-positive density would give a zero or negative liquid mass'],
+    };
+    function sloshAlanRetMetni(tab, govde) {
+        if (!tab || tab.key !== 'slosh') return null;
+        const k = (Array.isArray(govde.invalid_fields) && govde.invalid_fields[0]) || null;
+        if (!k || SLOSH_RET_SEBEPLERI.indexOf(k.reason) < 0) return null;
+        const f = tab.fields.filter(function (x) { return x[0] === k.field; })[0];
+        if (!f) return null;
+        const etiket = T(f[4], f[1]);
+        const v = Number(k.submitted);
+        const deger = (k.submitted !== null && k.submitted !== undefined && Number.isFinite(v))
+            ? U.num(v) : '—';
+        if (k.reason === 'not_positive') {
+            const nd = SLOSH_RET_NEDENI[k.field];
+            const neden = nd
+                ? T(nd[0], nd[1])
+                : T('panel.feed.slosh.retNedenGenel', 'the linear slosh model has no meaning for a non-positive value');
+            return U.tf('panel.feed.slosh.retPozitif', { field: etiket, v: deger, neden: neden },
+                '{field} must be greater than 0 (given: {v}): {neden}. The request was refused; nothing was computed.');
+        }
+        if (k.reason === 'not_finite') {
+            return U.tf('panel.feed.slosh.retSonlu', { field: etiket },
+                '{field} must be a finite number. The request was refused; nothing was computed.');
+        }
+        return U.tf('panel.feed.slosh.retSayi', { field: etiket },
+            '{field} must be a number. The request was refused; nothing was computed.');
     }
 
     // ------------------------------------------------------------------
@@ -1183,6 +1281,14 @@
             });
             applyTabSuggestions(tab, pane);
         });
+        // 3.0.7 (V307/ÇALKANTI-ARAYÜZ, K5): tank çalkantı modeli bölümü
+        // Çalkantı sekmesinin altına (calkanti_panel.js); katı motorda sekme
+        // yok, bölümün başına tek satır "çalkantı uygulanmaz".
+        if (window.HRMACalkanti) {
+            const sp = root.querySelector('.feed-pane[data-pane="slosh"]');
+            if (sp) window.HRMACalkanti.mount(sp);
+            else if (window.AnalysisDock.getMotorType() === 'solid') window.HRMACalkanti.mountSolid(root);
+        }
         return true;
     }
 
@@ -1244,6 +1350,8 @@
         // sekmeler burada yeniden tohumlanır (dock alanı yok: {} döner).
         fromResults: function () {
             try { applyAllTabSuggestions(); } catch (e) { /* tohum yoksa alan boş kalır */ }
+            // 3.0.7 (K5): yeni motor sonucu → eski tank modeli sonucu bayat.
+            try { if (window.HRMACalkanti) window.HRMACalkanti.motorDegisti(); } catch (e) { /* bölüm yok */ }
             return {};
         },
         render: function () { mountFeedTools(); },

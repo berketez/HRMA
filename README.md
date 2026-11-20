@@ -33,8 +33,8 @@ and you're done:
 
 | Platform | Direct download |
 |---|---|
-| **Windows 10/11** | [**HRMA-Setup-3.0.6.exe**](https://github.com/berketez/HRMA/releases/download/v3.0.6/HRMA-Setup-3.0.6.exe) (double-click, then Next → Next → Install) |
-| **macOS 11+ (Apple Silicon)** | [**HRMA-Setup-3.0.6-macOS.dmg**](https://github.com/berketez/HRMA/releases/download/v3.0.6/HRMA-Setup-3.0.6-macOS.dmg) (drag HRMA to Applications) |
+| **Windows 10/11** | [**HRMA-Setup-3.0.7.exe**](https://github.com/berketez/HRMA/releases/download/v3.0.7/HRMA-Setup-3.0.7.exe) (double-click, then Next → Next → Install) |
+| **macOS 11+ (Apple Silicon)** | [**HRMA-Setup-3.0.7-macOS.dmg**](https://github.com/berketez/HRMA/releases/download/v3.0.7/HRMA-Setup-3.0.7-macOS.dmg) (drag HRMA to Applications) |
 
 Everything is bundled (Python, all libraries, offline charts). HRMA opens in
 its own native window and notifies you automatically when a new version is
@@ -197,8 +197,8 @@ Download the latest installers from the
 
 | Platform | Installer | Notes |
 |---|---|---|
-| **Windows 10/11** | [`HRMA-Setup-3.0.6.exe`](https://github.com/berketez/HRMA/releases/download/v3.0.6/HRMA-Setup-3.0.6.exe) | English setup wizard (Next → Next → Install); per-user, desktop shortcut, no admin rights |
-| **macOS 11+ (Apple Silicon)** | [`HRMA-Setup-3.0.6-macOS.dmg`](https://github.com/berketez/HRMA/releases/download/v3.0.6/HRMA-Setup-3.0.6-macOS.dmg) | Drag & drop to Applications; right-click → Open on first launch |
+| **Windows 10/11** | [`HRMA-Setup-3.0.7.exe`](https://github.com/berketez/HRMA/releases/download/v3.0.7/HRMA-Setup-3.0.7.exe) | English setup wizard (Next → Next → Install); per-user, desktop shortcut, no admin rights |
+| **macOS 11+ (Apple Silicon)** | [`HRMA-Setup-3.0.7-macOS.dmg`](https://github.com/berketez/HRMA/releases/download/v3.0.7/HRMA-Setup-3.0.7-macOS.dmg) | Drag & drop to Applications; right-click → Open on first launch |
 
 Once installed, HRMA notifies you at startup when a new version is released
 and updates itself with one click.
@@ -294,7 +294,7 @@ HRMA/
 
 ## Version
 
-**HRMA v3.0.6**
+**HRMA v3.0.7**
 - Developed by: Berke Tezgocen
 - Idea & Testing: Ayberk Cem Aksoy
 - A preliminary-design and analysis tool for rocket propulsion

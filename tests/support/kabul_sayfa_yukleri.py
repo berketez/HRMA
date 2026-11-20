@@ -18,25 +18,22 @@ alanı, ``oxidizer_density`` 1141 ⟷ 1141.16, ``oxidizer_viscosity``; hibrit:
 ``vehicle_*`` ve aynanın gönderip sayfanın göndermediği 21 alan. API
 düğümleri kullanıcının yükünü değil başka bir yükü ölçüyordu.
 
-Hasat tarihi: 2026-11-09 · kaynak: örnek .hrma dosyaları (examples/).
+Hasat tarihi: 2026-11-20 · kaynak: örnek .hrma dosyaları (examples/).
 V306/KATI-KALAN (9 Kas): katı gövdeden ``star_fillet`` çıkarıldı — sayfa
 artık o kutuyu taşımıyor ve göndermiyor (hasadın bu alandaki karşılığı;
 başka alan değişmedi).
 """
 
-SAYFA_YUKLERI = {'hybrid': {'atmospheric_pressure': 1.013,
+SAYFA_YUKLERI = {'hybrid': {'atmospheric_pressure': 1.01325,
             'burn_time': 10,
             'calculate_trajectory': True,
-            'chamber_diameter_input': 0,
             'chamber_material': 'steel_304',
             'chamber_pressure': 30,
             'combustion_type': 'infinite',
-            'contraction_ratio': 0,
             'design_config_fields': [{'field': 'chamber_material', 'source': 'project_file'}],
             'design_config_opened': True,
             'design_config_source': 'project_file',
             'drag_coefficient': 0.5,
-            'expansion_ratio': 0,
             'fuel_density': 920,
             'fuel_type': 'htpb',
             'injector_type': 'showerhead',

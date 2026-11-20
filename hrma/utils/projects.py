@@ -714,16 +714,89 @@ def load_project_records(name: str) -> Tuple[Dict, List[Dict]]:
 
     doc = _read_project_file(path)
     try:
-        validate_payload(doc)
+        return load_project_document(doc)
     except ProjectValidationError as e:
         raise ProjectCorruptError(f'Project file does not match the schema: {e}')
 
+
+def load_project_document(doc: Any) -> Tuple[Dict, List[Dict]]:
+    """Depoya yazılmamış bir proje belgesini YÜKLEMEYLE AYNI kapıdan geçir.
+
+    V307/FS-UÇUŞ-2 (D3, A3): Fırlatma Sahası diskteki bir .hrma dosyasını
+    içe aktarabilsin diye ``load_project_records``ın dosyasız hâli. Şema
+    doğrulaması (``validate_payload``) ve beyanlı sürüm göçleri AYNEN
+    uygulanır; belge diske yazılmaz, ada göre yol kurulmaz. Dönüş:
+    ``(belge, uyarı kayıtları)``. Şemaya uymayan belge
+    :class:`ProjectValidationError` (adlı neden) yükseltir.
+    """
+    if not isinstance(doc, dict):
+        raise ProjectValidationError('project document root must be a JSON object')
+    validate_payload(doc)
     records = load_warning_records(doc)
     goc = _solid_legacy_case_bore_migration(doc)
     if goc is not None:
         records.append(goc)
     records.extend(_solid_retired_fields_migration(doc))
     return doc, records
+
+
+#: İçe aktarılan proje dosyasının kabul edilen uzantısı (biçim beyaz listesi).
+IMPORT_FILE_EXTENSIONS = (FILE_EXT,)
+#: İçe aktarılan dosya adının (yalnız gösterim için) en büyük uzunluğu.
+IMPORT_FILE_NAME_MAX_LEN = 255
+
+
+def validate_import_file_name(file_name: Any) -> str:
+    """İçe aktarılan dosyanın adı: yalnız GÖSTERİM içindir, yol kurulmaz.
+
+    Biçim beyaz listesi (``IMPORT_FILE_EXTENSIONS``, büyük/küçük harf
+    duyarsız); yol ayırıcısı, NUL ya da üst dizin parçası taşıyan ad
+    reddedilir (ad hiçbir dosya işleminde kullanılmasa da yol geçişi
+    biçimindeki bir ad kabul edilmez). Dönüş: adın kendisi.
+    """
+    if not isinstance(file_name, str) or not file_name.strip():
+        raise ProjectNameError('file name must be a non-empty string')
+    if len(file_name) > IMPORT_FILE_NAME_MAX_LEN:
+        raise ProjectNameError(
+            f'file name is longer than {IMPORT_FILE_NAME_MAX_LEN} characters')
+    if any(c in file_name for c in ('/', '\\', '\x00')) or '..' in file_name:
+        raise ProjectNameError('file name must not contain a path')
+    if not file_name.lower().endswith(IMPORT_FILE_EXTENSIONS):
+        raise ProjectNameError(
+            'only ' + ', '.join(IMPORT_FILE_EXTENSIONS) + ' project files can be imported')
+    return file_name
+
+
+def _reject_json_constant(name: str):
+    raise ValueError(f'non-finite number {name} is not allowed in a project file')
+
+
+def parse_project_text(text: Any) -> Dict:
+    """İçe aktarılan proje dosyasının METNİNİ çöz (eval/pickle yok).
+
+    Kapılar: metin olmalı; UTF-8 bayt boyu ``MAX_PROJECT_BYTES``ı aşamaz
+    (:class:`ProjectTooLargeError`); JSON standart ayrıştırıcıyla okunur,
+    ``NaN``/``Infinity`` reddedilir, aşırı iç içe yapı (ayrıştırıcının
+    özyineleme sınırı) adıyla reddedilir; kök nesne olmalıdır. Ayrıştırma
+    hataları :class:`ProjectValidationError` (satır/sütun ile).
+    """
+    if not isinstance(text, str):
+        raise ProjectValidationError('project file content must be text')
+    # surrogatepass: eşsiz vekil karakter (JSON '\ud800') boyu ölçmeyi
+    # kırmasın; içerik kapısı aşağıdaki ayrıştırıcıdır.
+    size = len(text.encode('utf-8', 'surrogatepass'))
+    if size > MAX_PROJECT_BYTES:
+        raise ProjectTooLargeError(
+            f'Project file is {size} bytes; limit is {MAX_PROJECT_BYTES} bytes (1 MB)')
+    try:
+        doc = json.loads(text, parse_constant=_reject_json_constant)
+    except RecursionError:
+        raise ProjectValidationError('project file is nested too deeply to read')
+    except ValueError as e:
+        raise ProjectValidationError(f'project file is not valid JSON: {e}')
+    if not isinstance(doc, dict):
+        raise ProjectValidationError('project file root must be a JSON object')
+    return doc
 
 
 # --------------------------------------------------------------------------

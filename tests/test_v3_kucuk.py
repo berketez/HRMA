@@ -315,7 +315,10 @@ class TestDockMotorSfHedefi:
         assert d['uc']['design_basis']['design_safety_factor_source'] == (
             'user_supplied')
         yol = 'motor.' + '.'.join(p for p in _HEDEF_YOLU[tur] if p != 'motor')
-        assert f'source: motor design target ({yol})' in d['metin']
+        # V307/DİL-EKRAN (KILAVUZ ÜB-3): kaynak adıyla beyan edilir; makine
+        # yolu kullanıcı metninde basılmaz.
+        assert 'source: motor design target' in d['metin']
+        assert yol not in d['metin']
         assert 'material database default' not in d['metin']
 
     def test_sivi_olculen_vaka(self, client, ornek_motorlar):
@@ -1435,15 +1438,17 @@ class TestKk3SunucuCumleleri:
     def test_hibrit_kunyesi_olcum_ve_dayanak_tr(self, kk3_cumleler):
         m = kk3_cumleler['hibrit_kunye']
         assert m.startswith('dry mass computed by the motor structural model')
-        oran = re.search(r'measured dry/propellant ratio (\S+);', m).group(1)
+        oran = re.search(r'computed dry/propellant ratio (\S+);', m).group(1)
         t = _sunucu_metni([m])[0]
-        assert ('ölçülen kuru/itici oranı ' + oran.replace('.', ',')) in t
+        assert ('hesaplanan kuru/itici oranı ' + oran.replace('.', ',')) in t
+        # V307/ONARIM2-UÇUŞ-ARAÇ (M7-FS-8): hesaplanan oran 'ölçülen' diye yazılmaz.
+        assert 'ölçülen' not in t and 'measured' not in m
         assert 'dayanak: Uçuş zinciri' in t
 
     def test_dayanagi_cevrilemeyen_kunye_aynen_kalir(self):
         """Fail-closed: kuyruk çevrilemezse yarı Türkçe cümle üretilmez."""
         m = ('dry mass computed by the motor structural model, NOT the 0.25 '
-             'rule of thumb; measured dry/propellant ratio 7.48; basis: '
+             'rule of thumb; computed dry/propellant ratio 7.48; basis: '
              'an unknown future basis sentence')
         assert _sunucu_metni([m])[0] == m
 

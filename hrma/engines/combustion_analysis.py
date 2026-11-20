@@ -26,7 +26,11 @@ except ImportError:
     CANTERA_AVAILABLE = False
 
 from hrma.constants import (G_0, R_UNIVERSAL, PA_PER_BAR, BAR_PER_PA,
-                            isa_pressure, isa_temperature)
+                            isa_pressure, isa_pressure_geometric,
+                            isa_temperature_geometric)
+# V307/HİBRİT-ORTAM: irtifa taramasının ayrılma ölçütü motorun tasarım
+# noktası denetimiyle aynı tek tanımdan (Summerfield k).
+from hrma.flow.separation import SUMMERFIELD_FACTOR_DEFAULT
 
 logger = logging.getLogger(__name__)
 
@@ -121,6 +125,57 @@ HYBRID_FUEL_REJECTION_REASONS = {
         'supply (formula, density, heat of formation, regression pair). '
         'Nothing is assumed on your behalf.'),
 }
+
+
+def _altitude_row_cf(thrust_n, cf_header, thrust_header_n, mdot, c_star):
+    """İrtifa tablosu satırının itki katsayısı — TEK TANIM (V307/TEK-TANIM).
+
+    C_F = F/(P_c·A_t) (Sutton & Biblarz 9. bs. Denk. 3-30). Sabit lülede
+    P_c ve A_t irtifayla değişmez, dolayısıyla satırın C_F'i başlık
+    C_F'inin itki oranıyla ölçeklenmişidir: C_F(h) = C_F,başlık ·
+    F(h)/F_başlık. Tasarım ortamının satırında F(h) = F_başlık olduğundan
+    sayı başlığın KENDİSİDİR (bit-aynı).
+
+    ESKİ (3.0.6): F/(ṁ·c*_ideal) — CEA ideal c* ile; bu C_F·η_c*'dir ve
+    aynı ortamda başlıktan %11 farklıydı (ölçüm: hibrit-ortam RAPOR AÇIK 2;
+    1,0 bar 0 m satırı 1,2052 ⟷ başlık 1,3568). Başlık verilmezse (motor
+    dışı doğrudan çağıranlar) F/(ṁ·c*) çağıranın verdiği c* ile — aynı
+    tanım, P_c·A_t = ṁ·c*.
+    """
+    try:
+        cf_b = float(cf_header)
+        f_b = float(thrust_header_n)
+    except (TypeError, ValueError):
+        cf_b = f_b = None
+    if (cf_b is not None and np.isfinite(cf_b) and cf_b > 0.0
+            and np.isfinite(f_b) and f_b > 0.0):
+        return cf_b * (thrust_n / f_b)
+    return thrust_n / (mdot * c_star) if mdot * c_star else 0.0
+
+
+def fixed_nozzle_altitude_point(thrust_design_n, design_ambient_pa,
+                                exit_area_m2, mass_flow_kg_s, altitude_m):
+    """Sabit geometrili lülenin h irtifasındaki itki ve Isp'si — TEK HESAP.
+
+    V307/CI-KIRMIZI: motorun irtifa tablosu (``_fixed_nozzle_altitude_sweep``,
+    tasarım ortamına çapalı yol) ve hibrit İrtifa Profili
+    (``hrma.analysis.altitude_performance.fixed_nozzle_profile``) aynı
+    büyüklüğü iki işlem sırasıyla hesaplıyordu (η_v·ṁ·v_e + (P_e − p_a)·A_e
+    ⟷ F_tas + (p_tas − p_a)·A_e); CI 44290629774 Linux'ta 0 m Isp'si son
+    basamakta ayrıştı (195,47482623444262 ⟷ 195,4748262344426). İkisi bu
+    işlevi çağırır; aynı girdiyle her platformda bit-aynıdır.
+
+        p_a(h) = isa_pressure_geometric(h)                 [Pa]
+        F(h)   = F_tas + (p_tas − p_a(h)) · A_e             (dF/dp_a = −A_e)
+        Isp(h) = F(h) / (ṁ · g0)
+
+    Sutton & Biblarz 9. bs. Denk. 2-14 / 3-29. Dönüş: (p_a [Pa], F [N],
+    Isp [s]).
+    """
+    p_a = isa_pressure_geometric(float(altitude_m))
+    itki = (float(thrust_design_n)
+            + (float(design_ambient_pa) - p_a) * float(exit_area_m2))
+    return p_a, itki, itki / (float(mass_flow_kg_s) * G_0)
 
 
 def _unsupported_fuel_error(fuel_type):
@@ -4012,8 +4067,26 @@ class CombustionAnalyzer:
                                      exit_area_m2: Optional[float] = None,
                                      anchor_ambient_pressure_pa: Optional[
                                          float] = None,
+                                     separation_exit_pressure_bar: Optional[
+                                         float] = None,
                                      ) -> Tuple[List[Dict], Dict]:
         """Sabit geometrili lülede irtifa taraması — TEK TANIM NOKTASI.
+
+        V307/HİBRİT-ORTAM (S1) — AYRILAN SATIR SAYI YAYIMLAMAZ. ÖLÇÜLDÜ
+        (docs/scofield/raw/OH/V307/hibrit-ortam/olcum/once.json): hibrit
+        300 N / 20 bar, tasarım ortamı 20 km (0,055293 bar) → 0 m satırı
+        itki −19,93 N, Isp −16,50 s; 50 km → −1 692,5 N / −1 583,07 s ve bu
+        sayı ``sea_level_isp`` adıyla yayımlanıyordu. Lüle o ortamda
+        Summerfield ölçütüyle ayrılır; aşağıdaki ekli akış bağıntısı orada
+        geçerli değildir. Çağıran ``separation_exit_pressure_bar`` (motorun
+        aşırı genişleme denetiminin çıkış basıncı) verirse ölçüt
+        (P_e < k·p_a, k = ``hrma.flow.separation.SUMMERFIELD_FACTOR_DEFAULT``;
+        motorun tasarım noktası denetimi ve İrtifa Profili ile AYNI ölçüt)
+        her satıra uygulanır: ayrılan satırın itki ve Isp'si ``None``, satır
+        ``flow_separated`` ve ``not_modelled_reason`` ile adıyla durur.
+        Tasarım ortamının satırı tasarım noktasının kendisidir (motor orada
+        kendi ayrılma tabanını uygular) ve olduğu gibi kalır. Verilmezse
+        eski yol bit-aynıdır; ayrılmayan satırlar da bit-aynıdır.
 
         T33 DÜZELTMESİ (2026-08-03). Aynı motor için sayfada İKİ irtifa
         tablosu vardı ve ikisi de farklı bir deniz seviyesi itkisi
@@ -4122,13 +4195,57 @@ class CombustionAnalyzer:
         # Vakum itkisi (P_a = 0) — irtifa verimlerinin paydası
         thrust_vacuum = eta_v * mdot * v_exit + P_e_pa * A_e
 
+        p_e_ayrilma = None
+        if separation_exit_pressure_bar is not None:
+            p_e_ayrilma = float(separation_exit_pressure_bar)
+            if not (np.isfinite(p_e_ayrilma) and p_e_ayrilma > 0.0):
+                raise ValueError(
+                    f'separation_exit_pressure_bar must be a positive finite '
+                    f'pressure, got {separation_exit_pressure_bar!r}; the '
+                    f'separation check is not skipped silently.')
+        k_ayrilma = float(SUMMERFIELD_FACTOR_DEFAULT)
+
         rows = []
         for altitude in altitudes:
-            # Standard atmosphere — merkezi ISA yardımcıları (hrma.constants)
-            T = isa_temperature(altitude)              # K
-            P = isa_pressure(altitude) * BAR_PER_PA    # bar
-            thrust = eta_v * mdot * v_exit + (P_e_pa - P * PA_PER_BAR) * A_e
-            isp = thrust / (mdot * G_0) if mdot > 0 else 0.0
+            # Standard atmosphere — merkezi ISA yardımcıları (hrma.constants);
+            # V307/İRTİFA-TEK: tablo irtifası GEOMETRİK (geopotansiyele çevrilir).
+            T = isa_temperature_geometric(altitude)              # K
+            P = isa_pressure_geometric(altitude) * BAR_PER_PA    # bar
+            # V307/HİBRİT-ORTAM: tasarım noktasının satırı (ortam basıncı
+            # çapanın kendisi) ayrılma hükmünden muaftır; motor orada kendi
+            # tabanını uygular ve çapa o sayıdır.
+            tasarim_satiri = (anchor_ambient_pressure_pa is not None and abs(
+                P * PA_PER_BAR - P_cap_pa) <= 1e-12 * max(P_cap_pa, 1.0))
+            if (p_e_ayrilma is not None and not tasarim_satiri
+                    and p_e_ayrilma < k_ayrilma * P):
+                rows.append({
+                    'altitude': altitude,
+                    'pressure': P,
+                    'temperature': T,
+                    'thrust': None,
+                    'isp': None,
+                    'exit_velocity': v_exit,
+                    'flow_separated': True,
+                    'not_modelled_reason': (
+                        'the fixed nozzle is separated at this ambient '
+                        'pressure by the Summerfield criterion (P_e = '
+                        f'{p_e_ayrilma:.4f} bar < {k_ayrilma:g} x p_a = '
+                        f'{k_ayrilma * P:.4f} bar): attached-flow relations '
+                        'do not hold and separated nozzle flow is NOT '
+                        'modelled here, so no thrust or Isp is published '
+                        'for this row'),
+                })
+                continue
+            if (anchor_ambient_pressure_pa is not None and eta_raw is not None
+                    and 0.5 <= eta_raw <= 1.0):
+                # V307/CI-KIRMIZI: tasarım ortamına çapalı yol İrtifa
+                # Profili ile AYNI işlevden (tek hesap; F_tas = teslim itkisi).
+                _, thrust, isp = fixed_nozzle_altitude_point(
+                    f_sl, P_cap_pa, A_e, mdot, altitude)
+            else:
+                thrust = (eta_v * mdot * v_exit
+                          + (P_e_pa - P * PA_PER_BAR) * A_e)
+                isp = thrust / (mdot * G_0) if mdot > 0 else 0.0
             rows.append({
                 'altitude': altitude,
                 'pressure': P,
@@ -4186,16 +4303,39 @@ class CombustionAnalyzer:
         c_star = motor_data['performance']['c_star']              # m/s
         mdot = motor_data.get('mdot_total', 1.0)                  # kg/s
 
+        # V307/TEK-TANIM kalem 5 (ana model kararı: C_F tek tanım
+        # F/(P_c·A_t), Sutton & Biblarz 9. bs. Denk. 3-30): çağıran motorun
+        # başlık C_F'ini ve onun ait olduğu teslim itkisini verirse satırın
+        # C_F'i AYNI tanımdan gelir (bkz. ``_altitude_row_cf``).
+        cf_header = motor_data.get('thrust_coefficient')
+        f_header = motor_data.get('thrust_sea_level')
         rows, meta = self._fixed_nozzle_altitude_sweep(
             mdot, v_exit, P_e_bar, T_e, R_e, altitudes,
             thrust_sea_level=motor_data.get('thrust_sea_level'),
             exit_area_m2=motor_data.get('exit_area_m2'),
             anchor_ambient_pressure_pa=motor_data.get(
-                'thrust_reference_pressure_pa'))
+                'thrust_reference_pressure_pa'),
+            separation_exit_pressure_bar=motor_data.get(
+                'separation_exit_pressure_bar'))
 
         for row in rows:
-            # CF = F/(Pc*At); At = c_star*mdot/Pc -> CF = F/(mdot*c_star).
-            cf = row['thrust'] / (mdot * c_star) if mdot * c_star else 0.0
+            if row.get('flow_separated'):
+                # V307/HİBRİT-ORTAM: ayrılan satır sayı yayımlamaz (itki,
+                # Isp ve C_F aynı ekli akış bağıntısından gelirdi).
+                performance_data.append({
+                    'altitude': row['altitude'],
+                    'pressure': row['pressure'],
+                    'temperature': row['temperature'],
+                    'exit_velocity': row['exit_velocity'],
+                    'cf': None,
+                    'isp': None,
+                    'thrust': None,
+                    'flow_separated': True,
+                    'not_modelled_reason': row['not_modelled_reason'],
+                })
+                continue
+            cf = _altitude_row_cf(row['thrust'], cf_header, f_header,
+                                  mdot, c_star)
             performance_data.append({
                 'altitude': row['altitude'],
                 'pressure': row['pressure'],
@@ -4227,7 +4367,19 @@ class CombustionAnalyzer:
         thrust_vacuum = float(meta.get('thrust_vacuum_n', 0.0))
         vacuum_isp = (thrust_vacuum / (mdot * G_0)) if mdot > 0 else 0.0
 
+        # V307/HİBRİT-ORTAM: 0 m satırı ayrıldıysa deniz seviyesi Isp'si
+        # yayımlanmaz ve nedeni satırın kendi cümlesidir (yalnız o durumda
+        # yazılır; ayrılmayan tasarımlarda yanıt bit-aynı).
+        ek_ds = {}
+        for satir in performance_data:
+            if (float(satir.get('altitude', float('nan'))) == 0.0
+                    and satir.get('flow_separated')):
+                ek_ds = {'sea_level_isp_not_published_reason':
+                         satir['not_modelled_reason']}
+                break
+
         return {
+            **ek_ds,
             'altitude_performance': performance_data,
             # --- ÖH D20 / B3-13 · 'sea_level_isp' ARTIK DENİZ SEVİYESİ ----
             # Burada ``performance_data[0]['isp']`` yazılıydı: listenin İLK
@@ -4682,15 +4834,56 @@ class CombustionAnalyzer:
             thrust_sea_level=base_thrust,
             exit_area_m2=motor_data.get('exit_area_m2'),
             anchor_ambient_pressure_pa=motor_data.get(
-                'thrust_reference_pressure_pa'))
+                'thrust_reference_pressure_pa'),
+            separation_exit_pressure_bar=motor_data.get(
+                'separation_exit_pressure_bar'))
         meta['mass_flow_basis'] = mass_flow_basis
 
         # Vakum impulsü — irtifa veriminin PAYDASI (T32)
         vacuum_total_impulse = meta['thrust_vacuum_n'] * burn_time
 
+        # --- V307/HİBRİT-ORTAM: "deniz seviyesi" adlı alanlar -------------
+        # ÖLÇÜLDÜ (olcum/once.json): ``base_thrust_sea_level`` = toplam
+        # impuls / süre, yani çapanın (TASARIM ortamının) itkisidir; tasarım
+        # ortamı 20 km iken "Sea Level Thrust: 300 N" basılıyordu (aynı
+        # lülenin gerçek deniz seviyesi satırı −19,93 N, ayrılmış). Çapa
+        # deniz seviyesindeyse (ya da verilmediyse) hiçbir şey değişmez.
+        # Değilse deniz seviyesi adı aynı lülenin 0 m satırını taşır (satır
+        # ayrıldıysa ``None``); tasarım ortamının değeri kendi adıyla durur.
+        _capa_pa = motor_data.get('thrust_reference_pressure_pa')
+        capa_deniz = (_capa_pa is None
+                      or float(_capa_pa) == float(isa_pressure_geometric(0.0)))
+        if capa_deniz:
+            thrust_sl_pub = base_thrust
+            impulse_sl = total_impulse
+        else:
+            satir0 = next((r for r in rows
+                           if float(r.get('altitude', float('nan'))) == 0.0),
+                          None)
+            thrust_sl_pub = None if satir0 is None else satir0.get('thrust')
+            impulse_sl = (None if thrust_sl_pub is None
+                          else thrust_sl_pub * burn_time)
+
         for row in rows:
+            if row.get('flow_separated'):
+                thrust_data.append({
+                    'altitude': row['altitude'],
+                    'pressure': row['pressure'],
+                    'temperature': row['temperature'],
+                    'thrust': None,
+                    'isp': None,
+                    'exit_velocity': row['exit_velocity'],
+                    'effective_total_impulse': None,
+                    'impulse_efficiency': None,
+                    'impulse_gain_vs_sea_level': None,
+                    **({} if capa_deniz else
+                       {'impulse_gain_vs_design_ambient': None}),
+                    'flow_separated': True,
+                    'not_modelled_reason': row['not_modelled_reason'],
+                })
+                continue
             effective_total_impulse = row['thrust'] * burn_time
-            thrust_data.append({
+            satir = {
                 'altitude': row['altitude'],
                 'pressure': row['pressure'],
                 'temperature': row['temperature'],
@@ -4707,20 +4900,47 @@ class CombustionAnalyzer:
                 'impulse_gain_vs_sea_level': (effective_total_impulse
                                               / total_impulse
                                               if total_impulse else 0.0),
-            })
+            }
+            if not capa_deniz:
+                satir['impulse_gain_vs_design_ambient'] = (
+                    satir['impulse_gain_vs_sea_level'])
+                satir['impulse_gain_vs_sea_level'] = (
+                    effective_total_impulse / impulse_sl
+                    if impulse_sl else None)
+            thrust_data.append(satir)
+
+        yayimli = [p for p in thrust_data if p['thrust'] is not None]
+        ek = {}
+        if not capa_deniz:
+            ek['base_thrust_design_ambient'] = base_thrust
+            ek['sea_level_basis'] = (
+                'base_thrust_sea_level and impulse_gain_vs_sea_level refer to '
+                'the 0 m row of this same nozzle (ISA sea level); the delivered '
+                'thrust at the design ambient is base_thrust_design_ambient '
+                'and the ratio to its impulse is '
+                'impulse_gain_vs_design_ambient. Where the 0 m row is flow '
+                'separated the sea-level values are null.')
+        if not yayimli:
+            ek['max_thrust_not_published_reason'] = (
+                'every row of the altitude sweep is flow separated, so no '
+                'thrust is published on this grid')
 
         return {
+            **ek,
             'thrust_altitude_data': thrust_data,
             'input_total_impulse': total_impulse,
-            'base_thrust_sea_level': base_thrust,
+            'base_thrust_sea_level': thrust_sl_pub,
             'vacuum_total_impulse': vacuum_total_impulse,
             'impulse_efficiency_basis': (
                 'delivered impulse at that altitude divided by the VACUUM '
                 'impulse of the same motor; 1.0 means nothing is lost to back '
                 'pressure, so the value cannot exceed 1'),
             'nozzle_loss_model': meta,
-            'max_thrust': max([p['thrust'] for p in thrust_data]),
-            'max_thrust_altitude': thrust_data[np.argmax([p['thrust'] for p in thrust_data])]['altitude'],
+            'max_thrust': (max([p['thrust'] for p in yayimli])
+                           if yayimli else None),
+            'max_thrust_altitude': (
+                yayimli[np.argmax([p['thrust'] for p in yayimli])]['altitude']
+                if yayimli else None),
             # v2.6.26 — bu bir SONUÇ gibi duruyor ama tarama
             # ızgarasının ucudur: sabit geometrili lülede itki irtifayla
             # monoton arttığı için argmax daima son noktaya düşer.

@@ -2,7 +2,9 @@
 
 Hand-computed anchors (Dodge 2000 Eq. (1.40), Table 3.2; SP-8009 Table I):
 
-Reference case R=0.5 m, h=1.0 m, g_eff=9.81 m/s^2, lambda_1=1.8412:
+Reference case R=0.5 m, h=1.0 m, g_eff=9.81 m/s^2, lambda_1=1.8412
+(four-digit hand calculation; since 3.0.7 the product uses the exact root
+1.841184 and the anchors below hold to the rel=1e-4 they are checked at):
     lambda_1*h/R = 3.6824,  tanh(3.6824) = 0.998733
     omega_1^2 = (1.8412*9.81/0.5)*0.998733 = 36.0786  -> omega_1 = 6.00655 rad/s
     f_1 = 6.00655/(2*pi) = 0.95597 Hz

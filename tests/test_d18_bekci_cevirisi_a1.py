@@ -263,6 +263,10 @@ YALNIZ_TESTIN_CAGIRDIGI_ROTALAR = frozenset({
     # tests/test_d27_app_api_a4.py, test_uq_endpoint.py ve
     # test_wave4a_contract.py yazıyor.
     '/api/jobs/<job_id>',
+    # V307/FS-HARİTA-VERİ faz 2 borç kaydı (harita paketi uçları, 4 satır)
+    # KAPANDI — V307/FS-HARİTA-KÜRE (16 Kas 2026): "Harita paketleri" paneli
+    # (hrma/static/js/launch_site_map_packs.js) liste, indirme, ilerleme,
+    # iptal ve silme uçlarını çağırıyor; satırlar silindi.
     # fix-8: 8 rota (advanced-performance-analysis, analysis/wall-profile,
     # comparative-analysis, correlation-report, flow-analysis,
     # kinetic-efficiency, uncertainty-analysis, validation/upload-csv)
@@ -562,6 +566,15 @@ def _urun_yuzunun_cagirdiklari(rotalar=None):
 #: Ölçüm 44 -> 23; çözülen 21 kalemin hedef kuralları tek tek dökümlü
 #: (``docs/scofield/raw/OH/V3/taban/b/rota_cozulen_21.txt``). Tavan
 #: ölçüme indirildi (yastık yok, ``test_tavan_olculen_sayiyla_hizali``).
+#:
+#: V307/KIRMIZI-C (16 Kas 2026): FS-HARİTA-VERİ'nin testi
+#: (``tests/test_v307_harita_paket.py`` 784/789/792/794) ölçümü 27'ye çıkardı.
+#: TAVAN YÜKSELTİLMEDİ; ÇÖZÜCÜ BEŞİNCİ KEZ GENİŞLETİLDİ (``_onekten_rotalar``:
+#: sorgu dizgeli önek tam yol sayılır; '/' ile biten önek segment düzeyinde
+#: eşlenir). Ölçüm 27 -> 23; çözülen dört çağrının hedefi
+#: ``/api/map-packs/labels`` ve ``/api/tile/<layer_key>/<int:z>/<int:x>/<int:y>``,
+#: ``_testin_cagirdiklari`` haritasında başka HİÇBİR anahtar değişmedi
+#: (152 anahtar, yalnız bu iki kurala bu dosya eklendi).
 COZULEMEYEN_ROTA_CAGRISI_TAVANI = 23
 
 
@@ -908,14 +921,39 @@ def _onekten_rotalar(onek, rotalar):
     Eşleşme yalnız şu iki durumda kabul edilir: kural önekle birebir aynı,
     ya da kuralın kalanı bir DEĞİŞKEN segmentiyle (``<``) başlıyor. Böylece
     ``/api/export-`` gibi bir önek ``/api/export-stl-zip``i YUTMAZ.
+
+    V307/KIRMIZI-C (16 Kas 2026) — ÇÖZÜCÜ BEŞİNCİ KEZ GENİŞLEDİ, iki kesin
+    kalıpla (ikisi de tahmin etmez; belirsizde boş döner):
+
+    1. Önek ``?`` içeriyorsa sorgu dizgesi başlamıştır: ``?``ten önceki yol
+       ÖNEK DEĞİL, TAMDIR ve ``_rotaya_cevir`` ile somut yol olarak eşlenir
+       (``'/api/map-packs/labels?bbox=%f…' % …`` -> ``/api/map-packs/labels``).
+    2. Önek ``/`` ile bitiyor ve birebir/``<`` eşleşmesi yoksa öneğin her
+       segmenti SOMUTTUR: kuralın ilk segmentleri bunlara (literal ya da
+       değişken segmentle) oturuyor VE kalanı değişken segmentle başlıyorsa
+       eşleşir (``'/api/tile/pack_detail/%d/%d/%d' % …`` ->
+       ``/api/tile/<layer_key>/<int:z>/<int:x>/<int:y>``). Segmentin
+       ortasında biten önek (``/api/export-``) bu yola hiç girmez.
     """
     if not onek.startswith('/'):
         return set()
+    if '?' in onek:
+        return _rotaya_cevir(onek.split('?', 1)[0], rotalar)
     bulgu = set()
     for r in rotalar:
         if r == onek:
             bulgu.add(r)
         elif r.startswith(onek) and r[len(onek):].startswith('<'):
+            bulgu.add(r)
+    if bulgu or not onek.endswith('/'):
+        return bulgu
+    parcalar = [x for x in onek.split('/') if x != '']
+    n = len(parcalar)
+    for r in rotalar:
+        k = [x for x in r.split('/') if x != '']
+        if len(k) <= n or not k[n].startswith('<'):
+            continue
+        if _kural_esler('/' + '/'.join(k[:n]), parcalar):
             bulgu.add(r)
     return bulgu
 
