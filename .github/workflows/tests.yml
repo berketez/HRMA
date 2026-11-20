@@ -19,6 +19,31 @@ on:
   schedule:
     - cron: '17 3 * * *'
 
+# 3.0.7 SÜREÇ kalem 4 — HESAP ORTAMI SABİT (belirlenimcilik).
+# 3.0.6 treninde her tam koşuda ~%40-50 sahte kırmızı: iki bit-aynılık testi
+# Linux'ta "koşudan koşuya" son basamakta ayrıştı (test_k2_kartus_tane_fea_bit_ayni:
+# yalnız İKİ değer, 100 × 0,005312855644371872 ⟷ …1993; rüzgârsız 6-DOF menzili
+# rc.5'te bağıl 1,39e-6). Aynı commit'in (e2f8ff17e) beş gecelik koşusunda k2
+# kırmızı olduğu iki koşuda dilim 3 işi 36,0 / 36,2 dk, yeşil olduğu üçünde
+# 18,1 / 22,6 / 27,0 dk sürdü: ayrışma KOŞUCU SINIFINA bağlı. `ubuntu-latest`
+# filosu farklı işlemcili makinelerden oluşur; numpy (AVX512 makinede SVML ve
+# x86-simd-sort yolları) ve OpenBLAS (DYNAMIC_ARCH: Zen / Haswell / SkylakeX
+# çekirdekleri) ÇALIŞMA ANINDA işlemciye göre farklı kod yolu seçer, kayan
+# nokta işlem sırası değişir. Aşağıdaki dört değişken hangi makine gelirse
+# gelsin AYNI kod yolunu seçtirir (AVX2 + FMA3, OpenBLAS Zen çekirdekleri,
+# 4 iş parçacığı: GitHub'ın 4 çekirdekli standart koşucusunun bugünkü
+# varsayılanı). Tolerans DEĞİŞMEDİ. Değerlerin TEK kaynağı
+# tools/ci_hesap_kunyesi.py SABIT_ORTAM; bekçi (tests/test_v307_surec.py)
+# bu blokla release.yml'nin test işini ona eşit tutar. Her dilim işi
+# "Hesap ortamı künyesi" adımında işlemciyi, etkin SIMD/BLAS yolunu ve iki
+# sondanın değerini basar; birleşik iş sabitli değerlerin bütün dilimlerde
+# bit-aynı olduğunu denetler.
+env:
+  OPENBLAS_CORETYPE: "Zen"
+  OPENBLAS_NUM_THREADS: "4"
+  OMP_NUM_THREADS: "4"
+  NPY_DISABLE_CPU_FEATURES: "AVX512F AVX512CD AVX512_KNL AVX512_KNM AVX512_SKX AVX512_CLX AVX512_CNL AVX512_ICL AVX512_SPR"
+
 jobs:
   pytest:
     name: pytest (dilim ${{ matrix.dilim }}/${{ strategy.job-total }})
@@ -37,10 +62,28 @@ jobs:
     # değil). Birleşik rapor ve TAM küme atlama bütçesi `pytest-birlesik`
     # işindedir. Dilim sayısının TEK kaynağı aşağıdaki listedir
     # (`strategy.job-total`); başka yerde elle yazılmaz.
+    #
+    # 3.0.7 SÜREÇ kalem 5 (16 Kas 2026) — 10 → 16 DİLİM + CI'DA ÖLÇÜLMÜŞ
+    # AĞIRLIKLAR. 3.0.6 treninde en uzun dilim 49-63 dk (dilim 4), diğerleri
+    # 21-46 dk; tek kırmızının yeniden koşusu bütün dilimi (~1 saat) geri
+    # sarıyordu. İki ayrı ölçülmüş kök:
+    #   1. Ağırlıklar (15 Eki, yerel M4 Max junit) CI'ı açıklamıyordu: aynı
+    #      bölümlemede tahmin her dilim 947 s, gerçek dilim 4 = 36-62 dk,
+    #      dilim 10 = 21-35 dk. CFD dosyaları CI'da yerelin ~4 katı sürüyor.
+    #      Yeni ağırlıklar CI günlüklerinden (5 gecelik koşu × 10 iş, zaman
+    #      damgalı ilerleme satırları) dosya başına medyan Linux saniyesi.
+    #   2. Koşucu hızı aynı iş için 0,59-1,53 × medyan (50 iş; aynı dilim
+    #      koşudan koşuya 1,3-2,0 kat). Toplam iş ~323 dk (medyan koşucu):
+    #      10 dilimde mükemmel dengeyle bile dilim başı ~32 dk, yavaş
+    #      koşucuda ~50 dk. 16 dilimde tahmin: medyan koşucu ~20 dk, p90
+    #      ~28 dk, gözlenen en yavaş koşucu ~31 dk (+ ~2 dk iş kurulumu)
+    #      → en uzun dilim ≤ 35 dk hedefi. 16 + STEP işi = 17 eşzamanlı iş
+    #      (genel depo sınırı 20). Ayrıntı:
+    #      docs/scofield/raw/OH/V307/surec/RAPOR.md kalem 5.
     strategy:
       fail-fast: false
       matrix:
-        dilim: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+        dilim: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]
     # İŞ düzeyinde: test adımı (eklenti) VE atlama bütçesi adımı (toplama
     # tabanını dilimde ertelemek için) aynı değeri görür.
     env:
@@ -188,6 +231,23 @@ jobs:
           print('rocketcea.cea_obj OK', CEA_Obj)
           PY
 
+      # 3.0.7 SÜREÇ kalem 4 — HESAP ORTAMI KÜNYESİ. 3.0.6'da CI günlüklerinde
+      # koşucunun işlemcisi hiç yoktu; Linux son basamak ayrışmasının hangi
+      # makinede olduğu sonradan bilinemedi. Bu adım her dilimde işlemci
+      # modelini, numpy'nin etkin SIMD özelliklerini, yüklü OpenBLAS'ların
+      # seçtiği çekirdeği ve iki bit-aynılık sondasının (k2 kartuş FEA,
+      # rüzgârsız menzil) değerini İKİ ortamda basar: iş akışının sabitli
+      # ortamı ve sabitler silinmiş ortam. Birleşik iş sabitli değerlerin
+      # bütün dilimlerde bit-aynı olduğunu denetler. Maliyet: yerelde iki
+      # sonda 2,2 s / süreç. Teşhis adımıdır: düşerse testler yine koşar,
+      # birleşik denetim eksik künyeyi adıyla KIRMIZI yapar.
+      - name: Hesap ortamı künyesi (işlemci, SIMD, BLAS çekirdeği, iki sonda)
+        continue-on-error: true
+        env:
+          PYTHONPATH: .
+          MPLBACKEND: Agg
+        run: python3 tools/ci_hesap_kunyesi.py iki-kip --json ci-hesap-kunyesi.json
+
       # ÖH D24 / OH-D23-23 — CI İŞ BÖLÜMÜ (ölçüldü; süre kanıtı
       # docs/scofield/raw/OH/D24/altyapi/a2/once_ohd2323.json).
       #
@@ -280,7 +340,7 @@ jobs:
       #             yolu KAPALI durumunu sınayan yeni test; build123d yokken
       #             atlanır)  =  76 (27 Ağustos 2026 bütçesi)
       #
-      # 9 KASIM 2026 (3.0.6) — ÖLÇÜLDÜ, BUTCE 96: v3.0.5'in kendi CI'ı (koşu
+      # 9 KASIM 2026 (3.0.6) — ÖLÇÜLDÜ, o günkü bütçe 96: v3.0.5'in CI'ı (koşu
       # 42611425301, 0a138ff6a) 71 atlama verdi; 3.0.6 rc.2 CI'ı (koşu
       # 42649775093) 96. Ölçüm komutu: iki koşunun "pytest (birleşik rapor +
       # tam atlama bütçesi)" işindeki ATLANDI dökümü düğüm adıyla farklandı —
@@ -293,6 +353,22 @@ jobs:
       #    1  tests/test_d19_arayuz_a1.py — V306/KATI-MODEL (M-KATI-10): hüküm
       #       geri çekilince köprü katsayısı basılmaz, akma niteliği dalı
       #       gerekçeli atlanır
+      #   Pay eklenmedi: tek bir yeni atlama kapıyı kapatır.
+      #
+      # 18 KASIM 2026 (3.0.7) — ÖLÇÜLDÜ, BUTCE 136: 3.0.7 erken aday CI'ı
+      # (koşu 44290629774, aday/v3.0.7-rc.1 13b307593) 134 atlama verdi; aynı
+      # işin ATLANDI dökümü 3.0.6 rc.8 CI'ınınkiyle (koşu 42789100405, 96)
+      # düğüm adıyla farklandı — yeni 38, kaybolan 0. Yeni 38'in TAMAMI:
+      #   26  tests/test_v307_guncelleme_ekran.py — yalnız macOS: osascript +
+      #       hdiutil (güncelleme ekranı; yerel tam süpürmede ve yayın
+      #       kapısında koşar)
+      #    5  tests/test_six_dof_slosh.py::TestCc — sığ klonda git nesnesi
+      #       0d369e4b7 yok (§C-c bit-aynılık kanıtı kanıt dizinindedir)
+      #    7  tarayıcı testleri, bu işte playwright kurulu değil:
+      #       test_v307_s2_kalinti 5, test_v307_fs_ucus 1, test_v307_fs_ucus_2 1
+      #   Adaydan sonra birleşen +2: tests/test_v307_harita_goruntu.py::
+      #   test_uretilmis_pilot_paketi[sinop_tr|ccsfs_slc40] — yerelde üretilen
+      #   pilot görüntü paketi CI'da yok (yerel tam süpürmede koşar).
       #   Pay eklenmedi: tek bir yeni atlama kapıyı kapatır.
       #
       # P13 §6.5'in önerdiği sayı `<= 26` idi ve kendi dürüstlük notunda
@@ -629,6 +705,7 @@ jobs:
           path: |
             pytest-report.xml
             ci-dilim-kunye.json
+            ci-hesap-kunyesi.json
             .coverage.dilim*
           include-hidden-files: true
           if-no-files-found: ignore
@@ -692,6 +769,17 @@ jobs:
         run: |
           echo "pytest dilimleri: ${{ needs.pytest.result }}"
           test "${{ needs.pytest.result }}" = "success"
+
+      # 3.0.7 SÜREÇ kalem 4 — belirlenimcilik sözleşmesi: sabitli ortamda iki
+      # sondanın değeri BÜTÜN dilimlerde (farklı işlemcili koşucular) bit-aynı
+      # olmalı. Tablo: dilim, işlemci, OpenBLAS çekirdeği, numpy AVX512, değerler
+      # (sabitli ve sabitsiz). Sabitsiz sütunun işlemciye göre ayrışması kökün
+      # kendisidir; sabitli sütun ayrışırsa bu adım KIRMIZI ve hangi makinede
+      # ayrıştığını adıyla söyler. Yalnız standart kütüphane kullanır. Son
+      # adımdır: düşmesi önceki adımları (kapsam kapısı) atlatmaz.
+      - name: Hesap ortamı belirlenimciliği (sabitli sondalar bütün dilimlerde bit-aynı mı)
+        if: always()
+        run: python3 tools/ci_hesap_kunyesi.py karsilastir --dizin dilim-raporlari
 
   # -------------------------------------------------------------------------
   # STEP/CAD export testleri — AYRI iş (Faz 5 / H5-2)
@@ -803,6 +891,7 @@ jobs:
           # buraya yazılmazsa o bekçi kırmızıya döner (liste çürüyemez).
           pytest tests/test_step_import.py \
                  tests/test_tank_step_units.py \
+                 tests/test_tank_geometry_import.py \
                  tests/test_faz4_export_geometri.py \
                  tests/test_faz4_app_export.py \
                  tests/test_export_generators.py \

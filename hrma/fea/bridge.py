@@ -690,7 +690,7 @@ def thin_wall_report(r_inner_m, thickness_m) -> dict:
     if not np.any(gecerli):
         raise ValueError(
             "thin_wall_report: sonlu ve pozitif iç yarıçap yok — oran "
-            "ölçülemez, uydurulmaz.")
+            "ölçülemez, yayımlanmaz.")
     oran = np.full(r.shape, -np.inf)
     oran[gecerli] = t[gecerli] / r[gecerli]
     i = int(np.argmax(oran))
@@ -709,7 +709,7 @@ def thin_wall_report(r_inner_m, thickness_m) -> dict:
             "THIN_WALL_T_OVER_R_LIMIT). Oran boğazda tepe yapar çünkü "
             "motorlar tek bir KAMARA cidarı yayımlar ve köprü onu lüle "
             "boyunca da uygular — lüle için ayrı kalınlık kanalı yoktur ve "
-            "uydurulmaz (meta.not_modelled). Öncül kırıldığında köprünün 2B "
+            "varsayılmaz (meta.not_modelled). Öncül kırıldığında köprünün 2B "
             "elastisite çözümü geçersiz olmaz; geçersiz olan, bu "
             "geometrinin gerçek lüleyi temsil ettiği iddiasıdır. "
             "outer_over_inner_at_max = mesh dış yarıçapı / iç yarıçap "
@@ -796,7 +796,7 @@ def _extract_contour_points(motor_results: dict):
     if not isinstance(nc, dict) or not nc.get("points"):
         return None, ("nozzle_contour.points yok — motor kontur yayımlamamış "
                       "(örnekleyici başarısızsa motorlar bloğu bilerek "
-                      "yayımlamaz; uydurma kontur üretilmez)")
+                      "yayımlamaz; yerine başka kontur üretilmez)")
     try:
         pts = np.asarray(nc["points"], dtype=float)
     except (TypeError, ValueError):
@@ -873,7 +873,7 @@ def _extract_wall_thickness_m(motor_results: dict, layout: str):
         return None, ("motor tipi tespit edilemedi — cidar kalınlığı alanı "
                       "bilinmiyor")
     if t_mm is None:
-        return None, f"{alan} yok/geçersiz — varsayılan kalınlık uydurulmaz"
+        return None, f"{alan} yok/geçersiz — varsayılan kalınlık varsayılmaz"
     return t_mm / 1000.0, f"{alan} [mm] / 1000; {ek}"
 
 
@@ -970,7 +970,7 @@ def _extract_material(motor_results: dict, layout: str):
         return None, "motor tipi tespit edilemedi — malzeme alanı bilinmiyor"
 
     if not key or not isinstance(key, str):
-        return None, f"{alan} yok — malzeme uydurulmaz"
+        return None, f"{alan} yok — malzeme varsayılmaz"
 
     try:
         from hrma.data.materials_db import get_material
@@ -978,7 +978,7 @@ def _extract_material(motor_results: dict, layout: str):
     except (KeyError, ValueError):
         return None, (f"malzeme '{key}' materials_db'de yok — E/ν "
                       "kaynağı olmadan FEA kurulamaz (örn. katının "
-                      "'composite' ek kaydı E/ν taşımaz); uydurma elastik "
+                      "'composite' ek kaydı E/ν taşımaz); yerine başka elastik "
                       "sabit konmaz")
 
     E = _finite_positive(rec.get("elastic_modulus"))
@@ -1070,7 +1070,7 @@ def _extract_pressure(motor_results: dict):
     p_bar = _finite_positive(motor_results.get("chamber_pressure"))
     if p_bar is None:
         return None, ("results['chamber_pressure'] yok/geçersiz — basınç "
-                      "yükü uydurulmaz")
+                      "yükü varsayılmaz")
     beyan = {
         "kaynak": "results['chamber_pressure'] [bar] * PA_PER_BAR",
         "Pc_bar": p_bar,
@@ -1543,7 +1543,7 @@ def extract_structural_inputs(motor_results: dict,
             "engine_layout": layout,
             "missing": missing,
             "reason": ("FEA girdisi motor sonucundan çıkarılamadı; eksikler: "
-                       + "; ".join(missing) + ". Uydurma değer konmaz "
+                       + "; ".join(missing) + ". Yerine başka değer konmaz "
                        "(sahte veri yasağı)."),
             "notes": notlar,
             "warning": _warning(WARN_INPUTS_MISSING,
@@ -1628,7 +1628,7 @@ def extract_structural_inputs(motor_results: dict,
                         f"{CHAMBER_EXTENSION_MAX_L_OVER_R:.0f}. Bu oran "
                         f"tipik olarak motor tipi imzasının yanlış "
                         f"okunmasından ({layout} varsayıldı) ve buna bağlı "
-                        f"m/mm birim seçiminden doğar. Uydurma geometriyle "
+                        f"m/mm birim seçiminden doğar. Varsayılan geometriyle "
                         f"FEA koşulmaz (fail-closed); alan: "
                         f"results['chamber_length']."),
                     "notes": {"kamara_uzantisi_makullik": ext_makullik},
@@ -2987,7 +2987,7 @@ def run_structural_from_motor(motor_results: dict,
               "daima daha düşüktür ve tasarımı O yönetir."
             if (kopru_sf and motor_sf) else
             "Motor sonucu kıyaslanabilir bir yapısal emniyet katsayısı "
-            "yayımlamadı; köprü kendi sayısını kıyassız bırakır (uydurma "
+            "yayımlamadı; köprü kendi sayısını kıyassız bırakır (yerine başka "
             "referans konmaz)."),
     }
 
@@ -3012,7 +3012,7 @@ def run_structural_from_motor(motor_results: dict,
             "thin_wall_holds": None,
             "_basis": (
                 "oran ÖLÇÜLEMEDİ (kontur/kalınlık geometrisi kıyasa uygun "
-                f"değil: {type(_exc).__name__}); uydurma oran konmaz "
+                f"değil: {type(_exc).__name__}); yerine başka oran konmaz "
                 "(P8B2-13)"),
         }
     # OH-FT-01: öncül kırıldığında UYARI kanalı açılır. Ölçüm zaten
@@ -3177,7 +3177,7 @@ def _extract_burn_time_s(motor_results: dict):
     v = _finite_positive(motor_results.get("burn_time"))
     if v is None:
         return None, ("results['burn_time'] yok/geçersiz — yanma süresi "
-                      "uydurulmaz (geçici çözümün penceresi bu alandır)")
+                      "varsayılmaz (geçici çözümün penceresi bu alandır)")
     beyan = {
         "kaynak": "results['burn_time'] [s]",
         "t_end_s": v,
@@ -3231,7 +3231,7 @@ def _extract_thermal_material(material_key: str):
     eksik = [ad for ad, deger in alanlar.items() if deger is None]
     if eksik:
         return None, (f"materials_db['{material_key}'] kaydında geçerli "
-                      + ", ".join(eksik) + " yok — uydurma ısıl özellik konmaz")
+                      + ", ".join(eksik) + " yok — yerine başka ısıl özellik konmaz")
     alanlar["kaynak"] = (
         f"materials_db['{material_key}'] (thermal_conductivity, "
         "specific_heat, density) — heat_transfer_analysis ile aynı kayıt "
@@ -3274,7 +3274,7 @@ def _extract_thermal_material(material_key: str):
         alanlar["allowable_temperature_kaynagi"] = (
             f"materials_db['{material_key}'] kaydında geçerli "
             "allowable_temperature / max_service_temp YOK — sınır "
-            "uydurulmaz, karşılaştırma yapılmaz")
+            "varsayılmaz, karşılaştırma yapılmaz")
     alanlar["service_temperature_K"] = _tl["service_K"]
     alanlar["melting_point_K"] = _tl["melting_K"]
     return alanlar, alanlar["kaynak"]
@@ -3358,7 +3358,7 @@ def extract_thermal_inputs(motor_results: dict,
             "verir, katı ve sıvı hiç vermez. Profil "
             "HeatTransferAnalyzer.analyze_axial_profile ile (ya da "
             "/api/analysis/wall-profile ucuyla) hesaplanıp axial_profile "
-            "argümanıyla verilmelidir; boğaz skalerinden profil uydurulmaz "
+            "argümanıyla verilmelidir; boğaz skalerinden profil türetilmez "
             "(sahte veri yasağı).")
 
     # --- V306/GÜVERTE-HATA (kalem 6, §5 B-N1) · PROFİL ⟷ AĞ MALZEMESİ ----
@@ -3565,7 +3565,7 @@ def extract_thermal_inputs(motor_results: dict,
                 "kalınlıktan başlar, h orada en büyüktür ve boğaza doğru "
                 "azalır. Eksen uyuşması (uç noktaları) ve h(z) mertebesi "
                 "AYRICA denetlenir; olmayan bir boğaz iddiası "
-                "uydurulmaz."),
+                "varsayılmaz."),
         }
 
     # --- h(z) MAKULLÜK KAPISI (P8B2-01) -----------------------------------
@@ -3667,7 +3667,7 @@ def extract_thermal_inputs(motor_results: dict,
                 "sapma profilin bu motorun fiziğinden gelmediğini gösterir; "
                 "böyle bir h(z) ile hesaplanan cidar sıcaklığından erime / "
                 "sınır aşımı HÜKMÜ ÇIKARILAMAZ. Sıcaklık alanı ÜRETİLMEDİ — "
-                "uydurma hüküm yayımlanmaz.")
+                "yerine başka hüküm yayımlanmaz.")
     elif hg_capalari and malzeme_anahtari != capa_malzemesi:
         hg_kapi = {
             "durum": "calistirilamadi",
@@ -3728,7 +3728,7 @@ def extract_thermal_inputs(motor_results: dict,
                 "sınır aşımı HÜKMÜ ÇIKARILAMAZ (ölçüldü: Bartz'ın 1/50'si "
                 "verildiğinde tepe cidar 2.587,5 K'den 419,9 K'ye düşüyor "
                 "ve 'cidar eriyor' hükmü sessizce 'sorun yok'a dönüyordu). "
-                "Sıcaklık alanı ÜRETİLMEDİ — uydurma hüküm yayımlanmaz.")
+                "Sıcaklık alanı ÜRETİLMEDİ — yerine başka hüküm yayımlanmaz.")
     else:
         hg_kapi = {
             "durum": "calistirilamadi",
@@ -3738,7 +3738,7 @@ def extract_thermal_inputs(motor_results: dict,
                 "(aranan alanlar: "
                 + "; ".join(".".join(y) for y in MOTOR_THROAT_HG_FIELDS)
                 + ") — profilin büyüklük mertebesi ÇAPRAZ DENETLENEMEDİ. "
-                "Uydurma çapa konmaz; aşağıdaki sıcaklık alanı bu beyanla "
+                "Yerine başka çapa konmaz; aşağıdaki sıcaklık alanı bu beyanla "
                 "okunmalıdır."),
             "tolerans": THERMAL_HG_CROSS_CHECK_TOL,
         }
@@ -3856,7 +3856,7 @@ def extract_thermal_inputs(motor_results: dict,
             # yerde ("_basis") durur, yani hiçbir cümle kaybolmaz.
             {"_basis": ("çağıranın verdiği profil x_mm/h_g/T_recovery "
                         "dışında hiçbir künye alanı taşımıyor — h(z)'nin "
-                        "nasıl elde edildiği BİLİNMİYOR (uydurulmaz)")}),
+                        "nasıl elde edildiği BİLİNMİYOR (varsayılmaz)")}),
         "profil_uyarilari": profil_uyarilari,
         "gaz_beyani": {
             "status": gaz_durum,
@@ -3876,7 +3876,7 @@ def extract_thermal_inputs(motor_results: dict,
     basis["kamara_uzantisi_termal"] = (
         "kamara silindiri termal alana EKLENMEDİ — gaz tarafı h(z) yalnız "
         "lüle konturu boyunca tanımlı; silindir bölgesinde katsayı "
-        "uydurulmaz" if not include_chamber else
+        "varsayılmaz" if not include_chamber else
         "kamara silindiri istendi (include_chamber=True) — profilin o bölgeyi "
         "de kapsaması gerekir")
 
@@ -4214,7 +4214,7 @@ def run_thermal_from_motor(motor_results: dict,
             "reason": (
                 "hrma.fea.thermal_axisym mevcut ama köprünün beklediği API "
                 "eksik: " + ", ".join(eksik_api) + ". Girdiler hazır; çözücü "
-                "ÇAĞRILMADI — API bilinmeden çağrı uydurulmaz, sahte termal "
+                "ÇAĞRILMADI — API bilinmeden çağrı yapılmaz, sahte termal "
                 "alan üretilmez."),
             "missing_api": eksik_api,
             "warning": _warning(WARN_THERMAL_SOLVER_UNAVAILABLE),
@@ -4232,7 +4232,7 @@ def run_thermal_from_motor(motor_results: dict,
                 "Başlangıç koşulu tekdüze ORTAM SICAKLIĞIDIR ve hiçbir motor "
                 "çözücüsü bu değeri yayımlamaz (kod tarandı). Çağıran "
                 "ambient_temperature_K [K] vermelidir; varsayılan oda "
-                "sıcaklığı uydurulup çözücü 'çalışır' gösterilmez."),
+                "sıcaklığı varsayılıp çözücü 'çalışır' gösterilmez."),
             "warning": _warning(WARN_INPUTS_MISSING,
                                 missing="ambient_temperature_K"),
             "inputs": inputs,
@@ -4241,7 +4241,7 @@ def run_thermal_from_motor(motor_results: dict,
     if outer_ambient is None:
         outer_bc = ta.AdiabaticBC()
         dis_beyan = (
-            "ADYABATİK — çağıran dış ortam verisi vermedi. Uydurma bir "
+            "ADYABATİK — çağıran dış ortam verisi vermedi. Varsayılan bir "
             "taşınım katsayısı/ortam sıcaklığı konmadı; ısı kaçışı sıfır "
             "sayıldı. Bu KONSERVATİF bir üst sınırdır: gerçek dış yüzey "
             "ısı kaybettiği için tepe cidar sıcaklığı bu koşudakinden "
@@ -4771,7 +4771,7 @@ def run_planar_grain_fea(grain_type,
                 "wagon_wheel kesiti ayrık deliklerden oluşur; port sınırı "
                 "orijine göre tek değerli r(θ) DEĞİLDİR ve 1/N dilim modeli "
                 "kurulamaz. Bu kesit için düzlemsel tane FEA'sı "
-                "modellenmemiştir — uydurma alan üretilmez."),
+                "modellenmemiştir — yerine başka alan üretilmez."),
             "end_burner": (
                 "end_burner taneli motorda merkez port yoktur (sigara "
                 "yanması); iç basınçlı halka kesit modeli bu tipe uymaz. "

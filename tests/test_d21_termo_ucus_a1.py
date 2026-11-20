@@ -102,10 +102,13 @@ class TestP4B116GammaBandiReddediyor:
         import importlib
         m = importlib.import_module('hrma.analysis.' + modul_adi)
         with pytest.raises(ValueError):
+            # V307/GRAFİK-BİRİM (kalem 2): NozzleFlow1D.from_motor_data
+            # MW'yi artık varsaymıyor (24 g/mol yedeği kalktı, adlı ret);
+            # gövde eski örtük değeri AÇIK taşır ki ret γ = 3,00'dan gelsin.
             getattr(m, yapici).from_motor_data({
                 'chamber_pressure': 20.0, 'chamber_temperature': 3000.0,
                 'gamma': 3.00, 'throat_diameter': 0.05,
-                'expansion_ratio': 4.0})
+                'expansion_ratio': 4.0, 'molecular_weight': 24.0})
 
 
 # ---------------------------------------------------------------------------

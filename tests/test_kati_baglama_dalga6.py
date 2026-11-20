@@ -147,16 +147,27 @@ def test_iki_faz_girdileri_cozucunun_kendi_buyuklukleri(temel):
 
 
 def test_iki_faz_kaybi_isp_ye_uygulanmiyor(temel):
-    """Çift sayım yasağı: blok teşhis, uygulanan çarpan ayrı ve beyanlı."""
+    """Çift sayım yasağı: uygulanan çarpan TEK ve beyanlı.
+
+    V307 KATI-DOĞRULAMA faz 3 (B1, 16 Kas 2026): ad tarihseldir. Eski iddia "blok teşhistir,
+    Isp'ye uygulanmaz" idi; ana model kararıyla modülün pencere içi tahmini
+    artık itki katsayısına uygulanıyor. Kilitlenen ilke aynı: kayıp EN FAZLA
+    bir kez sayılır ve hangi çarpanın uygulandığı yanıtta yazar.
+    """
     _, res = temel
     blok = res['two_phase_loss']
-    assert blok['applied_to_isp'] is False
-    assert 'two_phase_efficiency' in blok['overlap_declaration']
+    assert blok['applied_to_isp'] is True
+    assert blok['applied_efficiency'] == pytest.approx(
+        1.0 - blok['two_phase_loss_pct'] / 100.0, rel=1e-12)
+    assert 'REPLACED this estimate' in blok['overlap_declaration']
 
     # Mevcut kayıp dökümü de aynı şeyi söylemeye devam etmeli.
     dokum = (res['detailed_analysis']['performance_metrics']
              ['theoretical_vs_actual_isp'])
-    assert dokum['two_phase_losses_applied'] is False
+    assert dokum['two_phase_losses_applied'] is True
+    assert dokum['two_phase_applied_source'] == 'module_estimate'
+    assert dokum['two_phase_efficiency_applied'] == pytest.approx(
+        blok['applied_efficiency'], rel=1e-12)
     # İki sayının NEYİ ölçtüğü blokta adıyla açıklanmış olmalı.
     assert 'two_phase_losses' in blok['relation_to_isp_loss_breakdown']
 
@@ -424,12 +435,25 @@ def test_bloklar_performansa_geri_beslenmiyor(monkeypatch):
                                          {'status': 'NOT_MODELLED'}))
     kisitli = e.calculate_performance()
 
-    for alan in ('specific_impulse', 'isp_vacuum', 'total_impulse', 'c_star',
-                 'throat_diameter', 'exit_diameter', 'expansion_ratio',
-                 'average_thrust', 'max_thrust', 'burn_time'):
+    # V307 KATI-DOĞRULAMA faz 3 (B1, 16 Kas 2026): iki fazlı kayıp bloğu artık TEŞHİS
+    # DEĞİL — pencere içi tahmini itki katsayısına uygulanıyor. Blok
+    # NOT_MODELLED'e düşürülünce çarpan kalkar; itki sınıfı alanlar TAM
+    # olarak o çarpan kadar büyür, başka hiçbir şey değişmez. Akustik ve
+    # nozul akış alanı blokları teşhis olmaya devam eder (aynı koşuda
+    # düşürülüyorlar; etkileri olsaydı aşağıdaki eşitlikler bozulurdu).
+    eta = referans['two_phase_loss']['applied_efficiency']
+    assert referans['two_phase_loss']['applied_to_isp'] is True
+    assert 0.9 < eta < 1.0
+    for alan in ('c_star', 'throat_diameter', 'exit_diameter',
+                 'expansion_ratio', 'burn_time'):
         assert kisitli[alan] == referans[alan], (
-            f"'{alan}' bağlanan bloklara bağımlı hale gelmiş — bloklar "
-            'teşhis amaçlıdır, performansa geri beslenemez')
+            f"'{alan}' bağlanan bloklara bağımlı hale gelmiş — basınç, "
+            'süre ve geometri iki fazlı kayıptan etkilenmemeli')
+    for alan in ('specific_impulse', 'isp_vacuum', 'total_impulse',
+                 'average_thrust', 'max_thrust'):
+        assert kisitli[alan] * eta == pytest.approx(referans[alan], rel=1e-12), (
+            f"'{alan}': iki fazlı çarpan dışında bir blok performansa "
+            'geri besleniyor')
 
 
 # ===========================================================================

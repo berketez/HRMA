@@ -102,6 +102,18 @@ ORNEK_H1 = {
     # H-PANEL öncesi çapalarıyla BİREBİR yeşil (kalan 1: Lean bağı, ayrı
     # kök). Verimin kendisi tests/test_v301_hibrit_panel.py'de kilitli.
     'combustion_efficiency': 100.0,
+    # V307/ORTAM-TEK (19 Kas) — TASARIM ORTAMI AÇIKÇA. Bu dosyanın
+    # vakalarının konusu enjektör mantığıdır, ortam değil. Ortam alanı
+    # gönderilmeyince yokluk varsayılanı kullanılıyordu; V307/TEK-TANIM
+    # (18 Kas) o varsayılanı 1,0 bar'dan ISA 1,01325 bar'a çekince 8 düğüm
+    # kırmızıya döndü (akşam süpürmesi G1). Değer, hibrit sayfasının
+    # formunun GERÇEKTEN gönderdiği değerdir (ölçüldü: sayfanın kendi
+    # getFormData() gövdesi, docs/scofield/raw/OH/V307/ortam-tek/olcum/
+    # form_ortam.json). Kök ölçümü (k1_olcum.json): açık 1,0 bar eski
+    # çapaları BİT-AYNI verir, alanı göndermeyen istek açık 1,01325 bar ile
+    # BİT-AYNIDIR; değişimin tek kaynağı ortam girdisidir. Çapalar
+    # 1,01325 bar'da yeniden ölçüldü; tolerans DEĞİŞMEDİ.
+    'atmospheric_pressure': 1.01325,
 }
 
 #: V301/E2 (Ayberk tur 1) — ÇARPIŞMALI EKRAN BLOĞU ARTIK DEVREYİ TÜKETİR.
@@ -519,18 +531,31 @@ def test_f10_sayi_degismedi_capasi(h1_plakali):
     # EOS 50,5250928 bar. ΔP −%0,060, delik çapı +%0,022, plaka SF 1,192 →
     # 1,193, η_lig 0,9232 → 0,9231, eğilme 201,292 → 201,176 MPa
     # (docs/scofield/raw/OH/V306/sayi/RAPOR.md Kalem 4). Ölçüm çapası.
-    assert idd['orifice_diameter_mm'] == pytest.approx(2.1249645540942517, rel=1e-9)
+    # V307/ORTAM-TEK (19 Kas): istek ortamı açıkça 1,01325 bar (ORNEK_H1
+    # notu). Isp 220,4718 → 220,0930 s, ṁ ↑, delik çapı 2,1249645540942517 →
+    # 2,1267922684092078 mm (+%0,086), plaka SF 1,193 → 1,191, eğilme
+    # 201,176 → 201,442 MPa; ΔP ve η_lig aynı. Açık 1,0 bar eski sayıları
+    # bit-aynı verir (k1_olcum.json 'f10_capa').
+    assert idd['orifice_diameter_mm'] == pytest.approx(2.1267922684092078, rel=1e-9)
     assert idd['injection_pressure_drop_bar'] == pytest.approx(30.52509283127987, rel=1e-7)
     inj = h1_plakali['injector']
     assert (inj['n_holes'], inj['hole_diameter']) == (
-        3, pytest.approx(2.1249645540942517, rel=1e-9))
+        3, pytest.approx(2.1267922684092078, rel=1e-9))
     ps = inj['plate_structural']
     # v3.0.1 port kulvarı (20 Eki): plaka çapı = kamara iç çapı 80,68 -> 54,04 mm
     # (grain dış çapı artık son port). Eğilme gerilmesi ~D²/η ile ölçeklenir:
     # 440,114·(54,04/80,68)²·(0,9488/0,9232) ≈ 202,9 MPa (ölçülen 201,292;
     # fark yuvarlanmış çaplardan). Eski çapa (0,545, 0,9488, 440,114 MPa).
-    assert (ps['safety_factor'], ps['ligament_efficiency']) == (1.193, 0.9231)
-    assert ps['bending_stress_MPa'] == pytest.approx(201.176, abs=1e-3)
+    # V307/PLAKA-MARŞ (19 Kas): bu çapanın plaka sayıları ÇALIŞMA yük
+    # durumunundur (ΔP_inj); üst düzey hüküm artık iki durumun (çalışma +
+    # marş/kesme P_man − 0) en küçük SF'sidir. Birleşme (ana model, 19 Kas):
+    # sayılar ORTAM-TEK'in ISA çapası (1,191 / 201,442 MPa), anahtar yolu
+    # PLAKA-MARŞ'ın (load_cases.operating); ikisi aynı ΔP_inj hesabıdır.
+    _op = ps['load_cases']['operating']
+    assert (_op['safety_factor'], ps['ligament_efficiency']) == (1.191, 0.9231)
+    assert _op['bending_stress_MPa'] == pytest.approx(201.442, abs=1e-3)
+    assert ps['safety_factor'] == min(
+        k['safety_factor'] for k in ps['load_cases'].values())
 
 
 # ===========================================================================
@@ -691,7 +716,9 @@ def test_f10_t9_carpismali_tek_cift_istegi_bantta_karsilanir(carpismali):
     # (devre uyarısı ekran bloğuna taşınır; ana model, çapraz kırılma).
     assert d > ust
     # V306/SAYI: tek N₂O doyma kaynağıyla 2,60254 mm (önce 2,6020; Kalem 4).
-    assert d == pytest.approx(2.6025, abs=5e-4)
+    # V307/ORTAM-TEK: ortam açıkça 1,01325 bar (ORNEK_H1 notu) → 2,60478 mm
+    # (açık 1,0 bar'da 2,60254, bit-aynı; k1_olcum.json 'f10_t9_ep1').
+    assert d == pytest.approx(2.6048, abs=5e-4)
     kodlar = [w.get('code') for w in inj['warnings'] if isinstance(w, dict)]
     assert 'warn.injector.fixed_n_outside_manufacturing_band' in kodlar, (
         'bant dışı tek çift planı sessiz yayımlanıyor: %r' % inj['warnings'])
@@ -1568,10 +1595,13 @@ _YOL_SIVI_YAKIT = ('injection_system', 'injector_design_detail',
 #: Arama yolu (``_plan_orifices`` n_fixed'siz; son ``_near_lower_edge_warning``
 #: çağrısı). (ad, uç, yük, devre yolu, n, ölçülen d [mm], 'yakın' uyarısı?)
 S6_YAKINLIK_ARAMA = (
+    # V307/ORTAM-TEK (19 Kas): ortam açıkça 1,01325 bar (ORNEK_H1 notu);
+    # H20 0,5244 -> 0,5248 (pencerede kaldı), H24 0,5744 -> 0,5749 (dışında
+    # kaldı). Açık 1,0 bar eski çapları bit-aynı verir (k1_olcum.json).
     ('H20', '/calculate', dict(ORNEK_H1, thrust=20.0), _YOL_CALCULATE_OX,
-     1, 0.5244, True),  # port kulvarı 0,5240 -> 0,5243; V306/SAYI tek P_sat -> 0,5244
+     1, 0.5248, True),  # port kulvarı 0,5240 -> 0,5243; V306/SAYI tek P_sat -> 0,5244; ORTAM-TEK -> 0,5248
     ('H24', '/calculate', dict(ORNEK_H1, thrust=24.0), _YOL_CALCULATE_OX,
-     1, 0.5744, False),  # port kulvarı 0,5740 -> 0,5743; V306/SAYI tek P_sat -> 0,5744
+     1, 0.5749, False),  # port kulvarı 0,5740 -> 0,5743; V306/SAYI tek P_sat -> 0,5744; ORTAM-TEK -> 0,5749
     ('api_0.005', '/api/injector-design', dict(_API_HIBRIT_DUS, mdot_ox=0.005),
      _YOL_API_OX, 1, 0.5198, True),
     ('api_0.00557', '/api/injector-design',
@@ -1893,7 +1923,11 @@ S7_CALCULATE_KARSILANMIYOR = (
     # 10. tur (HB9 devir 45; dört koşul): 2,055 / 3,422 plaka 293,00 K iken;
     # kâhin ṁ(ΔP)/ṁ_hedef, ρ = CoolProp(293,15 K) → 2,053965 / 3,419515.
     # v3.0.1 port kulvarı: 2,054 -> 2,051 ve 3,42 -> 3,415 (ṁ +%0,17).
-    (50.0, 3, 2.051), (50.0, 4, 2.051), (30.0, 0, 3.415),
+    # V307/ORTAM-TEK (19 Kas): ortam açıkça 1,01325 bar (ORNEK_H1 notu):
+    # 2,051 -> 2,048 (2,047568) ve 3,415 -> 3,41 (3,409771); hüküm
+    # (target_flow_not_met, status.critical) aynı. Açık 1,0 bar eski oranları
+    # bit-aynı verir (k1_olcum.json 's7_I50e3/e4', 's7_I30').
+    (50.0, 3, 2.048), (50.0, 4, 2.048), (30.0, 0, 3.41),
 )
 #: Kırpılıp hedefi tolerans içinde tutan (Sunum oranı 1,04×) — bit-aynı.
 S7_CALCULATE_KARSILANIYOR = ((200.0, 8), (100.0, 0))
@@ -1978,8 +2012,15 @@ def test_s7_m2_uyari_metni_iki_dilde_esigi_beyan_eder():
 
 #: Ş6-3 kenar vakaları: ölçülen plan ve Sunum 2 satırındaki 4 ondalıklı çap.
 S7_KENAR = (
-    ('H22', '/calculate', dict(ORNEK_H1, thrust=22.0), _YOL_CALCULATE_OX,
-     0.54998),  # port kulvarı 0,5496 -> 0,5499; V306/SAYI tek P_sat -> 0,54998 (pencere içinde, kenara 0,00002)
+    # V307/ORTAM-TEK (19 Kas): ortam açıkça 1,01325 bar (ORNEK_H1 notu).
+    # 22 N bu ortamda 0,550430 mm verir: pencerenin DIŞINA çıkar, vaka kenar
+    # vakası olmaktan çıkar (ölçüldü, k1_olcum.json 's7_H22'). Vakanın konusu
+    # kenarın kendisi olduğu için itki kenarı yeniden kuracak biçimde 21,964 N
+    # seçildi (ölçüldü: 0,5499800 mm, d_mm 0,54998 — eski çapayla AYNI
+    # gösterim, kenara yine 0,00002; ~/HRMA-calisma araması 21,964 / 21,965).
+    # Düğüm kimliği (H22) izleme listeleri için korundu.
+    ('H22', '/calculate', dict(ORNEK_H1, thrust=21.964), _YOL_CALCULATE_OX,
+     0.54998),  # port kulvarı 0,5496 -> 0,5499; V306/SAYI tek P_sat -> 0,54998 (pencere içinde, kenara 0,00002); ORTAM-TEK 21,964 N @ 1,01325 bar -> 0,54998
     ('api_0.00557', '/api/injector-design',
      dict(_API_HIBRIT_DUS, mdot_ox=0.00557), _YOL_API_OX, 0.5486),
 )

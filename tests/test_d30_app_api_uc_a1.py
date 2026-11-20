@@ -191,6 +191,9 @@ class TestOHD2811GeziciBandKapisi:
 # ===========================================================================
 SAFETY = {'chamber_pressure': 50, 'propellant_mass': 5,
           'chamber_diameter': 0.15, 'wall_thickness': 0.005,
+          # V307/GÜVERTE-ISIL kalem 4: oda sıcaklığı zorunlu (3000 K
+          # varsayılanı kalktı); eski örtük değer açık, sayılar bit-aynı.
+          'chamber_temperature': 3000.0,
           'motor_type': 'hybrid'}
 
 
@@ -351,10 +354,20 @@ class TestOHD2813DeltaPKaynagi:
         inj, plaka = self._plaka(istemci)
         assert plaka, 'plate_structural yayımlanmadı'
         assert plaka['delta_P_source'] == 'injector_solution', plaka
-        assert plaka['delta_P_bar'] == pytest.approx(inj['pressure_drop']), (
+        # V307/PLAKA-MARŞ: üst düzey ``delta_P_bar`` artık YÖNETEN yük
+        # durumunun yüküdür (iki durum: çalışma ΔP_inj, marş/kesme
+        # P_man − 0). Enjektör çözümünün ΔP'si ``injector_pressure_drop_bar``
+        # ve çalışma durumunun yüküdür; ölçtüğü şey (hüküm çözücünün ΔP'si
+        # üstüne kurulu) aynıdır.
+        assert plaka['injector_pressure_drop_bar'] == pytest.approx(
+            inj['pressure_drop']), (
             'plaka hükmü enjektör çözümünün ΔP\'sinden BAŞKA bir sayıyla '
-            'kurulmuş: %r vs %r' % (plaka['delta_P_bar'],
+            'kurulmuş: %r vs %r' % (plaka['injector_pressure_drop_bar'],
                                     inj.get('pressure_drop')))
+        assert plaka['load_cases']['operating']['delta_P_bar'] == \
+            pytest.approx(inj['pressure_drop'], abs=5e-5), plaka
+        assert plaka['delta_P_bar'] == plaka['load_cases'][
+            plaka['governing_load_case']]['delta_P_bar'], plaka
 
     def test_istek_yankisi_dali_dogrulama_sayilmaz(self):
         """Çözücü ΔP üretmediyse hüküm 'doğrulama' DEĞİLDİR ve bunu söyler."""

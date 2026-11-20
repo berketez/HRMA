@@ -636,9 +636,15 @@ def test_surucu_cikis_beyani_capa_kapaliyken_de_kusuru_GOSTERIR():
     assert ob['cells_total'] == grid.nj
     assert 0 <= ob['subsonic_cells'] <= grid.nj
     assert ob['_basis'] == OUTLET_ANCHOR_BASIS
-    for parca in ('Schlichting', 'Blazek', 'u_n − a', 'uydurma sabit',
+    # 'varsayılan sabit yoktur': çapa değeri çözümün kendisinden okunur
+    # beyanı. V307 DİL-SUNUCU (389841e7f) 'uydurma sabit yoktur' ifadesini
+    # tarafsız Türkçeye çevirdi (ORTAK kuralı: 'uydurma' yanıtta yasak);
+    # bekçi aynı beyanı yeni ifadesiyle kilitler, eski ifade geri gelmemeli.
+    for parca in ('Schlichting', 'Blazek', 'u_n − a',
+                  'ÇÖZÜMÜN KENDİSİNDEN okunur', 'varsayılan sabit yoktur',
                   'TAŞIYAMAZ'):
         assert parca in ob['_basis'], f'künye eksik: {parca}'
+    assert 'uydurma' not in ob['_basis'].casefold()
     # Kayma duvarlı Euler koşusunda sınır tabakası YOKTUR: çıkış kolonu
     # tam süpersoniktir, yani uyarı da olmamalı. (Uyarının ateşlediği
     # yer viskoz koşudur — bekçisi test_viskoz_entegrasyon.py'de.)

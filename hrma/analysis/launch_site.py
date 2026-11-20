@@ -10,7 +10,8 @@ ivmesini üretmek. Yeni bir fizik motoru DEĞİLDİR: mevcut USSA 1976 altyapıs
 Kaynaklar (her sabit izlenebilir)
 ---------------------------------
 * Atmosfer: U.S. Standard Atmosphere 1976 (NOAA/NASA/USAF), Tablo 4 —
-  hrma.constants.ISA_LAYERS / isa_temperature() / isa_pressure() üzerinden.
+  hrma.constants.ISA_LAYERS / isa_temperature_geometric() /
+  isa_pressure_geometric() üzerinden (saha rakımı geometrik irtifadır).
   Bu modül ISA tablosunun KOPYASINI TUTMAZ, merkezden import eder.
 * Yerçekimi: WGS84 normal yerçekimi. Somigliana kapalı formu ve elipsoid
   üstü irtifa düzeltmesi: NIMA TR8350.2, "Department of Defense World
@@ -73,8 +74,9 @@ from hrma.constants import (
     ISA_TABLE_TOP_M,
     M_AIR,
     R_STAR_ICAO,
-    isa_pressure,
-    isa_temperature,
+    ISA_GEOPOTENTIAL_EARTH_RADIUS_M,
+    isa_pressure_geometric,
+    isa_temperature_geometric,
 )
 
 # Kuru hava özgül gaz sabiti — trajectory_analysis ile BİREBİR aynı türetme
@@ -499,7 +501,10 @@ def atmosphere_at(altitude_m: float,
                   pressure_ratio: float = 1.0) -> Dict[str, float]:
     """Verilen irtifada (T, P, rho, ses hızı).
 
-    Taban: hrma.constants.isa_temperature/isa_pressure (USSA 1976).
+    Taban: hrma.constants.isa_temperature_geometric / isa_pressure_geometric
+    (USSA 1976). ``altitude_m`` GEOMETRİK irtifadır (saha rakımı, deniz
+    seviyesinden yükseklik); tabloya H = h·r0/(r0 + h) ile geopotansiyele
+    çevrilerek verilir — V307/İRTİFA-TEK, yörünge çözücüsüyle aynı okuma.
     Standart-dışı gün: sıcaklık profili sabit ΔT ile kaydırılır ve basınç
     profili sabit bir oranla ölçeklenir (MIL-STD-210 / OpenRocket'ın
     "sıcak gün / soğuk gün" yaklaşımı). Bu bir YAKLAŞIMDIR: gerçek gün
@@ -508,9 +513,9 @@ def atmosphere_at(altitude_m: float,
     irtifada standart atmosfere yakınsar.
     """
     h = float(altitude_m)
-    t = isa_temperature(h) + float(temperature_offset_k)
+    t = isa_temperature_geometric(h) + float(temperature_offset_k)
     t = max(t, 150.0)                       # negatif/absürt T koruması
-    p = max(isa_pressure(h) * float(pressure_ratio), 1e-9)
+    p = max(isa_pressure_geometric(h) * float(pressure_ratio), 1e-9)
     rho = p / (R_SPECIFIC_AIR * t)
     return {
         'temperature_k': float(t),
@@ -523,10 +528,16 @@ def atmosphere_at(altitude_m: float,
 def isa_pressure_sensitivity_pa_per_m(altitude_m: float = 0.0) -> float:
     """|dP/dh| [Pa/m] — rakım hatasının basınç hatasına çevrilmesi için.
 
-    Hidrostatik: dP/dh = −ρ·g. Deniz seviyesinde ≈ 12.0 Pa/m.
+    Hidrostatik: dP/dH = −ρ·g0 (USSA 1976, geopotansiyel H). Rakım h
+    GEOMETRİK olduğundan dP/dh = −ρ·g0·dH/dh, dH/dh = (r0/(r0 + h))²
+    (V307/İRTİFA-TEK; ``atmosphere_at``ın basıncının kendi türevi, h = 0'da
+    çarpan tam 1). Deniz seviyesinde ≈ 12.0 Pa/m.
     """
     atm = atmosphere_at(altitude_m)
-    return atm['density_kg_m3'] * G_0
+    h = float(altitude_m)
+    dH_dh = (ISA_GEOPOTENTIAL_EARTH_RADIUS_M
+             / (ISA_GEOPOTENTIAL_EARTH_RADIUS_M + h)) ** 2
+    return atm['density_kg_m3'] * G_0 * dH_dh
 
 
 # ---------------------------------------------------------------------------
@@ -799,8 +810,8 @@ def resolve_launch_site(latitude_deg: float,
             atm_source = 'open_meteo_current'
             attribution.append(ATTRIBUTION_LINES['weather_online'])
 
-    isa_t = isa_temperature(site_elevation)
-    isa_p = isa_pressure(site_elevation)
+    isa_t = isa_temperature_geometric(site_elevation)
+    isa_p = isa_pressure_geometric(site_elevation)
     t_offset = (float(temperature_k) - isa_t) if temperature_k is not None else 0.0
     p_ratio = (float(pressure_pa) / isa_p) if pressure_pa is not None else 1.0
     if temperature_k is not None or pressure_pa is not None:

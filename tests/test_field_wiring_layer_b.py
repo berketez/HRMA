@@ -267,6 +267,14 @@ TEMPLATE_TO_PAYLOAD = {
     'n_holes_override': 'n_holes',
     'pressure_drop_percent': 'pressure_drop',
     'single_pressure': 'atmospheric_pressure',
+    # 3.0.7 (M7-ITKI-13, ONARIM-İTKİ-A): tek irtifa kipinde sayfanın
+    # ``getFormData``ı ``#single_altitude`` alanını okur ve gövdeye
+    # ``design_ambient_altitude_m`` adıyla koyar (basınç o irtifadan
+    # kurulduysa); sunucu tasarım ortamını o adla adlandırır
+    # (``_hibrit_ortam_irtifasini_adlandir``). Çözücünün gördüğü ad budur;
+    # şablon adını sarsmak alanı yalancı ölü gösteriyordu (rc.5 CI dilim 6,
+    # 20 Kas: dead_inputs=['single_altitude']).
+    'single_altitude': 'design_ambient_altitude_m',
     'thrust_impulse': 'total_impulse',
     'burn_time_impulse': 'burn_time',
 }
@@ -310,6 +318,15 @@ PAYLOAD_RANGE = {
     # alan taban yükte yok, ``shake.perturb`` orta noktayı (2 mm) gönderir ve
     # grain dış çapı 2·t = 4 mm büyür. ÖLÇÜM PENCERESİDİR, ürün sınırı değil.
     'residual_web_thickness': (0.0, 4.0),  # mm
+    # 3.0.7 (M7-ITKI-13): ``#single_altitude`` gövdeye
+    # ``design_ambient_altitude_m`` adıyla gider (TEMPLATE_TO_PAYLOAD);
+    # yeniden adlandırılan alan şablon aralığını devralmadığı için pencere
+    # burada, AYNI birimle (m) ve şablonun kendi bandıyla (min 0, max 50000)
+    # yazılır. Taban yükte alan yok: ``shake.perturb`` orta noktayı (25 km)
+    # gönderir; taban basıncı o irtifanın ISA basıncı olmadığı için sunucu
+    # tasarım ortamını irtifa adıyla adlandırmaz ve nedenini yazar — yaprak
+    # oynar, alan canlıdır.
+    'design_ambient_altitude_m': (0.0, 50000.0),  # m
 }
 
 # Ayrı uç noktaya giden ya da istemci tarafında kalan alanlar Katman B'nin
@@ -473,8 +490,8 @@ LEGITIMATE_CONSTANTS = (
     'oxidizer_tank_slosh.slosh.baffle.blocked_area_ratio',
     'oxidizer_tank_slosh.slosh.baffle.recommended_width_ratio',
     # 1 g BEYANI: g_eff sabit standart yerçekimidir ve öyle BEYAN edilir
-    # (hybrid_rocket_engine.py:4132-4140 g_eff_basis: uçuş ivmesi bağlaşımı
-    # NOT_MODELLED). Çözücüye g_eff=self.g0 geçirilir (:4107-4108) ve sonuç
+    # (hybrid_rocket_engine.py g_eff_basis: motor kartı 1 g'dedir; uçuş
+    # ivmesiyle bağlaşım 6-DOF çalkantı alt bölümünde, 3.0.7). Çözücüye g_eff=self.g0 geçirilir (:4107-4108) ve sonuç
     # sözlüğü aynı değeri yankılar (slosh_analysis.py:390).
     'oxidizer_tank_slosh.g_eff_m_s2',
     'oxidizer_tank_slosh.slosh.g_eff',
@@ -617,6 +634,24 @@ LEGITIMATE_CONSTANTS = (
     '.motor.structural_analysis.thermal_analysis.wall_delta_T_K',
     '.motor.structural_analysis.thermal_analysis.'
     'wall_delta_T_at_evaluated_wall_K',
+    # 3.0.7 (19 Kas, ana model) — V307/HİBRİT-ORTAM'ın ``design_ambient``
+    # bloğundaki dört BEYANLI sabit (akşam tam süpürmesi 7165b9acd'de bu
+    # bekçi tam bu dört yaprakla kırmızıydı). Kod kanıtı
+    # (hrma/engines/hybrid_rocket_engine.py, ``results['design_ambient']``):
+    # ``separation_pressure_ratio`` = k = ``SUMMERFIELD_FACTOR_DEFAULT``
+    # (hrma/flow/separation.py, 0,4; Summerfield, Foster & Swan — ayrılma
+    # ölçütünün kaynaklı katsayısı, girdi değil); deniz seviyesi bloğu
+    # TANIMI gereği ISA 0 m'dir: ``ambient_pressure_bar`` = p_ds =
+    # P_SEA_LEVEL_PA·BAR_PER_PA (1,01325 bar) ve ``separation_pressure_bar``
+    # = k·p_ds. Üçü de her girdide aynıdır ve öyle olmalıdır (künye bunu
+    # 'sea-level state of THIS nozzle … at 1.01325 bar' diye beyan eder).
+    # Girdiye bağlı kardeşler (design_point.separation_pressure_bar = k·p_a,
+    # exit_pressure_bar, flow_separated, thrust_N, isp_s) İMLENMEZ. TAM yol
+    # im — her biri tek yaprak yutar.
+    '.motor.design_ambient.design_point.separation_pressure_ratio',
+    '.motor.design_ambient.sea_level.ambient_pressure_bar',
+    '.motor.design_ambient.sea_level.separation_pressure_bar',
+    '.motor.design_ambient.sea_level.separation_pressure_ratio',
 ) + tuple(
     # İtki-irtifa TARAMA IZGARASI ve standart atmosfer sütunları:
     # altitudes_thrust = [0, 1000, 5000, 10000, 15000, 20000] m SABİT

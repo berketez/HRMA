@@ -184,14 +184,12 @@ class TestPerformanceSurfaceUsesPropellantIdentity:
             'uyarisi basiyor.')
         assert 'LOX' in text and 'HTPB' in text, text[:300]
 
-    def test_unsolvable_pair_is_reported_honestly(self, client):
-        """Çözücünün desteklemediği çift SESSİZCE başka bir çifte düşmemeli.
-
-        LOX/RP-1 bu sürümdeki denge çözücüsünün kapsamı dışında. Doğru
-        davranış: figürün etiketi istenen çifti göstermesi ve düğümlerin
-        'unsolved' olarak raporlanması. Yanlış davranış (düzeltilen hata):
-        HTPB/N2O yüzeyini çizip LOX/RP-1 sanmak.
-        """
+    def test_liquid_pair_is_solved_with_motor_thermochemistry(self, client):
+        """3.0.7 (ONARIM2-İTKİ, M7-ITKI-8): LOX/RP-1 artık sıvı motorun kendi
+        termokimyasıyla (RocketCEA, NASA CEA) çözülür — bu test önceden aynı
+        çifti "çözücü kapsamı dışında" diye kilitliyordu (bugünkü çıktıyı).
+        Etiket istenen çifttir, HTPB/N2O referansına düşülmez, düğümler
+        çözülür."""
         fig = _figure(client.post(ENDPOINT, json=dict(
             self.BASE, fuel_type='rp1', oxidizer_type='lox',
             of_range=[2.0, 3.0])))
@@ -199,6 +197,24 @@ class TestPerformanceSurfaceUsesPropellantIdentity:
         assert 'RP1' in text and 'LOX' in text, text[:300]
         assert 'HTPB' not in text and 'N2O' not in text, (
             'Istenen cift LOX/RP-1 iken figur HTPB/N2O referansini gosteriyor.')
+        assert 'unsolved' not in text, text[:400]
+        assert 'Gordon & McBride' in text, text[:400]
+
+    def test_unsolvable_pair_is_reported_honestly(self, client):
+        """Hiçbir yüzey çözücüsünün desteklemediği çift SESSİZCE başka bir
+        çifte düşmemeli. RP-1/N2O: RocketCEA eşlemesi yok (oksitleyici kartı
+        yok), hibrit denge çözücüsünün yakıtı da değil. Doğru davranış:
+        figürün etiketi istenen çifti göstermesi ve düğümlerin 'unsolved'
+        olarak raporlanması. Yanlış davranış (düzeltilen hata): HTPB/N2O
+        referans yüzeyini çizip istenen çift sanmak.
+        """
+        fig = _figure(client.post(ENDPOINT, json=dict(
+            self.BASE, fuel_type='rp1', oxidizer_type='n2o',
+            of_range=[2.0, 3.0])))
+        text = _figure_text(fig)
+        assert 'RP1' in text and 'N2O' in text, text[:300]
+        assert 'HTPB' not in text, (
+            'Istenen cift RP-1/N2O iken figur HTPB referansini gosteriyor.')
         assert 'unsolved' in text, (
             'Cozulemeyen dugumler "unsolved" olarak raporlanmiyor.')
 

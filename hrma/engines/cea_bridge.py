@@ -933,6 +933,95 @@ def get_combustion_properties(
 
 
 # --------------------------------------------------------------------------
+# EŞLEŞİK (OPTİMUM) GENLEŞME Isp'si — V307/ONARIM2-İTKİ (M7-ITKI-8)
+# --------------------------------------------------------------------------
+# Güverte PERFORMANS 3B yüzeyinin sıvı düğümleri. Hibrit yüzeyin tabanı
+# (``CombustionAnalyzer.analyze_combustion`` ε verilmeden): nozul çıkışı ISA
+# deniz seviyesi basıncına EŞLEŞİK (P_e = P_a, optimum genleşme), kayan
+# denge, ideal (verimsiz). Sıvı çiftler AYNI tabanda, sıvı motorun KENDİ
+# termokimyasıyla (RocketCEA = NASA CEA; Gordon & McBride, NASA RP-1311)
+# çözülür:
+#   1) ε = CEA'nın verilen P_c/P_e için çözdüğü alan oranı (denge),
+#   2) Isp_eşleşik = Isp_vak − c*·ε·(P_e/P_c)/g0
+#      (F = ṁ·v_e + (p_e − p_a)·A_e, p_a = p_e; A_e/ṁ = ε·c*/P_c —
+#      Sutton & Biblarz 9. baskı Eş. 2-14 ve 3-29); P_e/P_c CEA'nın o ε'da
+#      çözdüğü değerdir (istenen oranla ~4e-5 bağıl fark, ölçüldü:
+#      LOX/RP-1 50 bar O/F 2: 49,348 ⟷ 49,346).
+
+def _matched_isp_locked(fuel_card: str, ox_card: str, pc_bar: float,
+                        mr: float, exit_pressure_bar: float) -> Dict[str, Any]:
+    """`get_matched_expansion_isp` gövdesi — YALNIZ `_CEA_STATE_LOCK` altında."""
+    from hrma.constants import G_0
+    deneme = 0
+    while True:
+        c = _live_cea_obj(ox_card, fuel_card, None)
+        try:
+            pc_psia = pc_bar * BAR_TO_PSIA
+            eps = float(c.get_eps_at_PcOvPe(
+                Pc=pc_psia, MR=mr, PcOvPe=pc_bar / exit_pressure_bar))
+            isp_vac, cstar_ft_s, _tc = c.get_IvacCstrTc(
+                Pc=pc_psia, MR=mr, eps=eps)
+            pc_ov_pe = float(c.get_PcOvPe(Pc=pc_psia, MR=mr, eps=eps))
+            break
+        except KeyError:
+            if deneme >= CEA_STALE_RECORD_RETRIES or cea_record_alive(c):
+                raise
+            deneme += 1
+    cstar = float(cstar_ft_s) * FT_PER_S_TO_M_PER_S
+    isp = float(isp_vac) - cstar * eps / (pc_ov_pe * G_0)
+    return {
+        'isp_s': isp,
+        'expansion_ratio': eps,
+        'exit_pressure_bar': pc_bar / pc_ov_pe,
+        'isp_vac_s': float(isp_vac),
+        'c_star_m_s': cstar,
+    }
+
+
+@functools.lru_cache(maxsize=2048)
+def _matched_isp_cached(fuel_card: str, ox_card: str, pc_bar: float,
+                        mr: float, exit_pressure_bar: float) -> Tuple:
+    """Önbellek (yüzey ızgarası + tavan inceltmesi aynı düğümü yeniden sorar);
+    dönen değer değişmez demet."""
+    with _CEA_STATE_LOCK:
+        out = _matched_isp_locked(fuel_card, ox_card, pc_bar, mr,
+                                  exit_pressure_bar)
+    return tuple(sorted(out.items()))
+
+
+def get_matched_expansion_isp(fuel: str, oxidizer: str, pc_bar: float,
+                              mr: float,
+                              exit_pressure_bar: float) -> Dict[str, Any]:
+    """Optimum (eşleşik, P_e = ``exit_pressure_bar``) genleşmede ideal
+    kayan-denge Isp'si [s], RocketCEA ile.
+
+    Döner: {isp_s, expansion_ratio, exit_pressure_bar, isp_vac_s,
+    c_star_m_s, source: 'rocketcea'}. Çift RocketCEA kartına eşlenmezse,
+    kütüphane yoksa ya da P_c ≤ P_e ise ADLI ``ValueError`` (sayı uydurulmaz;
+    çağıran düğümü boş bırakır).
+    """
+    fuel_card, ox_card = map_propellants(fuel, oxidizer)
+    if not (fuel_card and ox_card):
+        raise ValueError(
+            f"Propellant pair '{fuel}'/'{oxidizer}' is not mapped to a NASA "
+            "CEA (RocketCEA) card.")
+    if not is_rocketcea_available():
+        raise ValueError('NASA CEA (RocketCEA) is not installed.')
+    pc = float(pc_bar)
+    pe = float(exit_pressure_bar)
+    if not (math.isfinite(pc) and math.isfinite(pe) and pe > 0.0 and pc > pe):
+        raise ValueError(
+            f'Matched expansion needs chamber pressure > exit pressure > 0 '
+            f'(got Pc {pc_bar!r} bar, Pe {exit_pressure_bar!r} bar).')
+    # O/F YUVARLANMAZ: yüzey düğümü (ör. 1,8333) eksendeki konumunda
+    # çözülür; ``_MR_ROUND`` yuvarlaması düğümü eksenden kaydırırdı.
+    pc_key = _round_significant(pc, _PC_SIG_DIGITS)
+    out = dict(_matched_isp_cached(fuel_card, ox_card, pc_key, float(mr), pe))
+    out['source'] = 'rocketcea'
+    return out
+
+
+# --------------------------------------------------------------------------
 # HİBRİT İTİCİ KARTLARI — HRMA'NIN KENDİ İTİCİ TANIMI (v3.0.1, K kulvarı)
 # --------------------------------------------------------------------------
 # Amaç: hibrit sonucunun SONUNDAKİ "NASA CEA karşılaştırması"

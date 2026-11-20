@@ -265,7 +265,8 @@ class TestP8B4_17TabanBirligi:
         hac = [t for t in fig['data']
                if (t.get('marker') or {}).get('symbol') == 'cross'][0]
         kunye = hac.get('hovertemplate') or ''
-        assert 'expansion basis' in kunye or 'expansion-basis' in kunye, kunye
+        # V307/ONARIM2-İTKİ: "taban farkı" (genleşme tabanı + motorun verimleri)
+        assert 'basis difference' in kunye, kunye
         assert 'expansion ratio 16.00' in kunye, kunye
         assert ('%.1f' % tasarim) in kunye, (
             'motorun KENDİ Isp\'si künyeden düştü')
@@ -275,7 +276,10 @@ class TestP8B4_17TabanBirligi:
         fig, _, _ = figur
         notlar = [a.get('text') or ''
                   for a in (fig['layout'].get('annotations') or [])]
-        assert any('expansion-basis difference' in t for t in notlar), notlar
+        # V307/ONARIM2-İTKİ: metin farkı "taban farkı" diye adlandırır
+        # (genleşme tabanı + motorun verimleri; ideal yüzey ⟷ teslim Isp).
+        assert any('basis difference (this surface: ideal'
+                   in t.replace('<br>  ', ' ') for t in notlar), notlar
 
     def test_ayni_tabandaki_nokta_KAYDIRILMAZ(self):
         """Fark bandın altındaysa haç motorun kendi sayısında kalır."""

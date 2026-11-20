@@ -420,8 +420,8 @@ class KineticEfficiency:
                 "weight, in compositions['chamber']['molecular_weight'] or "
                 "performance['molecular_weights']['chamber']. It is NOT "
                 "defaulted: the kinetic loss moves 16.6% in relative terms "
-                "between 26 and 18 g/mol, so a fabricated molecular weight "
-                "is a fabricated verdict.")
+                "between 26 and 18 g/mol, so an assumed molecular weight "
+                "would decide the verdict.")
 
         rho_c = chamber_comp.get('density')
         if rho_c is None or rho_c <= 0:

@@ -63,7 +63,11 @@ def _pano(j):
     fig = (j.get('plots') or {}).get('combustion_analysis')
     fig = json.loads(fig) if isinstance(fig, str) else fig
     assert fig, 'yanma panosu üretilmedi'
-    gosterge = [t for t in fig['data'] if t.get('type') == 'indicator']
+    # V307/GRAFİK-BİRİM (kalem 6): η_c* farkı ("▼−11,00") artık hücrenin
+    # alt şeridinde AYRI bir 'delta' göstergesi (sayıyla çakışıyordu);
+    # gösterge = kadranlı iz. Farkın sayısı test_k1_pano_eta_c'de denetlenir.
+    gosterge = [t for t in fig['data'] if t.get('type') == 'indicator'
+                and 'gauge' in str(t.get('mode'))]
     notlar = ' '.join(a['text'] for a in fig['layout'].get('annotations') or []
                       if str(a.get('text', '')).startswith('- '))
     # sarılmış madde satırlarını birleştir ('<br>  ' devam satırı)
@@ -122,6 +126,13 @@ def test_k1_pano_eta_c_manset_ile_ayni(hibrit_yanitlari, ad, kaynak):
     assert len(gosterge) == 1
     # Gösterge = motorun manşete uyguladığı η_c* (bit-aynı yüzde)
     assert gosterge[0]['value'] == blok['percent'], (gosterge[0]['value'], blok)
+    # Fark göstergesi aynı sayıyı ideal c* referansına (η_c* = 100) göre basar.
+    fig = json.loads(j['plots']['combustion_analysis']) if isinstance(
+        j['plots']['combustion_analysis'], str) else j['plots']['combustion_analysis']
+    fark = [t for t in fig['data'] if t.get('type') == 'indicator'
+            and t.get('mode') == 'delta']
+    assert len(fark) == 1 and fark[0]['value'] == blok['percent']
+    assert fark[0]['delta']['reference'] == 100.0
     assert 'Combustion (c*) Efficiency' in basliklar
     # Kaynaksız hüküm bandı yok
     assert not gosterge[0]['gauge'].get('steps')

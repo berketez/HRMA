@@ -255,7 +255,7 @@ def _repo_power_law():
             'Depo viskozite bağıntısı artık saf güç yasası değil: iki '
             f'sonda çifti farklı üs veriyor ({first!r} ve {second!r}). '
             f'Kaynak: {VISCOSITY_LAW_SOURCE}. Sarmalayıcı bu bağıntıyı '
-            'temsil edemez; ölçeklenmiş bir üs UYDURULMAZ.')
+            'temsil edemez; ölçeklenmiş bir üs VARSAYILMAZ.')
     return first
 
 
@@ -473,7 +473,7 @@ def resolve_gas_transport(*, gamma, T_ref, molecular_weight=None,
         raise ValueError(
             f'Taşınım özelliği depo zincirinden türetilecek ama {missing} '
             'verilmedi. Depo bu durumda sessizce MW = 24 g/mol varsayar; '
-            'uydurma gaz üstünden viskozite/cp yayımlanmaz. Ya '
+            'varsayılan bir gaz üstünden viskozite/cp yayımlanmaz. Ya '
             'molecular_weight (ya da gas_constant) verin ya da mu_ref ve '
             'cp değerlerini doğrudan geçirin.')
 

@@ -162,14 +162,14 @@ def _collect_points(result: Dict[str, Any]) -> Dict[Tuple[str, str],
     # (motor_type, quantity) -> aykiri test_id kumesi (main hucrelerden)
     outliers: Dict[Tuple[str, str], set] = {}
     for cell in result.get("statistics", {}).get("cells", []):
-        key = (cell["motor_type"], cell["quantity"])
+        key = (_motor_key(cell), cell["quantity"])
         outliers[key] = set(cell.get("outlier_test_ids", []))
 
     points: Dict[Tuple[str, str], Dict[str, List[Dict]]] = {}
     for rr in result.get("records", []):
         if rr.get("status") != "ok":
             continue
-        motor_type = rr.get("motor_type")
+        motor_type = _motor_key(rr)
         confidence = rr.get("confidence")
         is_anomaly = bool(rr.get("anomaly"))
         # P10B2-06: katman ayrimi correlation_runner._aggregate ile BIREBIR
@@ -212,10 +212,20 @@ def _use_log(values: List[float]) -> bool:
     return hi / lo >= _LOG_SPAN_THRESHOLD
 
 
+def _motor_key(item: Dict[str, Any]) -> str:
+    """Hucre/kayit kimliginin motor kismi: kati kayitta itici ailesiyle
+    ("solid [sugar]"). V307/KATI-DOGRULAMA karar 3 — kati istatistigi aileye
+    gore ayridir; ayni (motor, buyukluk) birden cok ailede yayimlanabilir,
+    aile kimlige girmezse figur noktalari ve dosya adlari karisirdi."""
+    aile = item.get("propellant_family")
+    motor = item.get("motor_type")
+    return f"{motor} [{aile}]" if aile else str(motor)
+
+
 def _find_cell(cells: List[Dict[str, Any]], motor_type: str,
                quantity: str) -> Optional[Dict[str, Any]]:
     for cell in cells:
-        if cell["motor_type"] == motor_type and cell["quantity"] == quantity:
+        if _motor_key(cell) == motor_type and cell["quantity"] == quantity:
             return cell
     return None
 
@@ -230,7 +240,7 @@ def _parity_figure(cell: Dict[str, Any],
     ici bos MOR KARE (AYNI figurde, efsanede 'excluded' gerekcesiyle).
     y=x + %10 bant. Aykirilar koyu halka.
     """
-    motor_type = cell["motor_type"]
+    motor_type = _motor_key(cell)
     quantity = cell["quantity"]
     main = layers.get("main", [])
     anomaly = layers.get("anomaly", [])
@@ -337,7 +347,7 @@ def _error_distribution_figure(result: Dict[str, Any],
 
     labels: List[str] = []
     for row_idx, cell in enumerate(rows):
-        key = (cell["motor_type"], cell["quantity"])
+        key = (_motor_key(cell), cell["quantity"])
         pts = points.get(key, {}).get("main", [])
         n = len(pts)
         # Deterministik dikey dagitim (jitter yerine sabit ofset)
@@ -363,7 +373,7 @@ def _error_distribution_figure(result: Dict[str, Any],
         ax.scatter([cell["bias_pct"]], [row_idx], s=90, marker="D",
                    facecolor=_ORANGE, edgecolor=_OUTLIER_EDGE,
                    linewidth=0.8, zorder=5)
-        labels.append(f"{cell['motor_type']}:{cell['quantity']} (n={n})")
+        labels.append(f"{_motor_key(cell)}:{cell['quantity']} (n={n})")
 
     ax.set_yticks(range(len(rows)))
     ax.set_yticklabels(labels)
@@ -430,7 +440,7 @@ def _summary_page(result: Dict[str, Any]) -> "plt.Figure":
         table_rows = []
         for c in shown:
             table_rows.append([
-                c["motor_type"], c["quantity"], str(c["n"]),
+                _motor_key(c), c["quantity"], str(c["n"]),
                 f"{c['bias_pct']:+.1f}", f"{c['median_ape_pct']:.1f}",
                 f"{c['rms_pct']:.1f}",
                 f"{c['max']['error_pct']:+.1f} ({c['max']['test_id']})",
@@ -637,11 +647,11 @@ def generate_report(result: Optional[Dict[str, Any]] = None,
             for cell in cells:
                 if cell["n"] < 3:
                     continue
-                key = (cell["motor_type"], cell["quantity"])
+                key = (_motor_key(cell), cell["quantity"])
                 layers = points.get(
                     key, {"main": [], "low": [], "anomaly": []})
                 fig = _parity_figure(cell, layers)
-                basename = (f"parity_{_slug(cell['motor_type'])}_"
+                basename = (f"parity_{_slug(_motor_key(cell))}_"
                             f"{_slug(cell['quantity'])}.png")
                 png_path = os.path.join(out_dir, basename)
                 fig.savefig(png_path, dpi=150, metadata=_PNG_METADATA)
@@ -649,7 +659,7 @@ def generate_report(result: Optional[Dict[str, Any]] = None,
                 plt.close(fig)
                 parity_paths.append(png_path)
                 parity_basenames.append(
-                    (cell["motor_type"], cell["quantity"], basename))
+                    (_motor_key(cell), cell["quantity"], basename))
 
             # Hata dagilimi figuru (her zaman uretilir)
             efig = _error_distribution_figure(result, points)

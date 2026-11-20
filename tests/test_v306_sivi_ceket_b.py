@@ -275,7 +275,10 @@ def test_ayrilan_sabit_lule_adli_ret(client):
     p = js['message_params']
     assert p['eps'] == 50.0 and p['pc_bar'] == 30.0
     assert p['pe_bar'] < p['sep_bar']
-    assert p['eps_max'] == pytest.approx(10.35, abs=0.005)
+    # V307/ONARIM-İTKİ-A (M7-ITKI-1): kök γ(ε) ile öz-tutarlı. 3.0.6'nın
+    # 10,35'i ε 50 lülesinin γ'sıyla çözülüyordu; 10,61'lik lüle deniz
+    # seviyesinde kabul ediliyordu (ret metni ile kabul çelişkisi).
+    assert p['eps_max'] == pytest.approx(10.61, abs=0.005)
     assert 'HTTP' not in js['message'] and '422' not in js['message']
     # Tasarım sayısı yayımlanmaz.
     for alan in ('thrust', 'isp_sea_level', 'total_mass_flow',
@@ -284,9 +287,14 @@ def test_ayrilan_sabit_lule_adli_ret(client):
 
 
 def test_ayrilmayan_en_buyuk_eps_yayimlanir(client):
+    # Ret metnindeki sayının lülesi kabul edilir (M7-ITKI-1: 10,61), bir
+    # sonraki yüzdelik reddedilir.
     kod, js = _post(client, dict(L3_EPS50, include_plots=False,
-                                 nozzle_expansion_ratio=10.35))
+                                 nozzle_expansion_ratio=10.61))
     assert kod == 200
+    kod_ust, _js = _post(client, dict(L3_EPS50, include_plots=False,
+                                      nozzle_expansion_ratio=10.62))
+    assert kod_ust == 422
     assert 'warn.liquid.flow_separation' not in {
         w['code'] for w in js['input_warnings']}
 

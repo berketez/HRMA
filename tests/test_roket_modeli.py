@@ -343,14 +343,20 @@ def test_seektime_kare_basi_allokasyon_yapmiyor():
 # ---------------------------------------------------------------------------
 
 def test_viewsite_tabani_ucusa_bagli():
-    """Taban YALNIZ uçuş varken 0,03R'ye iner; uçuşsuz dal 0,1R kalır."""
+    """Taban YALNIZ uçuş varken iner; uçuşsuz dal 0,1R kalır.
+
+    V307/FS-HARİTA (9 Kas): uçuşlu taban 0,03R'den (191 km) kameranın yakın
+    bakış sınırına (CTRL_MIN_TARGET = NEAR_MIN / NEAR_ORANI, ~21 m) indi;
+    çerçeve yolun kendi sınır yarıçapından gelir (FS-UÇUŞ / FS-İZLEME:
+    km ölçekli ve 57 m'lik uçuş nokta kalıyordu). Ölçüm ve sayısal bekçi
+    tests/test_v307_fs_harita.py (viewSite 57 m -> ~193 m)."""
     vs = _code_lines(_prototype_body(_globe_src(), 'viewSite'))
     m = re.search(
-        r'var\s+floor\s*=\s*\(?\s*this\._flight\s*\?\s*GLOBE_R\s*\*\s*0\.03\s*:\s*'
+        r'var\s+floor\s*=\s*\(?\s*this\._flight\s*\?\s*CTRL_MIN_TARGET\s*:\s*'
         r'GLOBE_R\s*\*\s*0\.1\s*\)?\s*;', vs)
     assert m, (
         'viewSite tabanı uçuş varlığına bağlı değil. Beklenen: '
-        'floor = this._flight ? GLOBE_R*0.03 : GLOBE_R*0.1 — uçuş yokken saha '
+        'floor = this._flight ? CTRL_MIN_TARGET : GLOBE_R*0.1 — uçuş yokken saha '
         'coğrafyası bağlamı için eski 0,1R korunur.')
     assert re.search(r'clamp\(\s*dist\s*,\s*floor\s*,\s*GLOBE_R\s*\*\s*2\.5\s*\)', vs), \
         'clamp hâlâ sabit tabanı kullanıyor; hesaplanan floor bağlanmamış.'

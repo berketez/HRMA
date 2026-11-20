@@ -292,7 +292,11 @@ class TestKullanilanCidar:
         assert i >= 0
         blok = t[i:i + 300]
         assert re.search(r'wall_thickness_used_mm\s+5\.00 mm', blok), blok
-        assert 'user_supplied' in blok
+        # V307/SEKME-GÜVERTE (NK3-K-2): kaynak kullanıcı dilinde ("the wall
+        # you supplied"); makine değeri `data-structural-wall-source`
+        # niteliğinde ve ipucunda (ham "wall_thickness_source: user_supplied"
+        # görünür metinden indi).
+        assert 'the wall you supplied' in blok
 
     def test_oneri_satirlari_hala_basiliyor(self):
         """Aşırı düzeltme koruması: öneriler kaybolmadı."""

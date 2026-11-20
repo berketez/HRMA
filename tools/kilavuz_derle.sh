@@ -23,13 +23,21 @@ command -v xelatex >/dev/null || { echo "xelatex yok"; exit 2; }
 CIKTI="$(mktemp -d -t kilavuz-derle)"
 for d in "${DOSYALAR[@]}"; do
   echo "== $d"
-  # iki geçiş: içindekiler + çapraz başvurular
-  for gecis in 1 2; do
+  # Geçişler: içindekiler + çapraz başvurular. En az 2; "Rerun" uyarısı
+  # kalmayana dek, en çok 4 (18 Kas 2026: OTO tabloları yeniden üretilince
+  # 2. geçiş "Label(s) may have changed. Rerun" verdi — içindekiler sayfa
+  # numarası kayabilirdi).
+  gecis=0
+  while :; do
+    gecis=$((gecis + 1))
     (cd "$KAYNAK" && xelatex -interaction=nonstopmode -halt-on-error -output-directory="$CIKTI" "$d.tex" > "$CIKTI/$d.$gecis.log" 2>&1) \
       || { echo "DERLEME HATASI ($d, geçiş $gecis): $(grep -m1 -E '^!' "$CIKTI/$d.$gecis.log" || true)"; tail -20 "$CIKTI/$d.$gecis.log"; exit 3; }
+    if [ "$gecis" -ge 2 ] && ! grep -q 'Rerun' "$CIKTI/$d.$gecis.log"; then break; fi
+    if [ "$gecis" -ge 4 ]; then echo "UYARI ($d): 4 geçişten sonra hâlâ 'Rerun' uyarısı"; break; fi
   done
   # sayfa sayısı (bilgi)
-  n=$(grep -o 'Output written on .* ([0-9]* pages' "$CIKTI/$d.2.log" | grep -o '[0-9]* pages' || true)
+  n=$(grep -o 'Output written on .* ([0-9]* pages' "$CIKTI/$d.$gecis.log" | grep -o '[0-9]* pages' || true)
+  echo "   geçiş: $gecis"
   cp "$CIKTI/$d.pdf" "$KAYNAK/$d.pdf"; cp "$CIKTI/$d.pdf" "$IKIZ/$d.pdf"
   echo "   yazıldı: $KAYNAK/$d.pdf + $IKIZ/$d.pdf ($n)"
 done

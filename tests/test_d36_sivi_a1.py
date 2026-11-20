@@ -405,8 +405,20 @@ class TestL6IstegeBagli:
         html = _html()
         ornek = _ornek_alanlar()
         zorunlu = set(uc['bos_govde'][1]['missing_fields'])
+        # V307/SIVI-ORTAM: tasarım ortamının irtifa / basınç alanları yalnız
+        # kendi kipinde görünür ve ORADA ZORUNLUDUR (boş bırakılırsa uç
+        # adıyla reddeder: tests/test_v307_sivi_ortam.py RETLER). Boş
+        # açılırlar ama "isteğe bağlı" DEĞİLDİRLER; işaret taşımazlar.
+        kipte_zorunlu = set(re.findall(
+            r'data-liq-ambient-show="[a-z_]+"[^>]*>\s*<label for="([^"]+)"',
+            html))
+        assert kipte_zorunlu == {'design_ambient_altitude_m',
+                                 'design_ambient_pressure_bar'}
+        for alan in kipte_zorunlu:
+            assert 'optional-mark' not in _etiket_govdesi(html, alan), alan
         bos = [a for a in _bos_varsayilanli_alanlar(html)
-               if a not in ornek and a not in zorunlu]
+               if a not in ornek and a not in zorunlu
+               and a not in kipte_zorunlu]
         assert 'max_burn_duration' in bos and 'chamber_diameter' in bos
         isaretsiz = [a for a in bos if 'optional-mark' not in _etiket_govdesi(html, a)]
         assert isaretsiz == [], isaretsiz
@@ -652,6 +664,12 @@ _SAYFA_ISLEVLERI = (
     # ``escapeNoticeText`` ile basar.
     'function ortakMetin(anahtar, yedek, degiskenler)',
     'function escapeNoticeText(v)',
+    # V307/S2-KALINTI (NK3-S-6): displayResults'ın VAKUM İTKİSİ kartı
+    # ondalık sayısını sayfanın anlamlı basamak kuralından alır
+    # (liqAnlamliOndalik); ikiz almazsa 'liqAnlamliOndalik is not defined'
+    # der. İlk giriş iki sabiti ve liqAnlamliOndalik'i birlikte keser
+    # (_js_blok sabitten sonraki ilk '{' bloğunu kapatır).
+    'const LIQ_ANLAMLI_BASAMAK', 'function liqAnlamliTxt(v, taban, unit)',
 )
 
 

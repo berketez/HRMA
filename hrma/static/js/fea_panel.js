@@ -1548,10 +1548,12 @@
         };
     }
 
-    //: P11B3-13 — göreli değişim izinin etiketi ALAN ADIdır: yeni i18n
-    //: anahtarı açılmaz (sözlük dosyaları bu dalgada kardeş kulvarın
-    //: sahası) ve makine adı çeviri gerektirmez.
-    const REL_CHANGE_ETIKETI = 'rel_change [%]';
+    //: P11B3-13 — göreli değişim izinin etiketi. V307/DİL-EKRAN (NK3-S-7):
+    //: ham alan adı ('rel_change [%]') TR ekranda kalıyordu; etiket artık
+    //: sözlükten, çizim anında (dil değişince yeniden çizimde tazelenir).
+    function relChangeEtiketi() {
+        return T('fea.axisRelChange', 'Relative change [%]');
+    }
 
     //: P11B3-13 — her noktanın YÖN künyesi (n_axial x n_radial). Alan
     //: yoksa künye YAZILMAZ (uydurma etiket yasak).
@@ -1589,7 +1591,7 @@
                 x: conv.n_elems, y: conv.rel_change_pct,
                 mode: 'lines+markers', type: 'scatter',
                 marker: { size: 6 }, line: { width: 1.5, dash: 'dot' },
-                name: REL_CHANGE_ETIKETI,
+                name: relChangeEtiketi(),
                 yaxis: 'y2',
             });
         }
@@ -1604,7 +1606,7 @@
         };
         if (relCizilir) {
             layout.yaxis2 = {
-                title: REL_CHANGE_ETIKETI,
+                title: relChangeEtiketi(),
                 overlaying: 'y', side: 'right', showgrid: false,
             };
             layout.legend = { orientation: 'h', y: 1.16 };
@@ -2458,8 +2460,8 @@
                     { m: conv.meshes, r: conv.refinements },
                     '{m} meshes were solved, so {r} refinement steps lie '
                     + 'between them: the round count above counts MESHES '
-                    + '(the same number the endpoint calls "tur" in its '
-                    + 'declaration below), while the endpoint\'s folding '
+                    + '(the same number the calculation calls "tur" in its '
+                    + 'declaration below), while the calculation\'s folding '
                     + 'counter counts the STEPS. The chart draws one point '
                     + 'per mesh.'));
             }
@@ -2580,7 +2582,7 @@
             if (!r.ok || !r.body || r.body.status !== 'success') {
                 lastPayload = null;
                 lastError = (r.body && (r.body.detail || r.body.error))
-                    || T('fea.httpError', 'The structural FEA endpoint returned an error.');
+                    || T('fea.httpError', 'The structural FEA calculation returned an error.');
             } else {
                 lastPayload = r.body.fea || null;
                 lastError = null;
@@ -4008,7 +4010,7 @@
                 gLastError = (r.body && (r.body.detail || r.body.message
                     || r.body.error))
                     || GL('httpError',
-                          'The grain FEA endpoint returned an error.');
+                          'The grain FEA calculation returned an error.');
             } else {
                 gLastPayload = r.body.fea || null;
                 gLastError = null;
@@ -4605,8 +4607,8 @@
                 key: 'panel.grain.needsInputs',
                 params: { fields: eksik.join(', ') },
                 fallback: 'This result does not publish the section inputs the '
-                    + 'solver needs: {fields}. The endpoint has no default for '
-                    + 'them and this panel invents none.' } };
+                    + 'solver needs: {fields}. They have no default, so the run '
+                    + 'does not start.' } };
         }
         return { ok: true };
     }
@@ -4641,9 +4643,9 @@
         if (eksik.length) {
             throw new Error(TF('panel.grain.missingInputs',
                 { fields: eksik.join(', ') },
-                'These inputs have no value and the endpoint has no default '
-                + 'for any of them: {fields}. The request was NOT sent — this '
-                + 'panel does not invent a number in their place.'));
+                'These inputs have no value and none of them has a default: '
+                + '{fields}. The request was NOT sent — the calculation needs '
+                + 'a value for each of them.'));
         }
         return body;
     }

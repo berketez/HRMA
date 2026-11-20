@@ -3,12 +3,12 @@
 Bu dizinde, uygulamayı ilk kez açan kullanıcının boş formla uğraşmadan
 "program çalışıyor mu?" sorusuna hızla yanıt alabilmesi için üç hazır
 `.hrma` projesi bulunur. Üçü de açılıp doğrudan hesaplanabilir; girdi
-değerleri uygulamanın kendi kataloglarından gelir, hiçbir sayı uydurma
-değildir.
+değerleri uygulamanın kendi kataloglarından ve sayfaların kendi
+varsayılanlarından gelir.
 
-| Dosya | Motor tipi | Tasarım | `results_summary` (v3.0.6 ile, sayfanın GERÇEK Hesapla gövdesiyle ölçüldü) |
+| Dosya | Motor tipi | Tasarım | `results_summary` (v3.0.7 ile, sayfanın GERÇEK Hesapla gövdesiyle ölçüldü) |
 |---|---|---|---|
-| `Example Hybrid N2O-HTPB 3kN.hrma` | Hibrit | N2O/HTPB, 3 kN, 10 s, 30 bar, O/F 6 | Isp 209,734 s, toplam impuls 26838,605 N·s |
+| `Example Hybrid N2O-HTPB 3kN.hrma` | Hibrit | N2O/HTPB, 3 kN, 10 s, 30 bar, O/F 6 | Isp 209,728 s, toplam impuls 26838,563 N·s |
 | `Example Solid KNDX BATES 75mm.hrma` | Katı | KNDX (KNO3/dekstroz 65/35), 3xBATES, 75 mm, 40 bar | tepe itki 1498,194 N, yanma 2,277 s, toplam impuls 2956,883 N·s, Isp 125,284 s |
 | `Example Liquid LOX-RP1 25kN.hrma` | Sıvı | LOX/RP-1, 25 kN, 50 bar, O/F 2.0, gaz jeneratörü çevrimi, 1,0 mm CuCrZr astar + dış kabuk, 30 s yanma (örnek girdisi) | Isp(deniz) 254,786 s, Isp(vakum) 299,320 s, toplam impuls 750000,000 N·s |
 
@@ -33,7 +33,7 @@ onunla birlikte güncellenir; bekçisi
 > sıcaklığı) sonucu oynatıyordu. Proje şeridi **Isp 140,109 s** yazarken
 > Hesapla **125,401 s** veriyordu (%-10,5) — aynı proje için iki sayı.
 > Örnek artık o altı alanı da taşır; değerler sayfanın kendi `value=`
-> varsayılanlarıdır (`solid.html`), uydurma değildir. Tablodaki sayılar bu
+> varsayılanlarıdır (`solid.html`). Tablodaki sayılar bu
 > yüzden düştü: **gösterilen sayı, kullanıcının gerçekten aldığı sayıdır.**
 > 125,4 s, KN-şeker motorlarının deneysel teslim Isp bandındadır (Nakka
 > 1999: ~115-130 s); eski 140,1 s verimsiz-kayıpsız ideal değerdi.

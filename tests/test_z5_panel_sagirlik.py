@@ -692,8 +692,16 @@ class TestProtectionOlculmusAki:
             assert js['required_thickness_m'] is None, (
                 f'{motor_type}: mm geri çekildi ama m ikizi yayımlanıyor')
 
-    def test_olcum_yoksa_hukum_geri_cekiliyor(self, client, tmp_path):
-        """FAIL-CLOSED: ölçülmüş akı yoksa kalınlık kartı '—' basar."""
+    def test_olcum_yoksa_kunye_user(self, client, tmp_path):
+        """Ölçülmüş akı yoksa künye ``user``dır (formdan girilen akı).
+
+        V307/GÜVERTE-ISIL (kalem 3) — BEKLENTİ DEĞİŞTİ. Eski: 2 000 000 W/m²
+        panelin KENDİ varsayılanıydı; o sayıyla koşan hüküm ``assumed``
+        sayılıp '—' basılıyordu. Varsayılan kalktı (alan boş; bekçisi
+        tests/test_v307_guverte_isil.py): motor akısı okunmadan forma
+        girilen akı kullanıcının girdisidir, sonucu ``user`` künyesiyle
+        basılır. Aynı sayının "varsayılan mı, girdi mi" olduğu artık
+        sorulmaz — varsayılan yok."""
         tps = client.post('/api/thermal-protection', json={
             'mode': 'ablative', 'q_net_W_m2': 2000000, 'burn_time_s': 10.0,
             'material': 'silica_phenolic'}).get_json()
@@ -703,11 +711,11 @@ class TestProtectionOlculmusAki:
                             motorType='hybrid', fromResultsFor=['protection'],
                             ablativeResponse=tps)
         html = cikti['ablativeHtml']
-        assert 'data-tps-flux-kind="assumed"' in html, (
-            'ölçüm yokken hüküm kazanılmış gibi basılıyor')
+        assert 'data-tps-flux-kind="user"' in html, (
+            'formdan girilen akı "user" künyesi taşımıyor')
+        assert 'data-tps-flux-kind="assumed"' not in html
+        assert 'entered in the form' in html
         assert 'Required liner thickness' in html or 'thickness' in html
-        assert str(round(tps['required_thickness_mm'], 2)) not in html, (
-            'kazanılmamış kalınlık sayısı hâlâ kartta')
 
     def test_olculmus_akida_kunye_computed(self, client, tmp_path,
                                            motor_sonuclari, oneriler):

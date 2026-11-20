@@ -187,9 +187,12 @@ def test_gonderilmeyen_alan_kanonik_degeriyle_kunyede(istemci, yol, taban,
 # (b) OH-AS-03 — çözülemeyen kimlik × API / panel / PDF
 # ===========================================================================
 AS03_GOVDE = {'chamber_pressure': 50, 'propellant_mass': 50,
-          'chamber_diameter': 0.1, 'wall_thickness': 0.005}
+          'chamber_diameter': 0.1, 'wall_thickness': 0.005,
+          # V307/GÜVERTE-ISIL kalem 4: oda sıcaklığı zorunlu (3000 K varsayılanı
+          # kalktı); eski örtük değer açık yazıldı, sayılar bit-aynı.
+          'chamber_temperature': 3000.0}
 AS03_PDF_GOVDE = {'chamber_pressure': 50.0, 'chamber_diameter': 0.1,
-             'propellant_mass': 50.0,
+             'propellant_mass': 50.0, 'chamber_temperature': 3000.0,
              'chamber_wall_policy': {'wall_thickness_m': 0.005}}
 AS03_NEGATIF = {
     'N1_motor': {'motor_type': 'warp_drive', 'propellant_type': 'apcp'},

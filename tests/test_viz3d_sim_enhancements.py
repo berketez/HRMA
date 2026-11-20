@@ -174,8 +174,9 @@ def test_sixdof_traj3d_plot_present():
     src = _read(SIXDOF)
     assert 'sd_plot_traj3d' in src, '3B yörünge konteyneri yok'
     assert "type: 'scatter3d'" in src
-    # Mach renklendirme + colorbar
-    assert 'color: ser.mach' in src
+    # Mach renklendirme + colorbar. V307/ONARIM2-UÇUŞ-PANEL (M7-UCUS-17):
+    # 3B çizim geçerlilik sınırında kesilmiş seriden (serC = bagliGecerliSeri).
+    assert 'color: serC.mach' in src
     assert 'showscale: true' in src
     assert "colorbar: { title: 'Mach'" in src
     # Apoje işaretçisi + zemin izdüşümü

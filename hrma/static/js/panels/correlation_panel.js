@@ -85,6 +85,18 @@
          'panel.correlation.layerAnomalyNote',
          'Records flagged as statistical outliers versus the model; '
          + 'kept visible for engineering review instead of being deleted.'],
+        // V307 KATI-DOĞRULAMA faz 3 (karar 4): MODELİN kapsamı dışındaki
+        // kayıtlar uç gövdesinde 'out_of_scope' katmanıyla geliyordu ama
+        // panelde hiç çizilmiyordu (KSB-001/002 ve hibrit swirl kayıtları
+        // tabloda görünmüyordu). Kapsam içi satırlar üstte, bunlar altta:
+        // iki istatistik yan yana okunur.
+        ['out_of_scope', 'panel.correlation.layerOutOfScope',
+         'Records outside the model scope',
+         'panel.correlation.layerOutOfScopeNote',
+         'Records the model declares outside its scope by a criterion fixed '
+         + 'in advance, independent of the size of the error. They are not '
+         + 'deleted: their errors are shown here next to the in-scope '
+         + 'statistics above.'],
     ];
 
     let lastData = null;
@@ -245,6 +257,53 @@
         });
     }
 
+    // İtici ailesinin okunur adı (V307 karar 3). Tablo kapalıdır; bilinmeyen
+    // aile kodu AYNEN gösterilir (çeviri uydurulmaz).
+    const AILE_ANAHTARLARI = {
+        sugar: ['panel.correlation.family.sugar', 'KN-sugar'],
+        composite: ['panel.correlation.family.composite', 'composite'],
+        double_base: ['panel.correlation.family.double_base', 'double-base'],
+        an_ap_al_htpb: ['panel.correlation.family.an_ap_al_htpb', 'AN/AP/Al/HTPB composite'],
+        an_hmx_ap_al_htpb: ['panel.correlation.family.an_hmx_ap_al_htpb', 'AN/HMX/AP/Al/HTPB composite'],
+        unclassified: ['panel.correlation.family.unclassified', 'unclassified'],
+    };
+    function familyLabel(aile) {
+        const k = AILE_ANAHTARLARI[String(aile)];
+        return k ? T(k[0], k[1]) : String(aile);
+    }
+
+    /* V307/ONARIM2-İTKİ (M7-ITKI-4): BÜYÜKLÜK sütunu iç adlar basıyordu
+       (`burn_rate`, `chamber_pressure_avg`, `isp_sl` …). Ad tablosu
+       koşucunun puanlayabildiği büyüklüklerin tamamıdır
+       (`hrma/validation/record_adapters.py` tahmin anahtarları; bekçi
+       tests/test_v307_onarim2_itki.py hepsinin burada olduğunu sınar).
+       Bilinmeyen kod AYNEN gösterilir (çeviri uydurulmaz). */
+    const BUYUKLUK_ANAHTARLARI = {
+        burn_rate: ['panel.correlation.q.burn_rate', 'Burn rate'],
+        c_star: ['panel.correlation.q.c_star', 'Characteristic velocity c*'],
+        chamber_pressure: ['panel.correlation.q.chamber_pressure', 'Chamber pressure'],
+        chamber_pressure_avg: ['panel.correlation.q.chamber_pressure_avg', 'Average chamber pressure'],
+        chamber_pressure_peak: ['panel.correlation.q.chamber_pressure_peak', 'Peak chamber pressure'],
+        isp: ['panel.correlation.q.isp', 'Specific impulse (Isp)'],
+        isp_sl: ['panel.correlation.q.isp_sl', 'Sea-level specific impulse'],
+        isp_vac: ['panel.correlation.q.isp_vac', 'Vacuum specific impulse'],
+        port_diameter_final: ['panel.correlation.q.port_diameter_final', 'Final port diameter'],
+        propellant_mass: ['panel.correlation.q.propellant_mass', 'Propellant mass'],
+        regression_rate: ['panel.correlation.q.regression_rate', 'Regression rate'],
+        thrust: ['panel.correlation.q.thrust', 'Thrust'],
+        thrust_mean: ['panel.correlation.q.thrust_mean', 'Average thrust'],
+        thrust_peak: ['panel.correlation.q.thrust_peak', 'Peak thrust'],
+        thrust_vac: ['panel.correlation.q.thrust_vac', 'Vacuum thrust'],
+        total_impulse: ['panel.correlation.q.total_impulse', 'Total impulse'],
+        web_burn_time: ['panel.correlation.q.web_burn_time', 'Web burn time'],
+        web_burn_time_vs_action_time: ['panel.correlation.q.web_burn_time_vs_action_time',
+            'Web burn time vs measured action time'],
+    };
+    function quantityLabel(q) {
+        const k = BUYUKLUK_ANAHTARLARI[String(q)];
+        return k ? T(k[0], k[1]) : String(q);
+    }
+
     function cellRowHtml(c, enBuyukBias) {
         const page = window.AnalysisDock.getMotorType();
         const isPage = c.motor_type === page;
@@ -273,8 +332,16 @@
                     style="color:var(--hd-orange, #ff8c33);">${c.n}&#8202;&#9888;</span>`)
             : '—';
         return `<tr title="${tip}">
-            <td style="${U.TD} ${motorStyle}">${escapeHtml(c.motor_type)}</td>
-            <td style="${U.TD}">${escapeHtml(c.quantity)}</td>
+            <td style="${U.TD} ${motorStyle}">${escapeHtml(c.motor_type)}${
+                c.propellant_family
+                    ? `<span data-propellant-family="${escapeHtml(String(c.propellant_family))}"
+                        title="${escapeHtml(T('panel.correlation.familyTip',
+                            'Propellant family: solid-motor statistics are kept separate per family.'))}"
+                        style="color:var(--hd-ink-dim, #7d97a5); font-weight:normal;"> [${
+                            escapeHtml(familyLabel(c.propellant_family))}]</span>`
+                    : ''}</td>
+            <td style="${U.TD}" data-quantity="${escapeHtml(String(c.quantity))}">${
+                escapeHtml(quantityLabel(c.quantity))}</td>
             <td style="${U.TD} text-align:right; font-family:var(--hd-mono);">${nHucre}</td>
             <td style="${U.TD} text-align:right; font-family:var(--hd-mono);">${
                 magnitudeBar(c.bias_percent, enBuyukBias)}${fmtPct(c.bias_percent)}</td>
@@ -331,7 +398,7 @@
             escapeHtml(T('panel.correlation.barNote',
                 'Bar length is |bias| relative to the largest |bias| in this '
                 + 'table — a magnitude cue from the data itself, not a '
-                + 'pass/fail threshold (the endpoint publishes none).'))}</p>`;
+                + 'pass/fail threshold (the calculation publishes none).'))}</p>`;
     }
 
     function collapsibleLayerHtml(title, note, cells) {
@@ -379,7 +446,22 @@
             ${(typeof data.generated_s === 'number' && isFinite(data.generated_s))
                 ? U.num(data.generated_s, 2) : '—'} s
         </div>` + skippedSummaryHtml(data.skipped_summary)
-             + raporMetniHtml(data.markdown);
+             + raporMetniHtml(data.markdown, data.skipped_summary);
+    }
+
+    // V307/ONARIM2-İTKİ (M7-ITKI-4): atlama özetinin HAM hâli (kayıt
+    // kimlikleri, eksik girdi listeleri) ekrandan kalktı; sunucunun
+    // gönderdiği gibi yalnız "Tam rapor metni" açılırında, rapor metninin
+    // altında durur. Özet yoksa blok kurulmaz.
+    function atlananHamHtml(atlananHam) {
+        if (!atlananHam || typeof atlananHam !== 'object'
+                || !Object.keys(atlananHam).length) return '';
+        return `<pre data-correlation-skipped-raw style="white-space:pre-wrap;
+                word-break:break-word; max-height:240px; overflow:auto;
+                font-size:0.72rem; font-family:var(--hd-mono, monospace);
+                color:var(--hd-ink, #cfe8f2); margin:6px 0 0; padding:8px;
+                background:var(--hd-inset, rgba(0,0,0,0.25));">${
+                escapeHtml(JSON.stringify(atlananHam, null, 1))}</pre>`;
     }
 
     /* ÖH D31 · P11B4-27 — 31 KB'LIK RAPOR METNİ ARTIK OKUNABİLİR.
@@ -394,7 +476,7 @@
        Metin UYDURULMAZ, ÖZETLENMEZ, biçimlenmez: sunucunun ürettiği
        markdown aynen, katlanmış bir blokta gösterilir. Alan gelmezse
        blok HİÇ kurulmaz. */
-    function raporMetniHtml(markdown) {
+    function raporMetniHtml(markdown, atlananHam) {
         if (typeof markdown !== 'string' || !markdown.trim()) return '';
         const bayt = markdown.length;
         return `<details style="margin:8px 0;">
@@ -412,7 +494,7 @@
                 font-family:var(--hd-mono, monospace);
                 color:var(--hd-ink, #cfe8f2); margin:6px 0 0;
                 padding:8px; background:var(--hd-inset, rgba(0,0,0,0.25));
-                ">${escapeHtml(markdown)}</pre>
+                ">${escapeHtml(markdown)}</pre>${atlananHamHtml(atlananHam)}
         </details>`;
     }
 
@@ -429,21 +511,80 @@
 
        Sayılar SUNUCUDAN gelir; panel toplam UYDURMAZ — özet boşsa satır
        hiç açılmaz, doluysa her kalem adıyla basılır. */
+    /* V307/ONARIM2-İTKİ (M7-ITKI-4): özet ekrana HAM JSON basıyordu
+       (`insufficient_inputs [{"missing":[…]…}]`, `skipped_score_counts {…}`,
+       `status_counts {…}`). Artık okunur tablo: neden → sayı. Sayılar
+       sunucunun listelerinin UZUNLUĞU ve sayım sözlüğünün değerleridir
+       (panel toplam uydurmaz); kayıt durum sayıları üstteki "Kayıtlar"
+       satırında zaten durur. Ham özet "Tam rapor metni" açılırında. */
+    const ATLANAN_KAYIT_NEDENLERI = [
+        ['insufficient_inputs', 'panel.correlation.cntInsufficient', 'insufficient inputs'],
+        ['not_supported', 'panel.correlation.cntUnsupported', 'not supported'],
+        ['runner_errors', 'panel.correlation.cntRunnerError', 'runner errors'],
+    ];
+    const ATLANAN_SKOR_NEDENLERI = {
+        skipped_circular_input: ['panel.correlation.skip.circular',
+            'Measured value is an input of the run (circular)'],
+        skipped_consumed: ['panel.correlation.skip.consumed',
+            'Measured value is consumed as a model input'],
+        skipped_derived: ['panel.correlation.skip.derived',
+            'Algebraically derived from the inputs'],
+        no_prediction: ['panel.correlation.skip.noPrediction',
+            'No model prediction for this quantity'],
+        measured_zero: ['panel.correlation.skip.measuredZero',
+            'Measured value is zero (percent error undefined)'],
+        measured_null: ['panel.correlation.skip.measuredNull',
+            'Measured value missing in the record'],
+        curve_skipped_v1: ['panel.correlation.skip.curve',
+            'Measured curve (curves are not scored)'],
+        unknown_unit: ['panel.correlation.skip.unknownUnit',
+            'Unit of the measured value not resolved'],
+        duplicate_base: ['panel.correlation.skip.duplicate',
+            'Same quantity reported twice in the record'],
+    };
     function skippedSummaryHtml(ozet) {
         if (!ozet || typeof ozet !== 'object') return '';
-        const anahtar = Object.keys(ozet).sort();
-        if (!anahtar.length) return '';
-        const parca = anahtar.map(function (k) {
-            const v = ozet[k];
-            return escapeHtml(k) + ' ' + escapeHtml(
-                (v === null || v === undefined) ? '—'
-                    : (typeof v === 'object' ? JSON.stringify(v) : String(v)));
+        const satirlar = [];
+        const satir = function (ad, sayi) {
+            satirlar.push(`<tr><td style="${U.TD}">${escapeHtml(ad)}</td>
+                <td style="${U.TD} text-align:right; font-family:var(--hd-mono);">${
+                    escapeHtml(String(sayi))}</td></tr>`);
+        };
+        const kayitSatirlari = [];
+        ATLANAN_KAYIT_NEDENLERI.forEach(function (n) {
+            if (Array.isArray(ozet[n[0]]) && ozet[n[0]].length) {
+                kayitSatirlari.push([T(n[1], n[2]), ozet[n[0]].length]);
+            }
         });
-        return `<div style="font-family:var(--hd-mono, monospace);
-                font-size:0.75rem; color:var(--hd-amber, #ffbe46);
-                margin:4px 0 8px;">
-            ${T('panel.correlation.skippedLabel',
-                'Skipped (not in this report)')}: ${parca.join(' · ')}
+        const skor = (ozet.skipped_score_counts && typeof ozet.skipped_score_counts === 'object')
+            ? ozet.skipped_score_counts : {};
+        const skorSatirlari = Object.keys(skor).sort().filter(function (k) {
+            return Number.isFinite(skor[k]) && skor[k] > 0;
+        }).map(function (k) {
+            const a = ATLANAN_SKOR_NEDENLERI[k];
+            return [a ? T(a[0], a[1]) : k, skor[k]];
+        });
+        if (!kayitSatirlari.length && !skorSatirlari.length) return '';
+        const TH = U.TD + ' color:var(--hd-ink-dim, #7d97a5);'
+            + ' font-family:var(--hd-mono); font-size:0.7rem;';
+        const baslik = function (metin) {
+            satirlar.push(`<tr><th style="${TH} text-align:left;" colspan="2">${
+                escapeHtml(metin)}</th></tr>`);
+        };
+        if (kayitSatirlari.length) {
+            baslik(T('panel.correlation.skippedRecords', 'Records not in the table (reason → records)'));
+            kayitSatirlari.forEach(function (r) { satir(r[0], r[1]); });
+        }
+        if (skorSatirlari.length) {
+            baslik(T('panel.correlation.skippedScores',
+                'Measured quantities not scored (reason → quantities)'));
+            skorSatirlari.forEach(function (r) { satir(r[0], r[1]); });
+        }
+        return `<div data-correlation-skipped style="font-size:0.75rem; margin:4px 0 8px;">
+            <div style="font-family:var(--hd-mono, monospace);
+                color:var(--hd-amber, #ffbe46); margin-bottom:4px;">${
+                T('panel.correlation.skippedLabel', 'Skipped (not in this report)')}</div>
+            <table style="${U.TBL}">${satirlar.join('')}</table>
         </div>`;
     }
 
@@ -502,6 +643,11 @@
         _render: render,
         _orderCells: orderCells,
         _cellTableHtml: cellTableHtml,
+        _skippedSummaryHtml: skippedSummaryHtml,
+        _raporMetniHtml: raporMetniHtml,
+        _quantityLabel: quantityLabel,
+        _quantityKeys: BUYUKLUK_ANAHTARLARI,
+        _skipReasonKeys: ATLANAN_SKOR_NEDENLERI,
         _augmentSection: augmentSection,
         get lastData() { return lastData; },
         run: run,

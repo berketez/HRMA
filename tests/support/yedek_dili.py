@@ -33,6 +33,21 @@ YEDEK_DILI = 'en'
 #: bekçisinin konusudur).
 TURKCE_HARF_DESENI = re.compile(r'[çğıöşüÇĞİÖŞÜ]')
 
+#: EN metinde Türkçe harf taşıyan ama İngilizce olan özel adlar (3.0.7, 19 Kas;
+#: rc.3 CI dilim 2 + 8). 'Türkiye' ülkenin İngilizcedeki resmî adıdır (BM,
+#: Haziran 2022) ve uygulamanın EN arayüzü de onu kullanır (i18n_launch_site.js
+#: site.mapPackName.*: 'Sinop area (Türkiye)'). Sürüm notunun EN bölümünü tarayan
+#: bekçiler bu listeyi kullanır; listedeki ad çıkarıldıktan sonra kalan her
+#: Türkçe harf yine kırmızıdır. Listeye ad eklemek bir KARARDIR.
+EN_OZEL_ADLAR = ('Türkiye',)
+
+
+def en_metinde_turkce_harf(metin: str):
+    """EN metinde Türkçe harf (``EN_OZEL_ADLAR`` dışında): ilk eşleşme ya da None."""
+    for ad in EN_OZEL_ADLAR:
+        metin = metin.replace(ad, '')
+    return TURKCE_HARF_DESENI.search(metin)
+
 #: ``T('anahtar', 'yedek')`` / ``TF('anahtar', 'yedek', ...)`` çağrılarından
 #: yedek metni çeken desen. Yedeği OLMAYAN çağrı bu desene takılmaz; onu
 #: ``yedeksiz_cagrilar`` bulur.

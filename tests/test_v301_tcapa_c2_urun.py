@@ -226,8 +226,10 @@ def test_besleme_bolum_ipucu_sozlukten():
     assert "T('panel.feed.sectionHint'" in src
     sozluk = _oku(KOK / 'hrma' / 'static' / 'js' / 'i18n_common.js')
     degerler = re.findall(r"'panel\.feed\.sectionHint':\s*'([^']*)'", sozluk)
+    # 3.0.7 (V307/ÇALKANTI-ARAYÜZ): sekmede terim birliği — 'çalkalanma' →
+    # 'çalkantı' (brif ve tasarım terimi; aynı sekmede iki ad olmasın).
     assert degerler == ['slosh · pressurant · water hammer',
-                        'çalkalanma · basınçlandırıcı · su koçu']
+                        'çalkantı · basınçlandırıcı · su koçu']
 
 
 def test_yapisal_guverte_malzeme_rozeti_makine_anahtari_basmaz():

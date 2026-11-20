@@ -321,7 +321,7 @@ FAMILY_BANDS = {
             'AP/HTPB T-burner bands exist in the literature (Blomshield, '
             'NAWCWD compilations) but were not retrievable/verifiable in '
             'this session (DTIC maintenance, paywalled journals) — open '
-            'item, row NOT fabricated.'),
+            'item, no row is published.'),
     },
     'pban': {
         'record_ids': ('a13_ap_pban',),
@@ -369,8 +369,8 @@ def bands_for_family(family):
         raise ValueError(
             f'Unknown propellant family {family!r}: no QSHOD band mapping '
             f'is published for it. Known families: '
-            f'{sorted(FAMILY_BANDS)}. An empty answer is not fabricated '
-            f'for unknown keys.')
+            f'{sorted(FAMILY_BANDS)}. Unknown keys receive no answer, not '
+            f'an empty one.')
     entry = FAMILY_BANDS[family]
     records = [QSHOD_BAND_RECORDS[rid] for rid in entry['record_ids']]
     missing = QSHOD_BAND_RECORDS.get(family)
