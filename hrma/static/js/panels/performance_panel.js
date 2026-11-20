@@ -43,6 +43,220 @@
     let sonIticiler = { fuel_type: null, oxidizer_type: null };
 
     // ------------------------------------------------------------------
+    // V307/GÜVERTE-ORTAM — SIVI MOTORUN TASARIM ORTAMI (güverte panellerinin
+    // TEK okuyucusu: PERFORMANS, KARŞILAŞTIRMA, BELİRSİZLİK)
+    // ------------------------------------------------------------------
+    // 3.0.7'de sıvı motorun tasarım ortamı girdidir (deniz seviyesi /
+    // irtifa / basınç / vakum; çözücü `design_ambient` bloğunda beyan eder).
+    // ÖLÇÜLDÜ (docs/scofield/raw/OH/V307/guverte-ortam/olcum/ortam_once.json):
+    // vakum tasarımında güverte panelleri ortam söylemeden sayı basıyordu —
+    // KARŞILAŞTIRMA'da deniz seviyesinde ayrılan vakum motorunun Isp'si
+    // (327,07 s, vakum) deniz seviyesi Isp'leriyle (254,79 s) aynı başlık
+    // altında sıralanıp "BEST ISP" seçiliyordu; PERFORMANS'ın Temel Isp
+    // alanı vakum Isp'siyle doluyor, ortamı yazmıyordu.
+    //
+    // Tanım yanıtın KENDİ beyanından okunur, hiçbir sayı türetilmez:
+    //   is_sea_level !== false      -> null (deniz seviyesi: etiket yok,
+    //                                  ekran bugünküyle aynı)
+    //   mode 'vacuum' / basınç 0    -> vakum
+    //   irtifa (altitude_m) varsa   -> "{h} m tasarım irtifası ({p} bar)"
+    //   yoksa basınç                -> "{p} bar tasarım ortamı"
+    // Blok sıvı ve hibrit motorundur (`mode` alanı yalnız bu iki bloğda
+    // var; V307/HİBRİT-ORTAM: hibrit `design_ambient` bloğu `mode`
+    // 'sea_level' / 'pressure' / 'vacuum' ile aynı okuyucudan geçer). Katının
+    // bloğu test ortamını anlatır ve paneller katıda deniz seviyesi Isp'sini
+    // okur — bu okuyucu katıya uygulanmaz.
+    // `key` iki tasarımın AYNI ortamda olup olmadığının kimliğidir (yanıtın
+    // basınç sayısı; irtifası aynı iki tasarım aynı ISA basıncını taşır).
+    const ORTAM_ANAHTARLARI = {
+        vacuum: ['panel.ambient.vacuum', 'vacuum'],
+        altitudeP: ['panel.ambient.altitudeP', '{h} m design altitude ({p} bar)'],
+        altitude: ['panel.ambient.altitude', '{h} m design altitude'],
+        pressure: ['panel.ambient.pressure', '{p} bar design ambient'],
+    };
+
+    function ortamSonlu(v) {
+        return (typeof v === 'number' && isFinite(v)) ? v : null;
+    }
+
+    function ortamTanimi(da) {
+        if (!da || typeof da !== 'object' || da.is_sea_level !== false
+                || typeof da.mode !== 'string') {
+            return null;
+        }
+        const p = ortamSonlu(da.pressure_bar);
+        const h = ortamSonlu(da.altitude_m);
+        if (da.mode === 'vacuum' || p === 0) {
+            return { kind: 'vacuum', key: 'p:0', p: 0, h: null };
+        }
+        if (p === null && h === null) {
+            // Ortam beyan edilmiş ama sayısı yok: tanım yok sayılmaz, adıyla
+            // "beyan edilmedi" kimliği taşır (hiçbir ortamla eşleşmez).
+            return { kind: 'undeclared', key: 'undeclared', p: null, h: null };
+        }
+        return {
+            kind: (h !== null) ? (p !== null ? 'altitudeP' : 'altitude') : 'pressure',
+            key: (p !== null) ? ('p:' + p) : ('h:' + h),
+            p: p, h: h,
+        };
+    }
+
+    // BELİRSİZLİK paneli için: isteğe giden form alanlarından aynı tanım
+    // (fabrikanın kurduğu motor bu alanlarla kurulur; deniz seviyesinde sayfa
+    // bu alanları HİÇ göndermez).
+    function ortamTanimiGirdiden(g) {
+        if (!g || typeof g !== 'object') return null;
+        const kip = g.design_ambient_mode;
+        if (kip === 'vacuum') {
+            return ortamTanimi({ is_sea_level: false, mode: 'vacuum', pressure_bar: 0 });
+        }
+        if (kip === 'altitude') {
+            return ortamTanimi({ is_sea_level: false, mode: 'altitude',
+                                 altitude_m: ortamSonlu(g.design_ambient_altitude_m) });
+        }
+        if (kip === 'pressure') {
+            return ortamTanimi({ is_sea_level: false, mode: 'pressure',
+                                 pressure_bar: ortamSonlu(g.design_ambient_pressure_bar) });
+        }
+        // V307/HİBRİT-ORTAM: hibrit gövdesi tasarım ortamını
+        // `atmospheric_pressure` (bar) ile taşır (sıvı/katı gövdelerinde bu
+        // ad yok). ISA deniz seviyesi (1,01325 bar) etiketsiz; alan gövdede
+        // okunamıyorsa tanım "beyan edilmedi" kimliği taşır (hiçbir ortamla
+        // eşleşmez; sayı varsayılmaz).
+        if (kip === undefined && g.atmospheric_pressure !== undefined) {
+            const pHib = (typeof g.atmospheric_pressure === 'number')
+                ? ortamSonlu(g.atmospheric_pressure) : null;
+            if (pHib === 1.01325) return null;
+            return ortamTanimi({ is_sea_level: false,
+                                 mode: pHib === 0 ? 'vacuum' : 'pressure',
+                                 pressure_bar: pHib });
+        }
+        return null;
+    }
+
+    // Etiketin anahtarı + parametreleri. Basınç dört basamakla (sıvı
+    // sayfasının tasarım ortamı satırıyla aynı: liquid.html
+    // liqDesignAmbientNote `sayi(da.pressure_bar, 4)`); ayraç tf'de.
+    function ortamEtiketParcalari(t) {
+        if (!t) return null;
+        if (t.kind === 'undeclared') {
+            return { key: 'panel.ambient.undeclared',
+                     fb: 'design ambient not declared by the result', params: null };
+        }
+        const k = ORTAM_ANAHTARLARI[t.kind];
+        const params = (t.kind === 'vacuum') ? null : {};
+        if (params && t.h !== null) params.h = Math.round(t.h);
+        if (params && t.p !== null) params.p = t.p.toFixed(4);
+        return { key: k[0], fb: k[1], params: params };
+    }
+
+    function ortamEtiketMetni(t) {
+        const e = ortamEtiketParcalari(t);
+        if (!e) return '';
+        return e.params ? U.tf(e.key, e.params, e.fb) : T(e.key, e.fb);
+    }
+
+    // Dil değişince kendiliğinden çevrilen düğüm (data-i18n-params; tf).
+    function ortamEtiketHtml(t) {
+        const e = ortamEtiketParcalari(t);
+        if (!e) return '';
+        return '<span data-isp-ambient="' + U.esc(t.kind) + '" data-i18n="'
+            + U.esc(e.key) + '"'
+            + (e.params ? ' data-i18n-params="' + U.esc(JSON.stringify(e.params)) + '"' : '')
+            + '>' + U.esc(ortamEtiketMetni(t)) + '</span>';
+    }
+
+    // V307/KÜÇÜKLER-2 (kalem 3, 4): tanım -> uçların ortam kaydı
+    // ({mode, pressure_bar, altitude_m}; app.py ``_tasarim_ortami_kaydi_oku``).
+    // null = deniz seviyesi (okunan Isp deniz seviyesi Isp'sidir); sayı
+    // türetilmez, tanımın sayısı aynen geçer. Sunucu etiketi bu panelin
+    // `panel.ambient.*` metniyle aynı ifadeyi yazar.
+    function ortamKaydi(t) {
+        if (!t) return { mode: 'sea_level' };
+        if (t.kind === 'vacuum') return { mode: 'vacuum' };
+        if (t.kind === 'undeclared') return { mode: 'undeclared' };
+        if (t.kind === 'altitudeP' || t.kind === 'altitude') {
+            return { mode: 'altitude', altitude_m: t.h, pressure_bar: t.p };
+        }
+        return { mode: 'pressure', pressure_bar: t.p };
+    }
+
+    window.HRMAIspAmbient = {
+        describe: ortamTanimi,
+        describeInputs: ortamTanimiGirdiden,
+        labelText: ortamEtiketMetni,
+        labelHtml: ortamEtiketHtml,
+        record: ortamKaydi,
+    };
+
+    // PERFORMANS: Temel Isp alanına önerilen sayı motorun tasarım ortamı
+    // Isp'sidir (sıvıda deniz seviyesi dışındaki tasarımda `specific_impulse`
+    // = `isp_design_ambient`). Ortam deniz seviyesi değilse bölümün içinde,
+    // durum satırının önünde GÖRÜNÜR bir not durur (ipucunda saklanmaz);
+    // deniz seviyesinde not yoktur (ekran bugünküyle aynı).
+    const PERF_ORTAM_NOT_ID = 'ad_perf_isp_ambient';
+    let tabanIspOrtami = null;
+    //: V307/KÜÇÜKLER-2 (kalem 4): motorun önerdiği Temel Isp (tohum). Alan
+    //: hâlâ bu sayıyı taşıyorsa ortam kaydı isteğe girer; kullanıcı sayıyı
+    //: değiştirdiyse ortamı bilinmez, kayıt GİRMEZ (ortam varsayılmaz).
+    let tabanIspTohumu = null;
+    // V307/ONARIM-İTKİ-A (M7-ITKI-7): motorun tasarım ortamı kaydı (Temel
+    // Isp tohumundan BAĞIMSIZ). Mach konturu lülenin ortamıdır; Temel Isp
+    // alanı elle değişse de motorun ortamı değişmez. Blok `mode` taşımıyorsa
+    // (katı) null: kayıt gönderilmez, uç bugünkü gibi davranır.
+    let motorOrtamKaydi = null;
+
+    function tabanIspTohumdaMi(v) {
+        if (tabanIspTohumu === null || typeof v !== 'number') return false;
+        if (v === tabanIspTohumu) return true;
+        // Güverte öneriyi alana kendi anlamlı basamağıyla yazar
+        // (analysis_dock dockSigFig; sayı `AnalysisDock.ui.SIGFIG`).
+        const ui = window.AnalysisDock && window.AnalysisDock.ui;
+        const d = ui && ui.SIGFIG;
+        return (typeof d === 'number' && d > 0)
+            ? v === Number(tabanIspTohumu.toPrecision(d)) : false;
+    }
+
+    function tabanIspNotunuYaz() {
+        if (typeof document === 'undefined' || !document.getElementById) return;
+        const sec = document.getElementById('ad_sec_performance');
+        let not = document.getElementById(PERF_ORTAM_NOT_ID);
+        if (!tabanIspOrtami) {
+            if (not && not.parentNode && typeof not.parentNode.removeChild === 'function'
+                    && not.getAttribute && not.getAttribute('data-perf-isp-ambient')) {
+                not.parentNode.removeChild(not);
+            } else if (not) {
+                not.innerHTML = '';
+                if (not.style) not.style.display = 'none';
+            }
+            return;
+        }
+        if (!sec) return;
+        if (!not || !not.getAttribute || !not.getAttribute('data-perf-isp-ambient')) {
+            not = document.createElement('p');
+            not.id = PERF_ORTAM_NOT_ID;
+            not.setAttribute('data-perf-isp-ambient', '1');
+            not.style.cssText = 'font-size:0.74rem; margin:6px 0;'
+                + ' color:var(--hd-orange, #ff8c33); white-space:normal;';
+            const status = document.getElementById('ad_status_performance');
+            if (status && status.parentNode === sec) sec.insertBefore(not, status);
+            else sec.appendChild(not);
+        }
+        if (not.style) not.style.display = '';
+        not.innerHTML = '<span data-i18n="panel.performance.baseIspAmbient">'
+            + U.esc(T('panel.performance.baseIspAmbient',
+                'Base Isp is filled with this motor\'s Isp at its design ambient, '
+                + 'not at sea level:')) + '</span> <strong>'
+            + ortamEtiketHtml(tabanIspOrtami) + '</strong>. '
+            + '<span data-i18n="panel.performance.baseIspAmbientSurface">'
+            + U.esc(T('panel.performance.baseIspAmbientSurface',
+                'The 3D Isp surface is solved for sea-level expansion '
+                + '(Pe = 1 bar); the figure states how it places this '
+                + 'design-point Isp against that basis.')) + '</span>';
+        if (window.I18N && window.I18N.applyTo) window.I18N.applyTo(not);
+    }
+
+    // ------------------------------------------------------------------
     // Dock buildPayload aynası: POST gövdesi HER ZAMAN formdan okunur
     // (panel dock dosyasına dokunmadan aynı sözleşmeyi uygular)
     // ------------------------------------------------------------------
@@ -63,6 +277,11 @@
         // yollamaktansa uç kendi referans çiftine düşsün ve bunu beyan etsin.
         if (sonIticiler.fuel_type) payload.fuel_type = sonIticiler.fuel_type;
         if (sonIticiler.oxidizer_type) payload.oxidizer_type = sonIticiler.oxidizer_type;
+        // V307/KÜÇÜKLER-2 (kalem 4): Temel Isp motorun tohumuysa onun tasarım
+        // ortamı adıyla gider; yüzey künyesi "design ambient: …" der.
+        if (tabanIspTohumdaMi(payload.base_isp)) {
+            payload.design_ambient = ortamKaydi(tabanIspOrtami);
+        }
         return payload;
     }
 
@@ -133,6 +352,26 @@
     }
 
     // İlk sonlu pozitif değer (üretici/tüketici anahtar adı farkları için)
+    //: V307/GRAFİK-BİRİM (kalem 2) — molekül ağırlığının okunduğu yollar,
+    //: thermal_panel.js ``MW_YOLLARI`` ile AYNI sıra (bekçi:
+    //: tests/test_v307_grafik_birim.py): önce motorun kendi Bartz gaz
+    //: çifti (katı), sonra üst düzey ``molecular_weight`` (hibrit, sıvı),
+    //: sonra termokimya kaydı. Hiçbiri yoksa öneri yok, alan boş kalır.
+    const MW_YOLLARI = ['heat_transfer_analysis.bartz_gas_properties.molecular_weight',
+                        'molecular_weight', 'thermochemistry.molecular_weight'];
+
+    function ilkYolSayisi(obj, yollar) {
+        for (let i = 0; i < yollar.length; i++) {
+            let v = obj;
+            const parca = yollar[i].split('.');
+            for (let j = 0; j < parca.length && v !== null && v !== undefined; j++) {
+                v = (typeof v === 'object') ? v[parca[j]] : undefined;
+            }
+            if (typeof v === 'number' && Number.isFinite(v) && v > 0) return v;
+        }
+        return null;
+    }
+
     function firstFinite(obj, keys) {
         for (let i = 0; i < keys.length; i++) {
             const v = Number(obj[keys[i]]);
@@ -151,8 +390,20 @@
         return null;
     }
 
+    // V307/ONARIM-İTKİ-A (M7-ITKI-7): kartın başlık/açıklaması sunucu
+    // metnidir; grafik sözlüğünden (I18N.chartText) geçer — TR ekranda
+    // "Nozzle Mach Distribution Analysis" İngilizce kalıyordu. Kaynak adı
+    // (belge başlığı) özel addır, çevrilmez.
+    function kartMetni(t) {
+        if (!t) return '';
+        return (window.I18N && typeof window.I18N.chartText === 'function')
+            ? window.I18N.chartText(String(t)) : String(t);
+    }
+
     function infoCard(info) {
         if (!info || (!info.title && !info.description)) return '';
+        info = { title: kartMetni(info.title), reference: info.reference,
+                 description: kartMetni(info.description) };
         return `<div style="border:1px solid var(--hd-line, rgba(0,229,255,0.14));
             border-left:3px solid var(--hd-cyan, #00e5ff);
             border-radius:var(--hd-radius-sm, 8px); padding:10px 14px; margin:8px 0;
@@ -209,6 +460,14 @@
         try {
             const payload = readFormPayload();
             payload.analysis_type = analysisType;
+            // V307/ONARIM-İTKİ-A (M7-ITKI-7): Mach konturu motorun tasarım
+            // ortamında çözülür (vakum tasarımı vakumda); kayıt yoksa uç
+            // ortamı adıyla "varsayıldı" diye yazar.
+            if (analysisType === 'nozzle_mach' && motorOrtamKaydi
+                    && payload.ambient_pressure === undefined
+                    && payload.ambient_pressure_bar === undefined) {
+                payload.design_ambient = motorOrtamKaydi;
+            }
             const resp = await fetch(ENDPOINT, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -305,28 +564,96 @@
         drawResponse(figureBlock(root, baslik), data);
     }
 
+    // V307/SEKME-GÜVERTE (NK3-H-7) — TOHUM YOKSA ANALİZ KOŞMAZ.
+    // ÖLÇÜLDÜ (NK3-H, örnek hibrit: Hesapla → Yanma Süresi 0 → Hesapla
+    // reddedildi → PERFORMANS → Analizi Çalıştır; kanıt
+    // docs/scofield/raw/OH/V307/sekme-guverte/olcum_once_bayat.json): son hesap
+    // başarısızken güverte önerilen alanları TANIM VARSAYILANINA döndürüyor
+    // (OH-D37-S4, doğru) ama bu panelin tanım varsayılanları gizli bir motordu
+    // (Pc 50 bar, O/F 3,5, Isp 300 s, ε 16, boğaz 0,001 m², oda Ø 0,1 m,
+    // T_c 3000 K, γ 1,2, ṁ 1 kg/s) ve "Analizi Çalıştır" o motoru çözüp "akış
+    // ayrılması" çiziyordu. Motordan gelen her büyüklüğün tanım değeri artık
+    // BOŞTUR: tohum yoksa alan boş kalır, `required` alanlar boşsa güverte
+    // isteği göndermez ve eksikleri adıyla söyler (dock.missingFields);
+    // kullanıcı değerleri kendisi girerse koşar. İsteğe bağlı boş alan
+    // gövdeye girmez (uç ve figür modülü onu adıyla "varsayıldı" listesine
+    // yazar ya da hiç çizmez). Isı akısı figürünün iki referans düzlemi
+    // (taban / kritik akı) motor büyüklüğü değildir ve kaynaksız sayıyla
+    // ön doldurulmaz: boşsa çizilmez (app.py ``_APA_REQUIRED_ANY_OF``
+    // künyesi: "sorulmamış bir referans çizgisi çizilmez").
     const PERF_FIELDS = [
-            ['chamber_pressure', 'Chamber Pressure (bar)', 50, 1, 'common.f.chamberPressureBar', 'panel.performance.help.chamber_pressure'],
+            ['chamber_pressure', 'Chamber Pressure (bar)', '', 1, 'common.f.chamberPressureBar', 'panel.performance.help.chamber_pressure'],
             // V301/H-PANEL (NK-73): alan TASARIM noktasının O/F'sidir (yardım
             // metni ve tohum: motorun of_ratio'su) — etiket "Optimum" diyordu.
             // Alan kimliği (optimal_of_ratio) uç sözleşmesidir, değişmez.
-            ['optimal_of_ratio', 'Design O/F Ratio', 3.5, 0.1, 'panel.performance.f.designOf', 'panel.performance.help.optimal_of_ratio'],
-            ['base_isp', 'Base Isp (s)', 300, 5, 'common.f.baseIsp', 'panel.performance.help.base_isp'],
-            ['expansion_ratio', 'Expansion Ratio', 16, 0.5, 'common.f.expansionRatio', 'panel.performance.help.expansion_ratio'],
-            ['throat_area', 'Throat Area (m²)', 0.001, 0.0001, 'common.f.throatAreaM2', 'panel.performance.help.throat_area'],
-            ['nozzle_length', 'Nozzle Length (m)', 0.1, 0.01, 'common.f.nozzleLengthM', 'panel.performance.help.nozzle_length'],
-            ['chamber_length', 'Chamber Length (m)', 0.5, 0.01, 'common.f.chamberLengthM', 'panel.performance.help.chamber_length'],
+            ['optimal_of_ratio', 'Design O/F Ratio', '', 0.1, 'panel.performance.f.designOf', 'panel.performance.help.optimal_of_ratio'],
+            ['base_isp', 'Base Isp (s)', '', 5, 'common.f.baseIsp', 'panel.performance.help.base_isp'],
+            ['expansion_ratio', 'Expansion Ratio', '', 0.5, 'common.f.expansionRatio', 'panel.performance.help.expansion_ratio'],
+            ['throat_area', 'Throat Area (m²)', '', 0.0001, 'common.f.throatAreaM2', 'panel.performance.help.throat_area'],
+            ['nozzle_length', 'Nozzle Length (m)', '', 0.01, 'common.f.nozzleLengthM', 'panel.performance.help.nozzle_length'],
+            ['chamber_length', 'Chamber Length (m)', '', 0.01, 'common.f.chamberLengthM', 'panel.performance.help.chamber_length'],
             ['burn_time', 'Burn Time (s)', '', 0.5, 'common.f.burnTimeS', 'panel.performance.help.burn_time'], // OH-D37-S6: süre uydurulmaz — boşsa gövdeye girmez (safety_panel.js deseni)
-            ['base_heat_flux', 'Base Heat Flux (W/m²)', 2000000, 100000, 'common.f.baseHeatFlux', 'panel.performance.help.base_heat_flux'],
-            ['critical_heat_flux', 'Critical Heat Flux (MW/m²)', 4.0, 0.5, 'common.f.criticalHeatFlux', 'panel.performance.help.critical_heat_flux'],
+            ['base_heat_flux', 'Base Heat Flux (W/m²)', '', 100000, 'common.f.baseHeatFlux', 'panel.performance.help.base_heat_flux'],
+            ['critical_heat_flux', 'Critical Heat Flux (MW/m²)', '', 0.5, 'common.f.criticalHeatFlux', 'panel.performance.help.critical_heat_flux'],
             // Bartz ısı akısı çözücüsünün gaz hâli girdileri (bulgu 6): bunlar
             // gönderilmediğinde backend 3000 K / gamma 1.2 / 1 kg/s
             // varsayılanlarına düşüyor ve farklı itergaçlar aynı grafiği veriyordu.
-            ['chamber_temperature', 'Chamber Temperature (K)', 3000, 50, 'common.f.chamberTemperatureK', 'panel.performance.help.chamber_temperature'],
-            ['gamma', 'Gamma (frozen)', 1.2, 0.01, 'common.f.gammaFrozen', 'panel.performance.help.gamma'],
-            ['mdot_total', 'Total Mass Flow (kg/s)', 1.0, 0.1, 'common.f.mdotTotal', 'panel.performance.help.mdot_total'],
-            ['chamber_diameter', 'Chamber Diameter (m)', 0.1, 0.01, 'common.f.chamberDiameterM', 'panel.performance.help.chamber_diameter'],
+            ['chamber_temperature', 'Chamber Temperature (K)', '', 50, 'common.f.chamberTemperatureK', 'panel.performance.help.chamber_temperature'],
+            ['gamma', 'Gamma (frozen)', '', 0.01, 'common.f.gammaFrozen', 'panel.performance.help.gamma'],
+            // V307/GRAFİK-BİRİM (kalem 2): MW alanı YOKTU — Mach / ısı akısı
+            // figürleri motorun yayımladığı MW yerine beyanlı 24 g/mol
+            // varsayımıyla çiziliyordu. İsteğe bağlı: boşsa gövdeye girmez,
+            // figür varsayımını alt başlıkta adıyla yazar.
+            ['molecular_weight', 'Molecular Weight (g/mol)', '', 0.5, 'common.f.molecularWeight', 'panel.performance.help.molecular_weight'],
+            ['mdot_total', 'Total Mass Flow (kg/s)', '', 0.1, 'common.f.mdotTotal', 'panel.performance.help.mdot_total'],
+            ['chamber_diameter', 'Chamber Diameter (m)', '', 0.01, 'common.f.chamberDiameterM', 'panel.performance.help.chamber_diameter'],
     ];
+
+    //: NK3-H-7: motorun tanımladığı büyüklükler — boşsa istek GÖNDERİLMEZ
+    //: (güverte `required` sözleşmesi; panelde olmayan ad yok sayılır, katı
+    //: kaydında O/F ve taban Isp alanı yoktur).
+    const PERF_REQUIRED = ['chamber_pressure', 'optimal_of_ratio', 'base_isp',
+                           'expansion_ratio', 'throat_area', 'chamber_length',
+                           'chamber_temperature', 'gamma', 'chamber_diameter'];
+
+    // V307/ONARIM-İTKİ-A (M7-ITKI-8): motorun itici kimliği. ÖLÇÜLDÜ
+    // (mühendis turu H4_perf): hibrit sonucu üst düzeyde `oxidizer_type`
+    // taşımıyor (yalnız `fuel_type`); çözücünün kendi girdisi
+    // `combustion_analysis.inputs` içinde. Sıra: üst düzey ad, sonra
+    // çözücü girdisi. Bulunamazsa null: uç referans çifte düşer ve bunu
+    // adıyla yazar (kimlik uydurulmaz).
+    function iticiKimligi(m) {
+        const ci = (m && m.combustion_analysis && typeof m.combustion_analysis === 'object'
+                    && m.combustion_analysis.inputs
+                    && typeof m.combustion_analysis.inputs === 'object')
+            ? m.combustion_analysis.inputs : {};
+        const ad = function (v) { return (typeof v === 'string' && v.trim()) ? v : null; };
+        return {
+            fuel_type: ad(m && m.fuel_type) || ad(m && m.fuel) || ad(ci.fuel_type),
+            oxidizer_type: ad(m && m.oxidizer_type) || ad(m && m.oxidizer) || ad(ci.oxidizer_type),
+        };
+    }
+
+    // V307/ONARIM-İTKİ-A (M7-ITKI-8): güvertenin İLK koşusu (Analizi
+    // Çalıştır → 3B yüzey) gövdeyi güvertenin kendi `buildPayload`ıyla
+    // kurar; panelin `readFormPayload` eklerini (itici kimliği, Temel Isp'nin
+    // tasarım ortamı) taşımıyordu ve yüzey RP-1/LOX motorunda bile N2O/HTPB
+    // referans çiftiyle çözülüyordu. Güvertenin form dışı bağlam kanalı
+    // (`contextFromResults`; form alanını ezmez) aynı ekleri verir.
+    function baglamSonuctan(r, govde) {
+        const m = (r && r.motor) || r || {};
+        sonIticiler = iticiKimligi(m);
+        const b = {};
+        if (sonIticiler.fuel_type) b.fuel_type = sonIticiler.fuel_type;
+        if (sonIticiler.oxidizer_type) b.oxidizer_type = sonIticiler.oxidizer_type;
+        // readFormPayload ile aynı kural: Temel Isp motorun tohumuysa
+        // tasarım ortamı adıyla gider (güvertenin kurduğu gövdeden okunur).
+        const g = (govde && typeof govde === 'object') ? govde : readFormPayload();
+        if (tabanIspTohumdaMi(g.base_isp)) {
+            b.design_ambient = ortamKaydi(tabanIspOrtami);
+        }
+        return b;
+    }
 
     window.AnalysisDock.register({
         id: 'performance',
@@ -336,7 +663,9 @@
         endpoint: ENDPOINT,
         motorTypes: ['hybrid', 'liquid'],
         fields: PERF_FIELDS,
+        required: PERF_REQUIRED,
         fromResults: fromResults,
+        contextFromResults: baglamSonuctan,
         render: render,
     });
 
@@ -352,6 +681,9 @@
             PERF_FIELDS.filter(function (f) {
                 return SURFACE_ONLY_FIELDS.indexOf(f[0]) === -1;
             })),
+        required: PERF_REQUIRED.filter(function (k) {
+            return SURFACE_ONLY_FIELDS.indexOf(k) === -1;
+        }),
         fromResults: fromResults,
         render: renderSolid,
     });
@@ -373,10 +705,10 @@
         // Kimlik burada yakalanır (motor sonucu tek doğruluk kaynağıdır) ve
         // readFormPayload her istekte ekler; arayüze yeni alan eklenmez,
         // kullanıcının elle tutarlı tutması gerekmez.
-        sonIticiler = {
-            fuel_type: m.fuel_type || m.fuel || null,
-            oxidizer_type: m.oxidizer_type || m.oxidizer || null,
-        };
+        sonIticiler = iticiKimligi(m);
+        motorOrtamKaydi = (m.design_ambient && typeof m.design_ambient === 'object'
+                           && typeof m.design_ambient.mode === 'string')
+            ? ortamKaydi(ortamTanimi(m.design_ambient)) : null;
         const sug = {
             chamber_pressure: m.chamber_pressure,
             burn_time: m.burn_time,
@@ -384,6 +716,8 @@
             chamber_temperature: m.chamber_temperature,
             gamma: m.gamma,
         };
+        const mw = ilkYolSayisi(m, MW_YOLLARI);
+        if (mw !== null) sug.molecular_weight = mw;
         // O/F: üretici anahtar adları tipe göre değişir (bulgu 4) —
         // hibrit of_ratio, sıvı mixture_ratio / optimal_mixture_ratio.
         const of = firstFinite(m, ['of_ratio', 'mixture_ratio',
@@ -406,6 +740,12 @@
         } else if (thrust !== null && mdot !== null && mdot > 0) {
             sug.base_isp = Number((thrust / (mdot * 9.80665)).toPrecision(5));
         }
+        // V307/GÜVERTE-ORTAM: sıvıda deniz seviyesi dışındaki tasarımda
+        // önerilen Temel Isp tasarım ortamının Isp'sidir (`specific_impulse`
+        // = `isp_design_ambient`; sayı DEĞİŞMEDİ) — ortamı görünür notta.
+        tabanIspOrtami = (sug.base_isp !== undefined) ? ortamTanimi(m.design_ambient) : null;
+        tabanIspTohumu = (sug.base_isp !== undefined) ? sug.base_isp : null;
+        tabanIspNotunuYaz();
         // Kütle debisi: yoksa Isp tanımından türetilir (ṁ = F/(Isp·g0))
         if (mdot !== null && mdot > 0) {
             sug.mdot_total = mdot;
@@ -434,6 +774,8 @@
         _render: render,
         _parseFigure: parseFigure,
         _readFormPayload: readFormPayload,
+        _contextFromResults: baglamSonuctan,
+        _propellantIdentity: iticiKimligi,
         //: OH-D32-01 — emekli `_siLength` çıkarımının yerine ADLI yokluk:
         //: son `fromResults` turunda birimi çözülemeyen alan adları.
         _unresolvedGeometry: function () {
@@ -442,5 +784,8 @@
         // Birim sözleşmesi testi (tests/test_unit_contract.py) bu saf
         // fonksiyonu gerçek motor yanıtı üzerinde node ile çalıştırır.
         _fromResults: fromResults,
+        //: V307/GÜVERTE-ORTAM — son fromResults turunda önerilen Temel
+        //: Isp'nin tasarım ortamı (deniz seviyesinde null).
+        _baseIspAmbient: function () { return tabanIspOrtami; },
     };
 })();

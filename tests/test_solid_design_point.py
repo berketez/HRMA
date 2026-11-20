@@ -434,7 +434,12 @@ def test_no_target_means_no_sizing():
     # V301/K-D (K-C2 DEVİR D1): varsayılan tane boyu 500 -> 400 mm; tepe
     # 5525.91 -> 4392.38 N (4392,38333975953; ölçüldü, K-D/RAPOR.md §D1;
     # tolerans aynı). Aynı yığın boyunun 4/5'i: yanan yüzey ve boğaz küçülür.
-    assert stats['peak'] == pytest.approx(4392.38, rel=1e-3)
+    # V307 KATI-DOĞRULAMA faz 3 (B1, 16 Kas 2026): tepe 4392.38 -> 4251.86 N
+    # (4251,864385905223; -%3,20). Varsayılan itici apcp alüminyumludur ve
+    # bu motorun boğazı yayımlanmış pencerenin içindedir; modülün iki fazlı
+    # kayıp tahmini artık itki katsayısına uygulanır. Basınç eğrisi ve süre
+    # değişmedi (aşağıdaki süre çapası aynı). Tolerans aynı.
+    assert stats['peak'] == pytest.approx(4251.86, rel=1e-3)
     # v2.5.2 (Codex bulgusu): yanma suresi ve impuls son integrasyon adimini
     # atliyordu — ornekler t ilerlemeden once saklaniyor, son web artisindan
     # sonraki araligi trapz disarida birakiyordu. Terminal tukenis ornegi

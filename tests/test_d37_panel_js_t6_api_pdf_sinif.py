@@ -50,10 +50,15 @@ def _kahin(ad):
 TUM_ADLAR = sorted(set(KATALOG) | set(ALIASES))
 GOVDE = {'chamber_pressure': 40.0, 'propellant_mass': 2.40667,
          'chamber_diameter': 0.081, 'wall_thickness': 0.002,
-         'thrust': 1299.71, 'burn_time': 2.27716, 'material': 'steel'}
+         'thrust': 1299.71, 'burn_time': 2.27716, 'material': 'steel',
+         # V307/GÜVERTE-ISIL kalem 4: oda sıcaklığı zorunlu (uçta ve PDF
+         # güvenlik bölümünde; 3000 K varsayılanı kalktı). Eski örtük değer
+         # açık yazıldı: sayılar bit-aynı.
+         'chamber_temperature': 3000.0}
 PDF_GOVDE = {'chamber_pressure': 40.0, 'chamber_diameter': 0.081,
              'propellant_mass': 2.40667, 'thrust': 1299.71,
              'burn_time': 2.27716,
+             'chamber_temperature': 3000.0,
              'chamber_wall_policy': {'wall_thickness_m': 0.002}}
 
 

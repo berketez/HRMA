@@ -6,6 +6,12 @@
     <!-- Yükleme bayt tavanları (app.py inject_upload_limits; import_ui.js okur;
          V3 güvenlik 5. tur): sayı JS'e kopyalanmaz. -->
     <meta name="hrma-upload-limits" content='{{ upload_limits|tojson }}'>
+    <!-- V307/GÜVERTE-ISIL: ısıl koruma sekmesinin kip başına zorunlu alanları
+         = ucun kapısı (app.py thermal_protection_form_contract); protection_panel.js okur. -->
+    <meta name="hrma-tp-mode-required" content='{{ tp_mode_required|tojson }}'>
+    <!-- V307/KÜÇÜKLER (kalem 6): güvenlik panelinin zorunlu alan kümesi = ucun
+         kapısı (app.py SAFETY_REQUIRED_FIELDS); safety_panel.js okur. -->
+    <meta name="hrma-safety-required" content='{{ safety_required|tojson }}'>
     <!-- i18n katmanı: çekirdek + bu sayfanın sözlüğü. Sıra ÖNEMSİZ (register kuyruğu
          var) ama okunabilirlik için çekirdek önce yükleniyor. -->
     <script src="/static/js/i18n.js"></script>
@@ -813,12 +819,55 @@
                         <option value="ox_rich" data-i18n="liq.ui.preburner_ox_rich">Oxidizer-Rich</option>
                     </select>
                 </div>
+                <!-- V307/SIVI-ORTAM: TASARIM ORTAMI. İtki bu ortamdaki motor
+                     itkisidir; nozulun yapışık akışı bu ortamda denetlenir.
+                     Varsayılan deniz seviyesi: o seçimde hesap gövdesine yeni
+                     alan GİRMEZ (liqDesignAmbientPayload), sonuçlar aynıdır.
+                     İrtifa ve basınç alanları yalnız kendi kiplerinde görünür
+                     (syncLiquidDesignAmbientFields). -->
                 <div class="form-group">
-                    <label for="thrust">
-                        <span data-i18n="liq.ui.target_thrust">Target Engine Thrust (sea level)</span> <span class="unit">(N)</span>
+                    <label for="design_ambient_mode">
+                        <span data-i18n="liq.ui.design_ambient">Design Ambient</span>
                         <div class="tooltip">
                             <div class="tooltip-icon">?</div>
-                            <span class="tooltip-text" data-i18n="liq.ui.target_thrust_level_for_the_liquid">Engine thrust at the sea-level design point, in N: ambient pressure 1.01325 bar (ISA sea level). For an open cycle (gas generator, tap-off) it is the ENGINE thrust = main chamber + turbine exhaust; the propellant flow, the throat and the tanks are sized from it. A vacuum thrust cannot be entered as the target: the vacuum thrust is computed from this design point and published separately. Accepted range: 100 N - 10 MN. This field is a required design point: left blank, the request is refused by name.</span>
+                            <span class="tooltip-text" data-i18n="liq.ui.design_ambient_tip">Ambient pressure at which the engine is designed. The thrust you enter is the engine thrust at this ambient pressure; the propellant flow and the throat are sized there, and the nozzle is checked for attached flow there (Summerfield criterion). Sea level: 1.01325 bar. Altitude: the standard-atmosphere (ISA) pressure of the altitude you enter. Ambient pressure: the pressure you enter. Vacuum: zero ambient pressure, for upper-stage and space engines. A nozzle that separates at sea level is a valid altitude or vacuum design; the results then state the sea-level condition (ground test) separately. Any choice other than sea level needs the nozzle expansion ratio. Left unchanged, the design ambient is sea level.</span>
+                        </div>
+                    </label>
+                    <select id="design_ambient_mode">
+                        <option value="sea_level" data-i18n="liq.ui.design_ambient_sea_level">Sea level (1.01325 bar)</option>
+                        <option value="altitude" data-i18n="liq.ui.design_ambient_altitude">Altitude (standard atmosphere)</option>
+                        <option value="pressure" data-i18n="liq.ui.design_ambient_pressure">Ambient pressure</option>
+                        <option value="vacuum" data-i18n="liq.ui.design_ambient_vacuum">Vacuum</option>
+                    </select>
+                </div>
+                <div class="form-group" data-liq-ambient-show="altitude" style="display: none;">
+                    <label for="design_ambient_altitude_m">
+                        <span data-i18n="liq.ui.design_ambient_altitude_m">Design Altitude</span> <span class="unit">(m)</span>
+                        <div class="tooltip">
+                            <div class="tooltip-icon">?</div>
+                            <span class="tooltip-text" data-i18n="liq.ui.design_ambient_altitude_m_tip">Design altitude above sea level, in m (geometric altitude). The design ambient pressure is the standard-atmosphere (ISA, US Standard Atmosphere 1976) pressure at this altitude, the same atmosphere the altitude performance table and the trajectory use. It is read only when the design ambient is Altitude; left blank there, the request is refused by name. Accepted 0-84852.</span>
+                        </div>
+                    </label>
+                    <input type="number" id="design_ambient_altitude_m" placeholder="required for altitude design"
+                           data-i18n-placeholder="liq.attr.design_ambient_altitude_required" min="0" max="84852" step="100">
+                </div>
+                <div class="form-group" data-liq-ambient-show="pressure" style="display: none;">
+                    <label for="design_ambient_pressure_bar">
+                        <span data-i18n="liq.ui.design_ambient_pressure_bar">Design Ambient Pressure</span> <span class="unit">(bar)</span>
+                        <div class="tooltip">
+                            <div class="tooltip-icon">?</div>
+                            <span class="tooltip-text" data-i18n="liq.ui.design_ambient_pressure_bar_tip">Design ambient pressure, in bar. The engine thrust you enter is the thrust at this ambient pressure. It is read only when the design ambient is Ambient pressure; left blank there, the request is refused by name. 0 is vacuum; 1.01325 is sea level. Accepted 0-1.01325.</span>
+                        </div>
+                    </label>
+                    <input type="number" id="design_ambient_pressure_bar" placeholder="required for pressure design"
+                           data-i18n-placeholder="liq.attr.design_ambient_pressure_required" min="0" max="1.01325" step="0.001">
+                </div>
+                <div class="form-group">
+                    <label for="thrust">
+                        <span data-i18n="liq.ui.target_thrust">Target Engine Thrust (at the design ambient)</span> <span class="unit">(N)</span>
+                        <div class="tooltip">
+                            <div class="tooltip-icon">?</div>
+                            <span class="tooltip-text" data-i18n="liq.ui.target_thrust_level_for_the_liquid">Engine thrust at the design point, in N, at the design ambient selected in the Design Ambient field: sea level (1.01325 bar) by default, the pressure of the entered altitude, the entered ambient pressure, or vacuum. For an open cycle (gas generator, tap-off) it is the ENGINE thrust = main chamber + turbine exhaust; the propellant flow, the throat and the tanks are sized from it. To design from a vacuum thrust select the vacuum design ambient; the vacuum thrust of a sea-level or altitude design is computed from this design point and published separately. Accepted range: 100 N - 10 MN. This field is a required design point: left blank, the request is refused by name.</span>
                         </div>
                     </label>
                     <input type="number" id="thrust" placeholder="required (no default)"
@@ -1113,7 +1162,7 @@
                         <span data-i18n="liq.ui.injector_material">Injector Plate Material</span> <span class="optional-mark" data-i18n="liq.ui.optional_mark">(optional)</span>
                         <div class="tooltip">
                             <div class="tooltip-icon">?</div>
-                            <span class="tooltip-text" data-i18n="liq.ui.injector_material_tip">Material of the injector face plate. Used in the injector plate structural check: a clamped circular plate (Roark Table 11.2, case 10b) of the chamber diameter under the injector pressure drop, with ASME PG-52 ligament efficiency from the fuel + oxidizer hole plan (all holes at the larger diameter, conservative). It gives the plate thickness that meets the Structural Safety Factor from the room-temperature yield strength; the page has no plate-thickness input. That sized plate is also the injector mass in the engine dry mass and the plate the CAD draws (one plate, one number). Not run for pintle, coaxial and swirl elements (no drilled-hole plan; the result says why). Empty: the check is not run and the injector is not weighed (not in the dry mass). An unknown name is rejected.</span>
+                            <span class="tooltip-text" data-i18n="liq.ui.injector_material_tip">Material of the injector face plate. Used in the injector plate structural check: a clamped circular plate (Roark Table 11.2, case 10b) of the chamber diameter, with ASME PG-52 ligament efficiency from the fuel + oxidizer hole plan (all holes at the larger diameter, conservative), in two load cases: operating (the injector pressure drop) and start/shutdown (the absolute manifold pressure, chamber pressure + injector pressure drop, against vacuum, while the chamber is not pressurised; Huzel and Huang, NASA SP-125, p. 129). The plate is sized for the Structural Safety Factor (on room-temperature yield strength) in the case that needs the thicker plate and rounded up to the next standard plate; the verdict is the lower safety factor of the two. The page has no plate-thickness input. Pressure surges (water hammer) and thermal stress are not modelled. That plate is also the injector mass in the engine dry mass and the plate the CAD draws (one plate, one number). Not run for pintle, coaxial and swirl elements (no drilled-hole plan; the result says why). Empty: the check is not run and the injector is not weighed (not in the dry mass). An unknown name is rejected.</span>
                         </div>
                     </label>
                     <select id="injector_material" autocomplete="off"><option value="" selected data-i18n="liq.ui.injector_material_not_selected">Not selected (plate check not run)</option><!-- {% for o in liquid_injector_material_options().options %} --><option value="{{ o.value }}" data-i18n="liq.injmat.{{ o.material_key }}"{% for pr in o.properties %} data-{{ pr.id|replace('_', '-') }}="{{ pr.value }}"{% endfor %}>{{ o.name }}</option><!-- {% endfor %} --></select>
@@ -1291,7 +1340,7 @@
                         <span data-i18n="liq.ui.nozzle_expansion_ratio_e">Nozzle Expansion Ratio εe</span>
                         <div class="tooltip">
                             <div class="tooltip-icon">?</div>
-                            <span class="tooltip-text" data-i18n="liq.ui.exit_area_to_throat_area_ratio">Exit area to throat area ratio (Ae/At). It sets the nozzle exit and with it the thrust coefficient: a larger ratio raises the vacuum specific impulse but over-expands the nozzle at sea level, and at a low chamber pressure the flow separates and the sea-level thrust the engine is sized for collapses (the results warn about separation). Leave it empty: the solver matches the exit pressure to sea-level ambient pressure (ambient-matched; the results name the source of the ratio). Accepted 1.5-300.</span>
+                            <span class="tooltip-text" data-i18n="liq.ui.exit_area_to_throat_area_ratio">Exit area to throat area ratio (Ae/At). It sets the nozzle exit and with it the thrust coefficient: a larger ratio raises the vacuum specific impulse but over-expands the nozzle at higher ambient pressure; when the exit pressure falls below 0.4 times the design ambient pressure the flow separates and the design is refused by name with the largest attached ratio. In a sea-level design the field may be left empty: the solver matches the exit pressure to sea-level ambient pressure (ambient-matched; the results name the source of the ratio). In an altitude, ambient-pressure or vacuum design the ratio is required: left blank there, the request is refused by name. Accepted 1.5-300.</span>
                         </div>
                     </label>
                     <!-- V306/UÇUŞ-KÜTLE (kalem 3): kaynaksız 50 varsayılanı kaldırıldı.
@@ -1830,6 +1879,9 @@
                         <div class="metrics-section">
                             <h3 data-i18n="liq.ui.performance_summary">Performance Summary</h3>
                             <div id="performanceMetrics"></div>
+                            <!-- V307/SIVI-ORTAM: tasarım ortamı + yer testi notu
+                                 (yalnız deniz seviyesi dışındaki tasarımda dolar). -->
+                            <div id="liqDesignAmbientNote" class="design-ambient-note" style="display: none; margin-top: 12px; font-size: 13px; line-height: 1.5; color: #c9d7e0;"></div>
                         </div>
                         
                         <!-- Engine Specifications -->
@@ -2684,7 +2736,11 @@
                 s.push(satir(T('liq.mat.prop_conductivity', 'Thermal conductivity (room temperature):'), numTxt(o.thermal_conductivity_w_mk, 1) + ' W/m·K'));
             s.push('<div>' + T('liq.mat.nozzle_same_material', 'The same material is used along the cooled nozzle (the station march uses it); a separate nozzle material analysis is not in this version.') + '</div>');
             if (o.source) {
-                const src = (globalThis.escapeNoticeText || String)(String(o.source));
+                // V307/DİL-SUNUCU-2 DEVİR (b): malzeme künyesi kullanıcının dilinde
+                // (I18N.serverText; tanınmazsa AYNEN).
+                const srvMetin = (window.I18N && typeof window.I18N.serverText === 'function')
+                    ? window.I18N.serverText(String(o.source)) : String(o.source);
+                const src = (globalThis.escapeNoticeText || String)(srvMetin);
                 s.push('<div style="opacity:0.85;">' + T('liq.mat.prop_source', 'Source:') + ' ' + src + '</div>');
             }
             kutu.innerHTML = s.join('');
@@ -3264,6 +3320,13 @@
                 if (typeof _eskiSonucBandi === 'function') _eskiSonucBandi(false);
                 currentResults = results;
                 // A1 — uçuş köprüsü (bkz. app.js'teki eş çağrı).
+                // V307/SIVI-ORTAM: irtifa/vakum tasarımında nozul deniz
+                // seviyesinde ayrılıyorsa yerden kalkan araç YOKTUR (deniz
+                // seviyesi itkisi yayımlanmaz). V307/FS-KÜÇÜK (kalem 4): uç
+                // bu aracı artık ADIYLA reddeder (sea_level_thrust_not_
+                // published); köprü reddi kaydeder, önceki hesabın aracı
+                // kalkar ve Fırlatma Sahası nedeni motor sayfasıyla aynı
+                // metinle yazar ("bu oturumda motor hesaplanmadı" değil).
                 if (window.FlightHandoff) {
                     window.FlightHandoff.publish(results, { motor_type: 'liquid' });
                 }
@@ -3514,6 +3577,60 @@
             if (kesit) kesit.style.display = '';
         }
 
+        // V307/SIVI-ORTAM — sonucun tasarım ortamı bloğu; deniz seviyesi
+        // tasarımında null (sayfa o durumda bu girdiden önceki gibi çizer).
+        function liqDesignAmbientOf(results) {
+            const da = results && results.design_ambient;
+            return (da && typeof da === 'object' && da.is_sea_level === false) ? da : null;
+        }
+        // Tasarım ortamı + yer testi (deniz seviyesi) notu. Sayıların hepsi
+        // yanıtın design_ambient bloğundandır; blok yoksa not basılmaz.
+        function liqDesignAmbientNote(results) {
+            const kutu = document.getElementById('liqDesignAmbientNote');
+            if (!kutu) return;
+            const da = liqDesignAmbientOf(results);
+            if (!da) { kutu.style.display = 'none'; kutu.textContent = ''; return; }
+            const sayi = function (v, d) {
+                return (typeof v === 'number' && isFinite(v)) ? numTxt(v, d) : null;
+            };
+            const esc = (globalThis.escapeNoticeText || String);
+            const satirlar = [];
+            const pBar = sayi(da.pressure_bar, 4);
+            if (da.mode === 'vacuum') {
+                satirlar.push(T('liq.msg.design_ambient_line_vacuum',
+                    'Design ambient: vacuum (0 bar). The thrust you entered is the vacuum thrust; the propellant flow and the throat are sized there.'));
+            } else if (da.mode === 'altitude' && sayi(da.altitude_m, 0) !== null && pBar !== null) {
+                satirlar.push(TF('liq.msg.design_ambient_line_altitude',
+                    { alt: sayi(da.altitude_m, 0), p: pBar },
+                    'Design ambient: {alt} m altitude, standard atmosphere pressure {p} bar. The thrust you entered is the thrust at that ambient; the propellant flow and the throat are sized there.'));
+            } else if (pBar !== null) {
+                satirlar.push(TF('liq.msg.design_ambient_line_pressure', { p: pBar },
+                    'Design ambient: {p} bar ambient pressure. The thrust you entered is the thrust at that ambient; the propellant flow and the throat are sized there.'));
+            }
+            const ds = da.sea_level || null;
+            if (ds && ds.status === 'attached'
+                    && sayi(ds.thrust_N, 0) !== null && sayi(ds.isp_s, 1) !== null) {
+                satirlar.push(TF('liq.msg.ground_test_attached',
+                    { pe: sayi(ds.exit_pressure_bar, 4), sep: sayi(ds.separation_pressure_bar, 4),
+                      f: sayi(ds.thrust_N / 1000, 2), isp: sayi(ds.isp_s, 1) },
+                    'Ground test at sea level (1.01325 bar): the nozzle flows attached (exit pressure {pe} bar, separation pressure {sep} bar). Sea-level thrust {f} kN, sea-level Isp {isp} s.'));
+            } else if (ds && ds.status === 'separated') {
+                const epsMax = sayi(ds.max_attached_expansion_ratio_2dp, 2);
+                satirlar.push(TF('liq.msg.ground_test_separated',
+                    { pe: sayi(ds.exit_pressure_bar, 4), sep: sayi(ds.separation_pressure_bar, 4) },
+                    'Ground test at sea level (1.01325 bar): the nozzle separates (exit pressure {pe} bar is below the separation pressure {sep} bar: 0.4 times ambient, Summerfield criterion on the one-dimensional exit pressure). Attached-flow relations do not hold there, so no sea-level thrust or Isp is published. A contoured nozzle whose wall pressure at the exit is higher than the one-dimensional value can stay attached; the wall pressure distribution is not solved here.')
+                    + (epsMax !== null ? ' ' + TF('liq.msg.ground_test_eps_max', { eps: epsMax },
+                        'At this chamber pressure the largest expansion ratio that stays attached at sea level is {eps}.') : ''));
+            } else if (ds) {
+                satirlar.push(T('liq.msg.ground_test_not_evaluated',
+                    'Ground test at sea level: not evaluated for this design (no sea-level number is published).'));
+            }
+            kutu.innerHTML = satirlar.map(function (t) {
+                return '<p style="margin: 6px 0;">' + esc(t) + '</p>';
+            }).join('');
+            kutu.style.display = satirlar.length ? '' : 'none';
+        }
+
         function displayResults(results) {
             document.getElementById('results').style.display = 'block';
             // V306/SIVI-CEKET-A (K5_KARAR EK7): kapı bandı; 'design'
@@ -3563,16 +3680,49 @@
             // odası + lüle Isp'si (ana akış debisine göre) ayrı kartta.
             const _defter = results.mass_flow_ledger || null;
             const _defterKapali = !!(_defter && _defter.status === 'open_cycle_closed');
-            const metrics = [
+            // V307/SIVI-ORTAM: tasarım ortamı deniz seviyesi DEĞİLSE başlık
+            // Isp'si o ortamın Isp'sidir (kartın adı ortamı söyler). Deniz
+            // seviyesi kartı yalnız nozul orada yapışıksa basılır (sayı
+            // yayımlanmadıysa kart YOK; durum aşağıdaki notta adıyla yazar).
+            // (typeof korumalı: sayfa ikizleri işlevleri tek tek söker.)
+            const _ortam = (typeof liqDesignAmbientOf === 'function')
+                ? liqDesignAmbientOf(results) : null;
+            const _dsYapisik = !!(_ortam && _ortam.sea_level
+                && _ortam.sea_level.status === 'attached'
+                && typeof _ortam.sea_level.isp_s === 'number');
+            const metrics = _ortam ? [
+                { label: T('liq.msg.engine_isp_design_ambient', 'Engine Isp — per total propellant consumption (design ambient)'), value: results.isp_design_ambient, decimals: 1, unit: 's' },
+                { label: T('liq.msg.engine_isp_vac', 'Engine Isp — per total propellant consumption (vacuum)'), value: results.isp_vacuum, decimals: 1, unit: 's' },
+                ...(_dsYapisik ? [
+                    { label: T('liq.msg.engine_isp_sl', 'Engine Isp — per total propellant consumption (sea level)'), value: _ortam.sea_level.isp_s, decimals: 1, unit: 's' }
+                ] : []),
+                ...(_defterKapali ? [
+                    { label: T('liq.msg.tca_isp_design_ambient', 'Main thrust chamber + nozzle Isp — per main-chamber flow (design ambient)'), value: _defter.main_chamber_isp_design_ambient_s, decimals: 1, unit: 's' },
+                    { label: T('liq.msg.tca_isp_vac', 'Main thrust chamber + nozzle Isp — per main-chamber flow (vacuum)'), value: _defter.main_chamber_isp_vacuum_s, decimals: 1, unit: 's' }
+                ] : []),
+                { label: T('liq.msg.space_optimized_isp', 'Comparison space-nozzle Isp (vacuum)'), value: results.isp_vacuum_optimized, decimals: 1, unit: 's' },
+                // 3.0.7 birleşmesi (ana model): S2-KALINTI'nın anlamlı basamak kuralı
+                // (NK3-S-6) SIVI-ORTAM'ın tasarım-ortamı kartlarına da uygulanır.
+                { label: T('liq.msg.design_ambient_thrust', 'Thrust at the design ambient'), value: results.thrust / 1000,
+                  decimals: liqAnlamliOndalik(results.thrust / 1000, 1), unit: 'kN' },
+                { label: T('liq.msg.vacuum_thrust', 'Vacuum Thrust'), value: results.thrust_vacuum / 1000,
+                  decimals: liqAnlamliOndalik(results.thrust_vacuum / 1000, 1), unit: 'kN' }
+            ] : [
                 { label: T('liq.msg.engine_isp_sl', 'Engine Isp — per total propellant consumption (sea level)'), value: results.isp_sea_level, decimals: 1, unit: 's' },
                 { label: T('liq.msg.engine_isp_vac', 'Engine Isp — per total propellant consumption (vacuum)'), value: results.isp_vacuum, decimals: 1, unit: 's' },
                 ...(_defterKapali ? [
                     { label: T('liq.msg.tca_isp_sl', 'Main thrust chamber + nozzle Isp — per main-chamber flow (sea level)'), value: _defter.main_chamber_isp_sea_level_s, decimals: 1, unit: 's' },
                     { label: T('liq.msg.tca_isp_vac', 'Main thrust chamber + nozzle Isp — per main-chamber flow (vacuum)'), value: _defter.main_chamber_isp_vacuum_s, decimals: 1, unit: 's' }
                 ] : []),
-                { label: T('liq.msg.space_optimized_isp', 'Space Optimized Isp'), value: results.isp_vacuum_optimized, decimals: 1, unit: 's' },
-                { label: T('liq.msg.vacuum_thrust', 'Vacuum Thrust'), value: results.thrust_vacuum / 1000, decimals: 1, unit: 'kN' }
+                { label: T('liq.msg.space_optimized_isp', 'Comparison space-nozzle Isp (vacuum)'), value: results.isp_vacuum_optimized, decimals: 1, unit: 's' },
+                // V307/S2-KALINTI (NK3-S-6): sabit 1 ondalıklı kN küçük
+                // motorda yanıltıyordu ("1,0 kN" ⟷ 953,6 N, %4,9). Ondalık
+                // sayısı sayfanın anlamlı basamak kuralından (liqAnlamliOndalik:
+                // en az 3 anlamlı basamak, taban 1, en çok 4): 0,954 kN.
+                { label: T('liq.msg.vacuum_thrust', 'Vacuum Thrust'), value: results.thrust_vacuum / 1000,
+                  decimals: liqAnlamliOndalik(results.thrust_vacuum / 1000, 1), unit: 'kN' }
             ];
+            if (typeof liqDesignAmbientNote === 'function') liqDesignAmbientNote(results);
 
             const fmtMetric = m => {
                 const v = Number(m.value);
@@ -3862,14 +4012,14 @@
                         <td style="padding: 8px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${hrmaFmt(results.chamber_temperature, LIQUID_DEC_TEMPERATURE_K)} K</td>
                     </tr>
                     <tr>
-                        <td style="padding: 8px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>${T('liq.js.vacuum_expansion_ratio', 'Vacuum Expansion Ratio:')}</strong></td>
+                        <td style="padding: 8px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>${T('liq.js.vacuum_expansion_ratio', 'Comparison space-nozzle expansion ratio:')}</strong></td>
                         <td style="padding: 8px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${numTxt(results.expansion_ratio_vacuum, 1)}</td>
                     </tr>
                     ${(typeof results.thrust === 'number' && isFinite(results.thrust)
                        && typeof results.burn_time === 'number' && isFinite(results.burn_time)) ? `
                     <tr>
                         <td style="padding: 8px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>${T('liq.ui.total_impulse', 'Total Impulse')}</strong></td>
-                        <td style="padding: 8px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${hrmaFmt(results.thrust * results.burn_time / 1000, 1)} kN&#183;s = ${hrmaFmt(results.thrust / 1000, 2)} kN &#215; ${hrmaFmt(results.burn_time, 1)} s</td>
+                        <td style="padding: 8px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));">${liqAnlamliTxt(results.thrust * results.burn_time / 1000, 1, 'kN&#183;s')} = ${liqAnlamliTxt(results.thrust / 1000, 2, 'kN')} &#215; ${hrmaFmt(results.burn_time, 1)} s</td>
                     </tr>` : (results.burn_time_source === 'not_supplied' ? `
                     <tr>
                         <td style="padding: 8px; border-bottom: 1px solid var(--hd-line, rgba(0,229,255,0.14));"><strong>${T('liq.ui.total_impulse', 'Total Impulse')}</strong></td>
@@ -3937,6 +4087,9 @@
                 c_star: T('liq.cea.q_c_star', 'c*'),
                 isp_vacuum: T('liq.cea.q_isp_vacuum', 'Vacuum specific impulse'),
                 isp_sea_level: T('liq.cea.q_isp_sea_level', 'Sea-level specific impulse'),
+                // V307/SIVI-ORTAM: deniz seviyesi dışındaki tasarımda ortam
+                // Isp satırı tasarım ortamınındır.
+                isp_design_ambient: T('liq.cea.q_isp_design_ambient', 'Specific impulse at the design ambient'),
                 chamber_temperature: T('liq.cea.q_chamber_temperature', 'Chamber temperature'),
                 molecular_weight: T('liq.cea.q_molecular_weight', 'Molecular weight'),
                 gamma: T('liq.cea.q_gamma', 'γ')
@@ -3946,8 +4099,9 @@
             if (cc.isp_rows_basis === 'main_thrust_chamber') {
                 ad.isp_vacuum = T('liq.msg.tca_isp_vac', 'Main thrust chamber + nozzle Isp — per main-chamber flow (vacuum)');
                 ad.isp_sea_level = T('liq.msg.tca_isp_sl', 'Main thrust chamber + nozzle Isp — per main-chamber flow (sea level)');
+                ad.isp_design_ambient = T('liq.msg.tca_isp_design_ambient', 'Main thrust chamber + nozzle Isp — per main-chamber flow (design ambient)');
             }
-            var basamak = { c_star: 1, isp_vacuum: 2, isp_sea_level: 2,
+            var basamak = { c_star: 1, isp_vacuum: 2, isp_sea_level: 2, isp_design_ambient: 2,
                 chamber_temperature: 1, molecular_weight: 3, gamma: 4 };
             var carpanAdi = {
                 'combustion_efficiency (eta_c*)': T('liq.cea.factor_eta_cstar', 'combustion efficiency η_c*'),
@@ -4017,7 +4171,7 @@
                     [T('liq.msg.throat_diameter', 'Throat Diameter'), num(results?.throat_diameter * 1000, 2), 'mm'],
                     [T('liq.msg.exit_diameter', 'Exit Diameter'), num(results?.exit_diameter * 1000, 2), 'mm'],
                     [T('liq.msg.expansion_ratio_ae_at', 'Expansion Ratio (Ae/At)'), num(results?.expansion_ratio, 2), '-'],
-                    [T('liq.msg.vacuum_expansion_ratio', 'Vacuum Expansion Ratio'), num(results?.expansion_ratio_vacuum, 2), '-'],
+                    [T('liq.msg.vacuum_expansion_ratio', 'Comparison space-nozzle expansion ratio'), num(results?.expansion_ratio_vacuum, 2), '-'],
                     [T('liq.msg.chamber_diameter', 'Chamber Diameter'), num(results?.chamber_diameter, 1), 'mm'],
                     [T('liq.msg.chamber_length', 'Chamber Length'), num(results?.chamber_length, 1), 'mm'],
                     [T('liq.msg.nozzle_length', 'Nozzle Length'), num(results?.nozzle_angles?.nozzle_length_mm, 1), 'mm'],
@@ -4180,6 +4334,12 @@
             
             // Environment & test
             
+            // V307/SIVI-ORTAM: tasarım ortamı deniz seviyesine döner.
+            document.getElementById('design_ambient_mode').value = 'sea_level';
+            document.getElementById('design_ambient_altitude_m').value = '';
+            document.getElementById('design_ambient_pressure_bar').value = '';
+            if (typeof syncLiquidDesignAmbientFields === 'function') syncLiquidDesignAmbientFields();
+
             document.getElementById('results').style.display = 'none';
             updatePropellantPreview();
             // ÖH D37 A1b sivi-kati-form · CW-F1: çevrim programla yazıldı
@@ -4285,8 +4445,10 @@
                 ? results.altitude_performance : null;
             const km = ap ? ap.map(p => (Number(p.altitude) || 0) / 1000)
                           : altData.altitude_range.map(alt => alt / 1000);
-            const isp = ap ? ap.map(p => { const v = Number(p.specific_impulse);
-                                           return isFinite(v) ? v : null; })
+            // V307/SIVI-ORTAM: yayımlanmayan satır (null) 0 değil boşluktur.
+            const isp = ap ? ap.map(p => ((typeof p.specific_impulse === 'number'
+                                           && isFinite(p.specific_impulse))
+                                          ? p.specific_impulse : null))
                            : altData.isp_vs_altitude;
 
             const trace1 = {
@@ -5979,6 +6141,46 @@
             'skip_distance'];
         const LIQ_NOT_PINTLE_FIELDS = ['injector_elements',
             'fuel_orifice_diameter', 'oxidizer_orifice_diameter'];
+        // V307/SIVI-ORTAM — TASARIM ORTAMI (deniz seviyesi / irtifa / basınç /
+        // vakum). Deniz seviyesi seçiliyken gövdeye HİÇBİR alan konmaz: hesap
+        // gövdesi bu girdiden önceki gövdeyle aynıdır (sonuçlar da). Başka
+        // kipte kip adı ve yalnız O KİPİN alanı gider (görünmeyen alan
+        // gönderilmez); boş alan gönderilmez, çözücü adıyla reddeder.
+        const LIQ_AMBIENT_FIELD_OF_MODE = {
+            altitude: 'design_ambient_altitude_m',
+            pressure: 'design_ambient_pressure_bar'
+        };
+        function liqDesignAmbientMode() {
+            const sel = document.getElementById('design_ambient_mode');
+            return (sel && sel.value) ? sel.value : 'sea_level';
+        }
+        function liqDesignAmbientPayload() {
+            const kip = liqDesignAmbientMode();
+            const out = {};
+            if (kip === 'sea_level') return out;
+            out.design_ambient_mode = kip;
+            const alan = LIQ_AMBIENT_FIELD_OF_MODE[kip];
+            if (alan) {
+                const v = liqOptNum(alan);
+                if (v !== undefined) out[alan] = v;
+            }
+            return out;
+        }
+        function syncLiquidDesignAmbientFields() {
+            const kip = liqDesignAmbientMode();
+            document.querySelectorAll('[data-liq-ambient-show]').forEach(function (el) {
+                el.style.display = (el.getAttribute('data-liq-ambient-show') === kip) ? '' : 'none';
+            });
+        }
+        window.syncLiquidDesignAmbientFields = syncLiquidDesignAmbientFields;
+        document.addEventListener('DOMContentLoaded', function () {
+            const sel = document.getElementById('design_ambient_mode');
+            if (!sel) return;
+            sel.addEventListener('change', syncLiquidDesignAmbientFields);
+            sel.addEventListener('input', syncLiquidDesignAmbientFields);
+            syncLiquidDesignAmbientFields();
+        });
+
         function liqInjectorFieldPayload() {
             const sel = document.getElementById('injector_type');
             const tip = liqInjectorCanonical(sel ? sel.value : '');
@@ -6107,6 +6309,48 @@
                     + 'conservative). The page has no plate-thickness input, so '
                     + 'this is the required thickness, not the safety factor of '
                     + 'a given plate.');
+            } else if (b.status === 'analyzed' && b.load_cases
+                       && b.load_cases.operating && b.load_cases.startup_shutdown) {
+                // V307/PLAKA-MARŞ: iki yük durumu; plaka yöneten duruma göre
+                // standart levhaya boyutlandı, hüküm küçük SF. Sayılar
+                // yanıttan; eksik alan "—" basılır (numTxt), uydurulmaz.
+                const op = b.load_cases.operating;
+                const st = b.load_cases.startup_shutdown;
+                out.textContent = TF('liq.ui.injplate_analyzed',
+                    { material: ad,
+                      t: numTxt(b.plate_thickness_mm, 1),
+                      src: (b.plate_thickness_source === 'next_standard_plate'
+                          ? T('liq.ui.injplate_src_std',
+                              'next standard plate above the larger required thickness')
+                          : T('liq.ui.injplate_src_req',
+                              'the larger required thickness itself, above the standard plate table')),
+                      gov: (b.governing_load_case === 'startup_shutdown'
+                          ? T('liq.ui.injplate_case_startup', 'start/shutdown')
+                          : T('liq.ui.injplate_case_operating', 'operating')),
+                      pm: numTxt(b.manifold_pressure_bar, 1),
+                      q2: numTxt(st.delta_P_bar, 1),
+                      sf2: numTxt(st.safety_factor, 2),
+                      t2: numTxt(st.required_thickness_mm, 2),
+                      q1: numTxt(op.delta_P_bar, 1),
+                      sf1: numTxt(op.safety_factor, 2),
+                      t1: numTxt(op.required_thickness_mm, 2),
+                      sf: numTxt(b.required_safety_factor, 2),
+                      d: numTxt(b.plate_diameter_mm, 1),
+                      eta: numTxt(b.ligament_efficiency, 3),
+                      n: String(b.n_holes),
+                      dh: numTxt(b.hole_diameter_mm, 3) },
+                    'Injector plate ({material}): {t} mm ({src}), sized by the '
+                    + '{gov} load case. Start/shutdown (manifold {pm} bar absolute '
+                    + 'against vacuum): load {q2} bar, safety factor {sf2}, {t2} mm '
+                    + 'required. Operating (injector pressure drop): load {q1} bar, '
+                    + 'safety factor {sf1}, {t1} mm required. Target safety factor '
+                    + '{sf} on yield; the verdict is the lower of the two. Clamped '
+                    + 'circular plate (Roark 11.2 case 10b), plate diameter {d} mm, '
+                    + 'ligament efficiency {eta} ({n} holes taken at {dh} mm, '
+                    + 'conservative). The start/shutdown load is a quasi-static '
+                    + 'upper bound that excludes pressure surges. Water hammer, '
+                    + 'dynamic amplification, thermal stress and fatigue are not '
+                    + 'modelled.');
             } else {
                 out.textContent = TF('liq.ui.injplate_other',
                     { material: ad, reason: String(b.reason || b.status || '') },
@@ -6161,6 +6405,8 @@
                 // expander'da ön yakıcı yoktur.
                 preburner_type: (document.getElementById('engine_cycle').value === 'staged_combustion'
                     ? document.getElementById('preburner_type').value : undefined),
+                // V307/SIVI-ORTAM: tasarım ortamı (deniz seviyesinde alan yok).
+                ...((typeof liqDesignAmbientPayload === 'function') ? liqDesignAmbientPayload() : {}),
                 thrust: liqOptNum('thrust'),
                 chamber_pressure: liqOptNum('chamber_pressure'),
                 feed_pressure: liqOptNum('feed_pressure'),
@@ -6761,7 +7007,7 @@
                         ${T('liq.js.propellant_label', 'Propellant:')} ${results.propellant_name || T('liq.js.not_specified', 'not specified')}</p>
                         <div style="margin-top: 20px; padding: 15px; background: var(--hd-panel-solid, #0a1524); border-radius: 6px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
                             <strong>${T('liq.js.engine_specifications', 'Engine Specifications:')}</strong><br>
-                            • ${T('liq.js.thrust_label', 'Thrust:')} ${numTxt((results.thrust/1000), 1)} kN<br>
+                            • ${T('liq.js.thrust_label', 'Thrust:')} ${liqAnlamliTxt(results.thrust / 1000, 1, 'kN')}<br>
                             • ${T('liq.js.isp_vac_label', 'Isp (vac):')} ${results.isp_vacuum == null ? 'N/A' : numTxt(results.isp_vacuum, 1)} s<br>
                             • ${T('liq.js.chamber_pressure_label', 'Chamber Pressure:')} ${results.chamber_pressure} bar<br>
                             • ${T('liq.js.expansion_ratio_label', 'Expansion Ratio:')} ${results.expansion_ratio == null ? 'N/A' : numTxt(results.expansion_ratio, 1)}
@@ -6824,15 +7070,17 @@
         // eski ondalık sayısından az değil, en çok 4 ondalık. Sayı değişmez.
         const LIQ_ANLAMLI_BASAMAK = 3;
         const LIQ_ANLAMLI_AZAMI_ONDALIK = 4;
+        // V307/S2-KALINTI (NK3-S-6): ondalık sayısı TEK işlevden — HUD
+        // kartı (count-up `decimals` ister) ve metin yolu aynı kuralı okur.
+        function liqAnlamliOndalik(v, taban) {
+            const t = (taban != null) ? taban : 0;
+            if (typeof v !== 'number' || !isFinite(v) || v === 0) return t;
+            const dec = Math.max(t, LIQ_ANLAMLI_BASAMAK - 1 - Math.floor(Math.log10(Math.abs(v))));
+            return Math.min(Math.max(dec, t), Math.max(t, LIQ_ANLAMLI_AZAMI_ONDALIK));
+        }
         function liqAnlamliTxt(v, taban, unit) {
             if (typeof v !== 'number' || !isFinite(v)) return '—';
-            const t = (taban != null) ? taban : 0;
-            let dec = t;
-            if (v !== 0) {
-                dec = Math.max(t, LIQ_ANLAMLI_BASAMAK - 1 - Math.floor(Math.log10(Math.abs(v))));
-                dec = Math.min(Math.max(dec, t), Math.max(t, LIQ_ANLAMLI_AZAMI_ONDALIK));
-            }
-            const s = numTxt(v, dec);
+            const s = numTxt(v, liqAnlamliOndalik(v, taban));
             return unit ? (s + ' ' + unit) : s;
         }
 
@@ -6925,13 +7173,46 @@
 
         // İki seriyi (Isp, itki) tek grafiğe kuran ortak yapıcı.
         // {traces, layout, note} döner.
+        // V307/SIVI-ORTAM: yayımlanmayan satır (null) grafikte BOŞLUKTUR.
+        // Number(null) 0 verdiği için ayrılan/çözülmeyen satırlar 0 s / 0 kN
+        // diye çiziliyordu (vakum tasarımında 0-10 km); sayı yoksa nokta yok.
+        function _altNum(v) {
+            return (typeof v === 'number' && isFinite(v)) ? v : null;
+        }
+        // Çizilmeyen satırların notu: irtifalar satırın kendisinden.
+        function _altWithheldNote(ap) {
+            const kmTxt = function (liste) {
+                return liste.map(function (p) {
+                    return numTxt(Number(p.altitude) / 1000, 0); }).join(', ');
+            };
+            const ayrik = ap.filter(function (p) {
+                return p && p.flow_separated === true && _altNum(p.thrust) === null; });
+            const diger = ap.filter(function (p) {
+                return p && p.flow_separated !== true && _altNum(p.thrust) === null; });
+            const parca = [];
+            if (ayrik.length) {
+                parca.push(TF('liq.msg.alt_rows_separated', { km: kmTxt(ayrik) },
+                    'Not drawn at {km} km: the fixed nozzle separates at those ambient pressures '
+                    + '(exit pressure below 0.4 times ambient, Summerfield criterion), so no thrust '
+                    + 'or Isp is published for those rows.'));
+            }
+            if (diger.length) {
+                parca.push(TF('liq.msg.alt_rows_not_published', { km: kmTxt(diger) },
+                    'Not drawn at {km} km: the solver publishes no thrust or Isp for those rows.'));
+            }
+            return parca.join(' ');
+        }
+
         function _buildAltitudeFigure(results, ap, opts) {
             const o = opts || {};
             const km = ap.map(function (p) { return (Number(p.altitude) || 0) / 1000; });
-            const isp = ap.map(function (p) {
-                const v = Number(p.specific_impulse); return isFinite(v) ? v : null; });
+            // V307/SIVI-ORTAM: yayımlanmayan satır (null) grafikte BOŞLUKTUR
+            // (Number(null) 0 verdiği için 0 s / 0 kN diye çiziliyordu).
+            const _sayi = function (v) {
+                return (typeof v === 'number' && isFinite(v)) ? v : null; };
+            const isp = ap.map(function (p) { return _sayi(p.specific_impulse); });
             const kN = ap.map(function (p) {
-                const v = Number(p.thrust); return isFinite(v) ? v / 1000 : null; });
+                const v = _sayi(p.thrust); return v === null ? null : v / 1000; });
             const rel = _altSeriesRatio(ap);
             // Isp serisinin adı çağırana bırakılır: 'Parametrik > Tek İrtifa'
             // paneli bu seriyi 'Specific Impulse (Isp)' diye adlandırıyordu.
@@ -7011,6 +7292,8 @@
 
             const anchorNote = _altAnchorNote(results, ap);
             if (anchorNote) note = note ? (note + '<br>' + anchorNote) : anchorNote;
+            const eksikNot = (typeof _altWithheldNote === 'function') ? _altWithheldNote(ap) : '';
+            if (eksikNot) note = note ? (note + '<br>' + eksikNot) : eksikNot;
             // V306/SIVI-DEFTER (K5): açık çevrimde itki ve Isp MOTOR
             // değerleridir; ana oda ve türbin egzozu payı satırda ayrı.
             const _dk = results && results.mass_flow_ledger;
@@ -7386,6 +7669,19 @@
             // kaynağı kullanır; motorun debisi yoksa hüküm verilmez.
             const trMdot = (typeof cr.total_mass_flow === 'number'
                             && cr.total_mass_flow > 0) ? cr.total_mass_flow : null;
+            // V307/SIVI-ORTAM: irtifa/vakum tasarımında nozul deniz
+            // seviyesinde ayrılıyorsa deniz seviyesi itkisi yayımlanmaz;
+            // yerden kalkan uçuş hesaplanmaz ve nedeni adıyla yazılır.
+            const _trOrtam = (typeof liqDesignAmbientOf === 'function') ? liqDesignAmbientOf(cr) : null;
+            if (_trOrtam && _trOrtam.sea_level && _trOrtam.sea_level.status === 'separated') {
+                div.innerHTML = '<p style="text-align:center;color:#7d97a5;padding:40px;">'
+                    + T('liq.js.trajectory_ground_separated',
+                        'The nozzle of this design separates at sea level (see the ground test note under '
+                        + 'Performance Summary), so no sea-level thrust is published and a flight from the '
+                        + 'ground is not computed for it.')
+                    + '</p>';
+                return;
+            }
             if (trThrust === null || trIsp === null || trMdot === null) {
                 div.innerHTML = '<p style="text-align:center;color:#7d97a5;padding:40px;">'
                     + T('liq.js.trajectory_needs_results',
@@ -8198,7 +8494,11 @@
             return Object.assign({}, cr, {
                 performance: Object.assign({
                     thrust: thrust,
-                    specific_impulse: _pdfNum(cr.isp_sea_level),
+                    // V307/SIVI-ORTAM: başlık Isp'si tasarım ortamının
+                    // Isp'sidir (deniz seviyesi tasarımında isp_sea_level).
+                    specific_impulse: _pdfNum(
+                        (typeof liqDesignAmbientOf === 'function' && liqDesignAmbientOf(cr))
+                            ? cr.isp_design_ambient : cr.isp_sea_level),
                     chamber_pressure: _pdfNum(cr.chamber_pressure),
                     exit_velocity: exitV,
                     mass_flow_rate: _pdfNum(cr.total_mass_flow),
@@ -8945,9 +9245,39 @@
                 if (response.ok && result.status === 'success' && result.content) {
                     _triggerLiquidDownload(new Blob([result.content], { type: 'text/plain' }),
                                            result.filename || (_liquidMotorName() + '.eng'));
-                    _liquidExportStatus(TF('liq.msg.eng_downloaded_detail',
-                                           { seconds: numTxt(Number(cr.burn_time), 1) },
-                                           '.eng file downloaded (constant thrust, {seconds} s burn)'));
+                    // V307/GÜVERTE-ORTAM: tasarım ortamı deniz seviyesi değilse
+                    // satır itkinin hangi ortamda tanımlandığını söyler (kayıt
+                    // ucun `eng_design_ambient`ı = dosyanın yorum satırları);
+                    // deniz seviyesinde anahtar yok, satır bugünküyle aynı.
+                    const _engOrtam = result.eng_design_ambient || null;
+                    const _engSn = numTxt(Number(cr.burn_time), 1);
+                    const _engP = (_engOrtam && typeof _engOrtam.pressure_bar === 'number'
+                                   && isFinite(_engOrtam.pressure_bar))
+                        ? numTxt(_engOrtam.pressure_bar, 4) : null;
+                    const _engH = (_engOrtam && typeof _engOrtam.altitude_m === 'number'
+                                   && isFinite(_engOrtam.altitude_m))
+                        ? numTxt(_engOrtam.altitude_m, 0) : null;
+                    if (_engOrtam && _engOrtam.mode === 'vacuum') {
+                        _liquidExportStatus(TF('liq.msg.eng_downloaded_detail_vacuum',
+                            { seconds: _engSn },
+                            '.eng file downloaded (constant thrust, {seconds} s burn). The thrust in the file is the vacuum thrust (design ambient 0 bar), not the sea-level thrust: flown from a sea-level launch pad it overstates the thrust.'));
+                    } else if (_engOrtam && _engH !== null && _engP !== null) {
+                        _liquidExportStatus(TF('liq.msg.eng_downloaded_detail_altitude',
+                            { seconds: _engSn, alt: _engH, p: _engP },
+                            '.eng file downloaded (constant thrust, {seconds} s burn). The thrust in the file is the thrust at the design ambient ({alt} m altitude, {p} bar), not the sea-level thrust: flown from a sea-level launch pad it overstates the thrust.'));
+                    } else if (_engOrtam && _engP !== null) {
+                        _liquidExportStatus(TF('liq.msg.eng_downloaded_detail_pressure',
+                            { seconds: _engSn, p: _engP },
+                            '.eng file downloaded (constant thrust, {seconds} s burn). The thrust in the file is the thrust at the design ambient ({p} bar), not the sea-level thrust: flown from a sea-level launch pad it overstates the thrust.'));
+                    } else if (_engOrtam) {
+                        _liquidExportStatus(TF('liq.msg.eng_downloaded_detail_ambient_undeclared',
+                            { seconds: _engSn },
+                            '.eng file downloaded (constant thrust, {seconds} s burn). The thrust in the file is not the sea-level thrust; the design ambient pressure was not published.'));
+                    } else {
+                        _liquidExportStatus(TF('liq.msg.eng_downloaded_detail',
+                                               { seconds: _engSn },
+                                               '.eng file downloaded (constant thrust, {seconds} s burn)'));
+                    }
                     showSuccess(T('liq.msg.eng_file_downloaded', '.eng file downloaded'));
                 } else {
                     // OH-D18-07: .eng ucu da aynı birim kapısının ardında;
@@ -8992,8 +9322,14 @@
                 [T('liq.msg.mixture_ratio_o_f_2', 'Mixture ratio (O/F)'), num(cr.mixture_ratio, 3)],
                 [T('liq.msg.optimal_mixture_ratio_o_f', 'Optimal mixture ratio (O/F)'), num(cr.optimal_mixture_ratio, 3)],
                 [T('liq.msg.sea_level_isp_s', 'Sea-level Isp (s)'), gnum('isp_sea_level', cr.isp_sea_level, 2)],
+                // V307/SIVI-ORTAM: deniz seviyesi dışındaki tasarımda itki ve
+                // başlık Isp'si tasarım ortamınındır; ortam ve Isp'si adıyla.
+                ...((typeof liqDesignAmbientOf === 'function' && liqDesignAmbientOf(cr)) ? [
+                    [T('liq.msg.design_ambient_pressure_row', 'Design ambient pressure (bar)'), num(cr.design_ambient.pressure_bar, 5)],
+                    [T('liq.msg.design_ambient_isp_row', 'Design-ambient Isp (s)'), gnum('isp_design_ambient', cr.isp_design_ambient, 2)],
+                ] : []),
                 [T('liq.msg.vacuum_isp_s', 'Vacuum Isp (s)'), gnum('isp_vacuum', cr.isp_vacuum, 2)],
-                [T('liq.msg.space_optimised_isp_s', 'Space-optimised Isp (s)'), gnum('isp_vacuum_optimized', cr.isp_vacuum_optimized, 2)],
+                [T('liq.msg.space_optimised_isp_s', 'Comparison space-nozzle Isp, vacuum (s)'), gnum('isp_vacuum_optimized', cr.isp_vacuum_optimized, 2)],
                 ...(tasarimKapisi ? [
                     [T('liq.gate.tca_isp_sl', 'Thrust chamber (TCA) specific impulse, sea level') + ' (s)', num(tca.sea_level_s, 2)],
                     [T('liq.gate.tca_isp_vac', 'Thrust chamber (TCA) specific impulse, vacuum') + ' (s)', num(tca.vacuum_s, 2)],
@@ -9010,7 +9346,7 @@
                 [T('liq.msg.throat_diameter_mm', 'Throat diameter (mm)'), (liqGateFieldText(cr, 'throat_diameter') || num(cr.throat_diameter * 1000, 2))],
                 [T('liq.msg.exit_diameter_mm', 'Exit diameter (mm)'), (liqGateFieldText(cr, 'exit_diameter') || num(cr.exit_diameter * 1000, 2))],
                 [T('liq.msg.expansion_ratio', 'Expansion ratio'), num(cr.expansion_ratio, 3)],
-                [T('liq.msg.vacuum_expansion_ratio_2', 'Vacuum expansion ratio'), num(cr.expansion_ratio_vacuum, 3)],
+                [T('liq.msg.vacuum_expansion_ratio_2', 'Comparison space-nozzle expansion ratio'), num(cr.expansion_ratio_vacuum, 3)],
                 [T('liq.ui.cooling_type', 'Cooling type'), cr.cooling_type || ''],
                 [T('liq.msg.cooling_channels', 'Cooling channels'), (liqGateFieldText(cr, 'cooling_system') || num(cool.cooling_channels, 0))],
                 [T('liq.msg.nozzle_length_mm', 'Nozzle length (mm)'), (liqGateFieldText(cr, 'cooling_system') || num(cool.nozzle_length, 2))]
@@ -9686,7 +10022,16 @@
         }
         function _liquidSixDofDriveFrom(cr, mProp, mEngine) {
             if (!cr) return null;
-            const F = Number(cr.thrust);
+            // V307/SIVI-ORTAM: uçuş yerden başlar; tasarım ortamı deniz
+            // seviyesi değilse uçan itki aynı nozulun DENİZ SEVİYESİ
+            // itkisidir (cr.thrust tasarım ortamının itkisidir). Nozul
+            // deniz seviyesinde ayrılıyorsa o itki yayımlanmaz: uçuş yok.
+            const _ortam = (typeof liqDesignAmbientOf === 'function') ? liqDesignAmbientOf(cr) : null;
+            const _ds = _ortam ? (_ortam.sea_level || {}) : null;
+            if (_ds && !(_ds.status === 'attached' && typeof _ds.thrust_N === 'number')) {
+                return { reject: 'ground_separated' };
+            }
+            const F = _ds ? _ds.thrust_N : Number(cr.thrust);
             const mdot = Number(cr.total_mass_flow);
             const mp = Number(mProp);
             if (!isFinite(F) || F <= 0 || !isFinite(mdot) || mdot <= 0
@@ -9721,6 +10066,12 @@
         }
 
         function _liquidSixDofRetMetni(drive) {
+            if (drive && drive.reject === 'ground_separated') {
+                return T('liq.js.trajectory_ground_separated',
+                    'The nozzle of this design separates at sea level (see the ground test note under '
+                    + 'Performance Summary), so no sea-level thrust is published and a flight from the '
+                    + 'ground is not computed for it.');
+            }
             return TF('liq.msg.sixdof_prop_exceeds_engine',
                 { mprop: numTxt(drive.m_prop, 3), meng: numTxt(drive.m_engine, 3),
                   mdot: numTxt(drive.mdot, 4), burn: numTxt(drive.burn_time, 2),
@@ -9918,9 +10269,12 @@
             // Kapı TEK YERDE ve '—' literali ÇOĞALTILMADAN: sayı olmayan
             // girdi bölünmeden hrmaFmt'e verilir, hüküm onun sözleşmesinde
             // kalır.
+            // V307/S2-KALINTI (NK3-S-6): sabit 2 ondalıklı kN küçük yükte
+            // (ör. 70 N yan kuvvet → "0,07 kN", ±%7) yanıltıyordu; ondalık
+            // sayısı sayfanın anlamlı basamak kuralından (taban 2).
             const kN = function (v) {
                 return typeof v === 'number'
-                    ? hrmaFmt(v / 1000, 2, 'kN')
+                    ? liqAnlamliTxt(v / 1000, 2, 'kN')
                     : hrmaFmt(v, 2, 'kN');
             };
             let rows = '';
@@ -9946,7 +10300,7 @@
             // üretir; o beyan aşağıda basılır — sıfırı gösterge yapmak yasak.
             if (typeof mb.total_N_m === 'number' && mb.total_N_m > 0) {
                 rows += gimbalRow(T('liq.js.gimbal_moment_total', 'Moment Budget Total:'),
-                    hrmaFmt(mb.total_N_m / 1000, 2, 'kN·m'));
+                    liqAnlamliTxt(mb.total_N_m / 1000, 2, 'kN·m'));
                 rows += gimbalRow(T('liq.js.gimbal_actuator_force', 'Actuator Force (quasi-static):'),
                     kN(act.force_total_N));
             }
@@ -9957,7 +10311,9 @@
             // satır olur; verilmediyse h=0 kabulü aşağıda beyan edilir.
             if (ringOffsetGiven) {
                 rows += gimbalRow(T('liq.js.gimbal_ring_moment', 'Mount Ring Bending Moment:'),
-                    hrmaFmt(ring.bending_moment_N_m / 1000, 2, 'kN·m'));
+                    (typeof ring.bending_moment_N_m === 'number'
+                        ? liqAnlamliTxt(ring.bending_moment_N_m / 1000, 2, 'kN·m')
+                        : hrmaFmt(ring.bending_moment_N_m, 2, 'kN·m')));
             }
             if (d.bolts) {
                 rows += gimbalRow(T('liq.js.gimbal_bolt_moment_max', 'Max Bolt Load (from moment):'),
@@ -10319,6 +10675,8 @@
          (FEED SYSTEM: slosh / pressurant / water hammer) -->
     <script src="/static/js/panels/cooling_panel.js"></script>
     <script src="/static/js/panels/feed_panel.js"></script>
+    <!-- 3.0.7 K5: tank çalkantı modeli bölümü (Besleme → Çalkantı) -->
+    <script src="/static/js/calkanti_panel.js"></script>
     <!-- COMPARE paneli: snapshot tabanlı konfigürasyon karşılaştırması -->
     <script src="/static/js/panels/comparative_panel.js"></script>
     <!-- v2.5.0 G3 panelleri: Monte Carlo belirsizlik (UNCERTAINTY)

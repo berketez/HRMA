@@ -718,7 +718,7 @@ def _estimate_structural_mass(tag, elem, geometry):
     density = _material_bulk_density(elem)
     if density is None:
         return None, ('no bulk material density in file; mass not '
-                      'estimated (no fabricated defaults)')
+                      'estimated (no default density is assumed)')
     if density <= 0:
         return None, (f'material bulk density in file is {density:g} kg/m3, '
                       'which is not physical; mass not estimated')

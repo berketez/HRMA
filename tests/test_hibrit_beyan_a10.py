@@ -335,7 +335,9 @@ def test_t60_yapisal_analiz_yoksa_kapakli_boy_uydurulmaz(boru_motor):
     boyutlar = sonuc['design_summary']['key_dimensions']
     assert boyutlar['total_motor_length_with_caps_mm'] is None
     assert boyutlar['forward_closure_length_mm'] is None
-    assert 'not fabricated' in boyutlar['total_motor_length_basis']
+    # V307/DİL-SUNUCU: 'fabricated' üslubu yalın cümleye çevrildi
+    # ('the length is not estimated'); kilit aynı: boy tahmin edilmez.
+    assert 'the length is not estimated' in boyutlar['total_motor_length_basis']
 
 
 def test_sonuc_json_serilestirilebilir(boru_motor):

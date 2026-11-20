@@ -426,7 +426,17 @@ ORNEK_TASARIM_FARKI = {
         # contraction_ratio v3.0.0 '<yok>' ⟷ örnek 0 ('not_supplied_
         # solver_derives', alan yokken de uç 0 kullanır: sonuç etkisiz).
         'regression_a', 'regression_n', 'mass_flux_chamber',
-        'hole_diameter_min', 'hole_diameter_max', 'contraction_ratio'}),
+        'hole_diameter_min', 'hole_diameter_max',
+        # 3.0.7 örnekler (b867448f6, 19 Kas): contraction_ratio listeden
+        # çıktı — yeniden üretilen örnek alanı boş bırakır (''), sayfa onu
+        # göndermez; v3.0.0 gövdesiyle fark yok (bekçi 'çürüdü' dedi).
+        # 3.0.7 ORTAM-TEK (fdd85a13d) + örnekler (b867448f6, 19 Kas):
+        # hibrit örnek ISA deniz seviyesinde tasarlanır — ortam 1,013 →
+        # 1,01325 bar (HYBRID_DEFAULT_AMBIENT_BAR). v3.0.0 dosyasının
+        # 1,013'ü olduğu gibi yüklenir (göç değil); fark örneğin bilinçli
+        # tasarım değişikliğidir. Ölçüm (19 Kas, bakim/3.0.7 b867448f6):
+        # bu alan dışında beyansız fark yok.
+        'atmospheric_pressure'}),
 }
 
 
@@ -521,7 +531,10 @@ def _k8_beklenen(mt, s):
                  s.get('isp_sea_level'), 1),
                 ('kart', 'Engine Isp — per total propellant consumption (vacuum)',
                  s.get('isp_vacuum'), 1),
-                ('kart', 'Space Optimized Isp', s.get('isp_vacuum_optimized'), 1),
+                # V307/ONARIM-İTKİ-A (M7-ITKI-13): kart adı kendi lülesini
+                # söyler (tasarlanan lüle değil, karşılaştırma uzay lülesi).
+                ('kart', 'Comparison space-nozzle Isp (vacuum)',
+                 s.get('isp_vacuum_optimized'), 1),
                 ('kart', 'Vacuum Thrust', (s.get('thrust_vacuum') or 0) / 1000, 1),
                 ('tablo', 'Throat Diameter', s.get('throat_diameter_mm'), 2),
                 ('tablo', 'Exit Diameter', s.get('exit_diameter_mm'), 2),

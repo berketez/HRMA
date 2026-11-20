@@ -786,9 +786,22 @@ class TestPanelRender:
         r = _panel_render(res)
         assert self._ROZET in r['text']
         assert self._NOT in r['text']
-        assert 'model_validity_reasons' in r['html']
+        # V307/DİL-EKRAN-2 (ÖK-22 kararının aynı sınıfı, 18 Kas): gerekçe
+        # satırı makine adı ('model_validity_reasons') ve ham kodlar yerine
+        # okunur etiket + cümle basar; ölçülen olgu aynı (her gerekçe
+        # ekranda, adıyla).
+        okunur = {
+            'wall_temperature_at_or_above_melting_point':
+                'at or above the melting point of its material',
+            'wall_temperature_above_derating_curve_data':
+                'above the end of the strength-derating data',
+        }
+        # (Alan adı 'model_validity_reasons' sunucunun DEĞER KAYNAKLARI
+        # cümlesinde geçiyor — DİL-SUNUCU DEVİR 4; burada aranmaz.)
+        assert 'Why the result is outside the model' in r['text']
         for kod in ca['model_validity_reasons']:
-            assert kod in r['html'], kod
+            assert okunur[kod] in r['text'], kod
+            assert kod not in r['text'], kod
 
     @pytest.mark.parametrize('bayrak', ['false', 'yok'])
     def test_bayrak_false_ya_da_yok_hicbiri(self, bayrak):
@@ -1670,6 +1683,10 @@ _DOCK_ONAY_IDDIASI = (r'\bSAFE\b', r'\bACCEPTABLE\b', r'\bPASS\b',
 #: Motorun künye bloğu (analysis_dock.js WALL_PROVENANCE_PATHS ile aynı ad).
 _DOCK_KUNYE_BLOGU = {'solid': 'case_analysis', 'liquid': 'chamber_structure',
                      'hybrid': 'chamber_analysis'}
+#: Künye bloğunun ekrandaki okunur adı (structural_panel.js
+#: MOTOR_VALIDITY_BLOCK_TEXT, EN).
+_DOCK_KUNYE_OKUNUR = {'solid': 'Motor case wall', 'liquid': 'Chamber wall',
+                      'hybrid': 'Combustion chamber wall'}
 #: Başarısız hükümler: bayrak TRUE iken de SUSTURULMAZ (§28-44 deseni).
 _DOCK_BASARISIZ = r'\b(?:UNSAFE|MARGINAL|CRITICAL|FAIL)\b'
 _DOCK_VAKA = {'kati_erime_ustu': 'solid', 'sivi_radyatif': 'liquid',
@@ -1776,11 +1793,31 @@ class TestDockPaneliGecerlilik:
                 'model_validity_limit_exceeded'] is True
             assert 'OUTSIDE MODEL VALIDITY' in d['metin']
         else:
-            assert ('model_validity_limit_exceeded true · motor.structural_'
-                    'analysis.' + _DOCK_KUNYE_BLOGU[tur]) in d['metin']
+            # V307/DİL-SON kalem 3: motor künye satırı okunur cümleyle
+            # (önce 'model_validity_limit_exceeded true · motor.structural_
+            # analysis.<blok>'); makine yolu makine-okur alanda (data-hrma-kod).
+            assert 'Motor result outside the model' in d['metin']
+            assert _DOCK_KUNYE_OKUNUR[tur] in d['metin']
+            assert ('data-hrma-kod="motor.structural_analysis.'
+                    + _DOCK_KUNYE_BLOGU[tur] + '"') in d['html']
+            assert 'model_validity_limit_exceeded' not in d['metin']
         assert 'diagnostic only' in d['metin']
+        # V307/DİL-EKRAN-2: ucun kendi geçerlilik satırı (sıvı radyatif dal,
+        # modelValidityBlock) gerekçeyi okunur cümleyle basar; motor künye
+        # satırı (öteki dallar) kodu taşımaya devam eder. Ölçülen olgu aynı:
+        # her gerekçe ekranda.
+        okunur = {
+            'wall_temperature_at_or_above_melting_point':
+                'at or above the melting point of its material',
+            'wall_temperature_above_derating_curve_data':
+                'above the end of the strength-derating data',
+        }
         for kod in blok['model_validity_reasons']:
-            assert kod in d['metin'], kod
+            assert okunur[kod] in d['metin'], kod
+            if ad != 'sivi_radyatif':
+                # V307/DİL-SON kalem 3: kod ekranda değil, makine-okur alanda.
+                assert kod not in d['metin'], kod
+                assert kod in d['html'], kod
 
     @pytest.mark.parametrize('ad', ['ornek_kati', 'ornek_sivi'])
     def test_gecerlilik_ici_bit_ayni(self, sivi_kati, dock_paneli, ad):
@@ -1798,6 +1835,7 @@ class TestDockPaneliGecerlilik:
         assert _dock_akisi(tur, motor)['html'] == d['html']
         assert re.search(r'\bSAFE\b|\bACCEPTABLE\b', d['html']), ad
         assert 'model_validity_limit_exceeded true' not in d['metin']
+        assert 'Motor result outside the model' not in d['metin']
         assert 'diagnostic only' not in d['metin']
 
 
@@ -1878,7 +1916,8 @@ class TestDockPaneliBasarisizSusturulmaz:
         html = _dock_node('solid', motor, uc)['html'] or ''
         metin = ' '.join(re.sub(r'<[^>]*>', ' ', html).split())
         assert MODEL_VALIDITY_VERDICT_BASIS in metin
-        assert 'model_validity_limit_exceeded true' in metin
+        # V307/DİL-SON kalem 3: motor künye satırı okunur cümleyle.
+        assert 'Motor result outside the model' in metin
         for desen in _DOCK_ONAY_IDDIASI:
             assert not re.search(desen, html), desen
 
@@ -2115,7 +2154,9 @@ class TestUcKendiBayragiOnayYok:
         dta_satiri = re.search(r'design_target_assessment(.*?)(?:'
                                r'verdict_safety_factor|$)', d['metin'])
         assert dta_satiri, d['metin'][:400]
-        assert 'status: NOT_EVALUATED' in dta_satiri.group(1)
+        # V307/SEKME-GÜVERTE (NK3-K-2): dta satırı kullanıcı dilinde
+        # ("status: NOT_EVALUATED" → "grade of the target: NOT EVALUATED").
+        assert 'grade of the target: NOT EVALUATED' in dta_satiri.group(1)
         assert not re.search(r'\bSAFE\b|VERY LOW', d['metin']), (
             re.findall(r'.{60}\bSAFE\b.{20}', d['metin']))
         assert 'withheld' in d['metin']
@@ -2445,17 +2486,26 @@ class TestKabFormYoluSivi:
         # davranışta da aynen basılır (susturulmaz).
         dta_eski = eski['uc']['structural_analysis']['safety_analysis'][
             'design_target_assessment']
-        dta_satiri = 'status: {} · risk_level: {}'.format(
-            dta_eski['status'], dta_eski['risk_level'])
+        # V307/SEKME-GÜVERTE (NK3-K-2): satır artık kullanıcı dilinde
+        # ("status: X · risk_level: Y" ham anahtarları görünür metinden
+        # indi); iddia aynı: ucun kendi dta hükmü ve riski basılır.
+        def _soz(v):
+            return str(v).replace('_', ' ')
+        dta_satiri = 'grade of the target: {} · risk {}'.format(
+            _soz(dta_eski['status']), _soz(dta_eski['risk_level']))
         assert dta_satiri in eski['metin']
         if str(dta_eski['status']).upper() in _UC_BASARISIZ_DEGERLERI:
             assert dta_satiri in yeni['metin']
         assert 'Fatigue Status SAFE' in eski['metin']
         assert not re.search(r'\bSAFE\b|\bACCEPTABLE\b|VERY LOW|'
-                             r'risk_level: LOW', yeni['metin']), (
+                             r'risk_level: LOW|\brisk LOW\b', yeni['metin']), (
             re.findall(r'.{60}(?:\bSAFE\b|ACCEPTABLE|LOW).{20}',
                        yeni['metin']))
-        assert 'status: NOT_EVALUATED' in yeni['metin']
+        # (Eski iddia 'status: NOT_EVALUATED' "earned_scope_status:
+        # NOT_EVALUATED" satırından da karşılanıyordu; iki satır artık
+        # kullanıcı dilinde.)
+        assert re.search(r'(?:measured sections|grade of the target): '
+                         r'NOT EVALUATED', yeni['metin'])
         assert re.search(_DOCK_BASARISIZ, yeni['metin'])
         assert _t7_yapraklar(yeni['uc'], _UC_ONAY_DEGERLERI) == []
 

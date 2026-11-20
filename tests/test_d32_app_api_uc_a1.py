@@ -141,7 +141,10 @@ class TestOHD3011DevirCapasi:
     """
 
     TABAN = {'chamber_pressure': 40, 'propellant_mass': 50,
-             'chamber_diameter': 0.1, 'wall_thickness': 0.005}
+             'chamber_diameter': 0.1, 'wall_thickness': 0.005,
+             # V307/GÜVERTE-ISIL kalem 4: oda sıcaklığı zorunlu (3000 K varsayılanı
+             # kalktı); eski örtük değer açık yazıldı, sayılar bit-aynı.
+             'chamber_temperature': 3000.0}
 
     def _tnt(self, istemci, ek):
         r = istemci.post('/analyze_safety', json=dict(self.TABAN, **ek))

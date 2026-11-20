@@ -244,7 +244,9 @@ class TestF44CalkalanmaGirdiKapisi:
                                      fluid_density=1000.0)
         omega, f1 = model.natural_frequency(mode=1)
         # Dodge 2000, Eq. (1.40) el hesabı: omega^2 = (lam*g/R)*tanh(lam*h/R)
-        lam = 1.8412
+        # 3.0.7 (V307/K1): kesin J1' kökü (Dodge (1.41)); eskisi 1.8412.
+        from scipy.special import jnp_zeros
+        lam = float(jnp_zeros(1, 1)[0])
         beklenen = math.sqrt((lam * G_0 / 0.5) * math.tanh(lam * 1.0 / 0.5))
         assert omega == pytest.approx(beklenen, rel=1e-12)
         assert model.liquid_mass == pytest.approx(

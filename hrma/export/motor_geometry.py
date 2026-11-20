@@ -997,6 +997,17 @@ def liquid_results_to_motor_geometry(results):
             'cooling_channels_source': (
                 'cooling_system.cooling_channels of /calculate_liquid '
                 '(copied for the CAD export)')}
+    # V307/ONARIM-İTKİ-A (M7-ITKI-10): Isp TASARIM ORTAMININ Isp'sidir
+    # (``thrust`` da o ortamın itkisidir). ÖLÇÜLDÜ (mühendis turu L7, sıvı
+    # örnek ε 61 vakum): dışa aktarım yalnız ``isp_sea_level``e bakıyordu;
+    # vakum tasarımında o alan bilerek yayımlanmaz (lüle deniz seviyesinde
+    # ayrılır) ve JSON "not published by the solver" diyordu, oysa çözücü
+    # ``isp_design_ambient`` (322,438 s) yayımlıyordu. Deniz seviyesi
+    # tasarımında kaynak ve sayı AYNEN eskisi (bit-aynı); dışında Isp
+    # ortamın adıyla (``isp_basis``) yazılır.
+    _ortam = r.get('design_ambient')
+    _ds_disi = isinstance(_ortam, dict) and _ortam.get('is_sea_level') is False
+    _isp_kaynak = 'isp_design_ambient' if _ds_disi else 'isp_sea_level'
     # Ölçüler: çözülen yazılır, çözülemeyen KÜNYEYE düşer (anahtar yazılmaz).
     # Birim uyarısı yukarıdaki docstring'de: chamber_* MM gelir, boğaz/çıkış
     # zaten METRE gelir.
@@ -1014,11 +1025,24 @@ def liquid_results_to_motor_geometry(results):
              r.get('chamber_pressure'), 1.0),
             ('burn_time', 'burn_time', r.get('burn_time'), 1.0),
             ('thrust', 'thrust', r.get('thrust'), 1.0),
-            ('isp', 'isp_sea_level', r.get('isp_sea_level'), 1.0),
+            ('isp', _isp_kaynak, r.get(_isp_kaynak), 1.0),
             ('of_ratio', 'mixture_ratio', r.get('mixture_ratio'), 1.0)):
         deger = _coz(anahtar, kaynak, ham, olcek)
         if deger is not None:
             out[anahtar] = deger
+    if _ds_disi and 'isp' in out:
+        out['isp_basis'] = {
+            'quantity': 'isp_design_ambient',
+            'design_ambient_mode': _ortam.get('mode'),
+            'design_ambient_pressure_bar': _num(_ortam.get('pressure_bar'),
+                                                None),
+            'design_ambient_altitude_m': _num(_ortam.get('altitude_m'), None),
+            'basis': ('Isp and thrust are at the design ambient of this '
+                      'engine (design_ambient), not at sea level.'),
+        }
+        _isp_ds = _num(r.get('isp_sea_level'), None)
+        if _isp_ds is not None:
+            out['isp_sea_level'] = _isp_ds
     if unresolved:
         out['geometry_unresolved'] = unresolved
     _carry_nozzle_contour(out, r)

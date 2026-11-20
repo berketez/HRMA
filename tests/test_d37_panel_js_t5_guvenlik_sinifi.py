@@ -238,7 +238,10 @@ class TestModulBeyani:
 # ---------------------------------------------------------------------------
 BEYAN_UC_GOVDE = {'chamber_pressure': 30.0, 'propellant_mass': 12.94,
             'chamber_diameter': 0.121, 'wall_thickness': 0.005,
-            'thrust': 3000.0, 'burn_time': 10.0, 'material': 'ss_304'}
+            'thrust': 3000.0, 'burn_time': 10.0, 'material': 'ss_304',
+            # V307/GÜVERTE-ISIL kalem 4: oda sıcaklığı zorunlu (3000 K varsayılanı
+            # kalktı); eski örtük değer açık yazıldı, sayılar bit-aynı.
+            'chamber_temperature': 3000.0}
 
 
 def _beyan_yok_sayi_yok(j, kod):

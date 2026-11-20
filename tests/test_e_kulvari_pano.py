@@ -254,7 +254,9 @@ out.diff = {
 out.diffNoBaseline = D.diff.compute(null, yeniSonuc);
 out.diffIdentical = D.diff.compute(oncekiSonuc, JSON.parse(JSON.stringify(oncekiSonuc)));
 out.diffBadge = D.diff.badge(fark.changes[0]);
-out.diffStrip = D.diff.strip(fark);
+// V307/ŞERİT-GÜRÜLTÜ: şerit yalnız manşet kartlarını kıyaslar (headline);
+// genel compute API'de kalır ama şeride girmez.
+out.diffStrip = D.diff.strip(D.diff.headline(oncekiSonuc, yeniSonuc, 'hybrid'));
 
 // Rozet yerleştirme: yalnız DEĞİŞEN yol işaretlenir
 const kap = new El('div');
@@ -558,9 +560,14 @@ def test_e2_ilk_sonuc_fark_uydurmaz(olcum):
 def test_e2_serit_esigi_acikca_yazar(olcum):
     """Gizli kural bırakılmaz: eşik kullanıcıya metinle bildirilir."""
     serit = olcum['diffStrip']
-    assert 'dock.diff.basis' in serit or '%' in serit, (
-        'şerit eşiği hiç anmıyor: %r' % serit[:200])
-    assert 'motor.thrust' in serit, 'şerit değişen büyüklüğü göstermiyor'
+    # V307/ŞERİT-GÜRÜLTÜ: ölçüt artık "kartın gösterdiği basamak" (yeni sayı
+    # yok); ölçüt cümlesi şeritte basılır. Değişen büyüklük OKUNUR adla
+    # görünür, yanıt yolu yalnız data-hrma-kod özniteliğinde.
+    assert 'dock.diff.basisHeadline' in serit, (
+        'şerit ölçütünü hiç anmıyor: %r' % serit[:200])
+    gorunen = re.sub(r'<[^>]*>', ' ', serit)
+    assert 'Thrust' in gorunen, 'şerit değişen büyüklüğü göstermiyor'
+    assert 'motor.thrust' not in gorunen, 'şerit ham yanıt yolunu basıyor'
 
 
 @needs_node
@@ -578,7 +585,8 @@ def test_e2_kapi_gercekten_cagriliyor(olcum):
     assert 'motor.thrust' in olcum['gateChanged'], (
         'entegrasyon yolundan gelen fark boş: %r' % olcum['gateChanged'])
     assert olcum['diffBandDisplay'] == 'block', '"ne değişti" şeridi gizli kaldı'
-    assert 'motor.thrust' in olcum['diffBandHtml']
+    assert 'data-hrma-kod="motor.thrust"' in olcum['diffBandHtml']
+    assert 'Thrust' in re.sub(r'<[^>]*>', ' ', olcum['diffBandHtml'])
 
 
 def test_e2_kapi_entegrasyon_katmaninda_zaten_cagriliyor():

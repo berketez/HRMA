@@ -180,14 +180,17 @@ class TestMKati20IspEtiketi:
         assert r['isp_sea_level'] != r['isp_design_ambient']
 
     def test_ortam_kunyesi_cozucunun_basinci(self, client):
-        from hrma.constants import isa_pressure
+        # V307/İRTİFA-TEK: test irtifası GEOMETRİK okunur (ana model kararı,
+        # 16 Kas). 6000 m: eski isa_pressure(6000) = 47 181,03 Pa
+        # (dönüşümsüz), yeni isa_pressure_geometric(6000) = 47 217,64 Pa.
+        from hrma.constants import isa_pressure_geometric
         r = _kos(client, _l3_irtifa(6000))
         da = r['design_ambient']
         assert da['source'] == 'test_altitude_isa'
         assert da['altitude_m'] == 6000.0
         assert da['is_sea_level'] is False
         assert da['pressure_kpa'] == pytest.approx(
-            float(isa_pressure(6000.0)) / 1e3, rel=1e-12)
+            float(isa_pressure_geometric(6000.0)) / 1e3, rel=1e-12)
         # Ayrılma uyarısının ortam basıncıyla AYNI sayı.
         assert r['nozzle_flow_separation']['ambient_pressure_Pa'] == \
             pytest.approx(da['pressure_kpa'] * 1e3, rel=1e-12)

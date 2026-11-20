@@ -148,6 +148,53 @@ RECESSION_VALID_MAX_MM_S = 0.35
 TM107041_TABLE2_ALL_MM_S = (0.00017, 0.0601)      # tüm örnekler
 TM107041_TABLE2_MX2600_MM_S = (0.00452, 0.00822)  # yüksek yoğunluklu uçuş sınıfı
 
+# ---------------------------------------------------------------------------
+# V307/GÜVERTE-ISIL (kalem 1) — ASTAR HÜKMÜNÜN ORTAK ADLARI (tek tanım).
+#
+# ÖLÇÜLDÜ (docs/scofield/raw/OH/V307/guverte-isil/olcum_once.json): aynı sıvı
+# ablatif motorun hazne astarı üç yerde üç ayrı sayıydı. Hepsi AYNI çekirdeği
+# (``ablative_thickness``) çağırıyordu; fark çekirdekte değil, çağıranların
+# GİRDİLERİNDE ve kalınlık KURALINDAydı:
+#
+#   L1 (Pc 15 bar, 7,7 s)        h_g W/m²K   T_r K    gerileme mm/s   kalınlık
+#   motor (pasif koruma bloğu)   1894        3395     0,1375          1,59 mm
+#   güverte TERMAL (astar yolu)  2595        3384     0,2080          7,78 mm
+#   örnek sıvı 50 bar, ablatif
+#   motor                        4135        3328     0,3669          yok
+#   güverte TERMAL               (kendi zinciri)      0,405           yok
+#
+# Girdi farkı: motor astar istasyonunu KENDİ Bartz zincirinin hazne
+# katsayısıyla sürer; güverte ucu aynı istasyonu ısı modülünün zincirinden
+# (referans soğutulmuş cidar) yeniden türetiyordu. Kural farkı: sıvı motor
+# yalnız gerileme payını yayımlar, güverte hibrit zincirinin kuralını
+# (gerileme payı + iletim payı) uygular. Onarım: güverte motorun astar
+# istasyonu girdilerini alır (aynı işlev + aynı girdi = aynı gerileme hızı,
+# aynı gerileme payı, aynı zarf hükmü) ve kural farkını ADIYLA yazar.
+# ---------------------------------------------------------------------------
+#: Sıvı (ve katı) zincirinin astar kalınlığı kuralı: yalnız gerileme payı.
+LINER_RULE_RECESSION_ONLY = 'recession x design margin (Level-1 Q*)'
+LINER_RULE_RECESSION_ONLY_BASIS = (
+    'the published thickness is the RECESSION allowance only: total recession '
+    'of the Level-1 steady Q* model x design margin. It carries NO conduction '
+    '(insulation) allowance: the temperature of the wall behind the liner is '
+    'not solved here. The hybrid chain and the analysis deck add a conduction '
+    'allowance on top of the same recession allowance '
+    '(hybrid_rocket_engine.hybrid_liner_sizing) and publish the two parts by '
+    'name.')
+
+#: Blok düzeyi astar hükmü (motor ⟷ güverte aynı adlar). 'NOT_SIZED':
+#: hiçbir istasyonda kalınlık yayımlanmadı; neden istasyonun
+#: ``validity_note`` alanındadır.
+LINER_STATUS_SIZED = 'SIZED'
+LINER_STATUS_PARTIALLY_SIZED = 'PARTIALLY_SIZED'
+LINER_STATUS_NOT_SIZED = 'NOT_SIZED'
+LINER_STATUS_BASIS = (
+    "derived from the per-station thickness_status of this block: 'SIZED' "
+    "when every liner station published a thickness, 'NOT_SIZED' when none "
+    "did, 'PARTIALLY_SIZED' otherwise (liner_stations_not_sized names the "
+    "stations; the reason is the station's validity_note). The block status "
+    "'modelled' only says the block ran.")
+
 #: Açık (explicit) 1B FD marşının TEK İSTEK HESAP BÜTÇESİ [adım sayısı].
 #:
 #: ÖH D15 / P4B1-13. ``heat_sink_transient`` kararlılık için
@@ -408,7 +455,31 @@ def _blowing_reduction(b_prime: float, lam: float = BLOWING_LAMBDA) -> float:
     x = 2.0 * float(lam) * float(b_prime)
     if x <= 1e-12:
         return 1.0
+    if x > 700.0:
+        # V307/GÜVERTE-ISIL: ``math.expm1`` x ≳ 709'da OverflowError atar.
+        # ÖLÇÜLDÜ: ``/api/thermal-protection`` ablatif kipte çok büyük bir
+        # ``gas_cp_J_kgK`` (1e300) HTTP 500 veriyordu. Bu aralıkta
+        # expm1(x) = e^x (çift duyarlıkta tam), dolayısıyla psi = x·e^(−x):
+        # aynı bağıntının taşmayan yazımı, limit 0 (yeni katsayı yok).
+        ussel = math.exp(-x)
+        return x * ussel if ussel > 0.0 else 0.0
     return x / math.expm1(x)
+
+
+#: Öz-tutarlı yüzey dengesinin bölme araması için adım tavanı.
+#:
+#: V307/GÜVERTE-ISIL: tavan 80'di ("80 adımda makine hassasiyetine iner").
+#: Bu, aralığın [0, sdot_max] mertebece ılımlı olduğunu varsayar: durma ölçütü
+#: mutlak 1e-15 olduğundan gereken adım log2(sdot_max / 1e-15)'tir (gerçekçi
+#: sdot_max ~ 1e-3 m/s için ~40). ÖLÇÜLDÜ: saldırgan bir gaz tarafı katsayısı
+#: (h_g = 1e300 W/m²K) sdot_max'ı 7e292'ye çıkarıyor, 80 adım köke
+#: yaklaşamıyor, arama aralığın ortasında (psi = 0) bitiyor ve çekirdek
+#: "NET ISINMA YOK" diyordu — saçma girdi zarf reddi yerine iletim payıyla
+#: "astar gerekli" hükmü alıyordu. Tavan artık çift duyarlıklı sayının bütün
+#: üs aralığını (2^-1074 … 2^1024, ~2100 yarılama) kapsar; gerçekçi girdide
+#: döngü eskisi gibi ölçütle erken biter (sonuç bit-aynı), saldırgan girdide
+#: kök bulunur ve zarf kapısı (gerileme hızı tavanı) hükmü verir.
+BLOWN_BALANCE_MAX_BISECTIONS = 2200
 
 
 def _solve_blown_surface_balance(h_gas_W_m2K: float,
@@ -436,8 +507,9 @@ def _solve_blown_surface_balance(h_gas_W_m2K: float,
     Yöntem: g(sdot) = sdot - q_net(sdot)/(rho*Q*) fonksiyonu sdot'ta KESİN
     MONOTON ARTANdır (psi monoton azalan -> q_net monoton azalan), dolayısıyla
     kök tektir ve [0, sdot_max] aralığındadır; sdot_max blokajsız (psi = 1)
-    çözümdür ve fiziksel üst sınırdır. Bölme araması (bisection) 80 adımda
-    makine hassasiyetine iner; scipy bağımlılığı EKLENMEZ.
+    çözümdür ve fiziksel üst sınırdır. Bölme araması (bisection) gerçekçi
+    girdide ~40 adımda makine hassasiyetine iner (tavan:
+    ``BLOWN_BALANCE_MAX_BISECTIONS``); scipy bağımlılığı EKLENMEZ.
 
     Args:
         gas_cp_J_kgK: Kenar (hazne) gazının özgül ısısı [J/(kg*K)]. B'
@@ -518,7 +590,7 @@ def _solve_blown_surface_balance(h_gas_W_m2K: float,
     lo, hi = 0.0, sdot_max
     # g(0) = -q_max/rho_qstar < 0 ; g(sdot_max) >= 0 (psi <= 1)
     iterations = 0
-    for _ in range(80):
+    for _ in range(BLOWN_BALANCE_MAX_BISECTIONS):
         mid = 0.5 * (lo + hi)
         if g(mid) < 0.0:
             lo = mid

@@ -220,11 +220,14 @@ class TestWallProfileContract:
 #: duyduğu en küçük geometri. ``3d_surface`` boş gövdeyle de meşrudur (haçsız
 #: bir tarama yüzeyi çizer); öteki ikisi çizilen şeyin kendisini gerektirir.
 #: Tek kaynak: ``hrma.app._APA_REQUIRED_ANY_OF``.
+#: V307/KÜÇÜKLER-2 (kalem 2): oda sıcaklığı da zorunlu (eski 3000 K
+#: varsayımı kalktı); 3100 K yalnız bu bekçinin girdisidir.
 _APA_EN_KUCUK_GOVDE = {
     '3d_surface': {},
-    'nozzle_mach': {'throat_area': 0.0012, 'expansion_ratio': 16.0},
+    'nozzle_mach': {'throat_area': 0.0012, 'expansion_ratio': 16.0,
+                    'chamber_temperature': 3100.0},
     'heat_flux': {'throat_area': 0.0012, 'expansion_ratio': 16.0,
-                  'burn_time': 30.0},
+                  'burn_time': 30.0, 'chamber_temperature': 3100.0},
 }
 
 

@@ -355,14 +355,20 @@ class TestP7B204IrtifaKapisi:
 
     @pytest.mark.parametrize('h', [0.0, 11000.0, 30000.0, 50000.0, 70000.0])
     def test_USSA1976_TEK_KAYNAKTAN_gelir(self, istemci, h):
-        """P7B2-04 başlığı ("70 km'de −%55,51") ÖLÇÜMLE ÇÜRÜTÜLDÜ."""
-        from hrma.constants import isa_pressure, isa_temperature
+        """P7B2-04 başlığı ("70 km'de −%55,51") ÖLÇÜMLE ÇÜRÜTÜLDÜ.
+
+        V307/İRTİFA-TEK: uç irtifayı GEOMETRİK okur (ana model kararı,
+        16 Kas); tek kaynak artık isa_pressure_geometric /
+        isa_temperature_geometric (eski: dönüşümsüz isa_pressure /
+        isa_temperature; 0 m bit-aynı, 30 km'de basınç +%2,15)."""
+        from hrma.constants import (isa_pressure_geometric,
+                                    isa_temperature_geometric)
         _, govde, _ = _post(istemci, '/api/altitude-to-pressure',
                             {'altitude': h})
-        assert govde['pressure'] == pytest.approx(isa_pressure(h) / 1e5,
-                                                  rel=1e-12)
-        assert govde['temperature'] == pytest.approx(isa_temperature(h),
-                                                     rel=1e-12)
+        assert govde['pressure'] == pytest.approx(
+            isa_pressure_geometric(h) / 1e5, rel=1e-12)
+        assert govde['temperature'] == pytest.approx(
+            isa_temperature_geometric(h), rel=1e-12)
 
 
 # ===========================================================================

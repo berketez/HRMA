@@ -230,23 +230,37 @@ class TestP11S1_03KullanilanAkininKunyesi:
                 f'{ad}: caller kancası {kanca!r} — "false" olmalıydı')
 
     @node_gerekli
-    def test_kazanilmamis_kalinlik_sayisi_basilmiyor(self, tmp_path, supurme):
-        """FAIL-CLOSED: hükmü taşıyan çift (h_gas, T_recovery) motordan
-        OKUNMADIYSA kalınlık sayısı kart olarak basılmaz.
+    def test_formdan_gelen_cift_kullanici_kunyesi_tasir(self, tmp_path, supurme):
+        """Hükmü taşıyan çift (h_gas, T_recovery) motordan OKUNMADIYSA künye
+        ``user``dır: sayı kullanıcının kendi girdisinin sonucudur.
 
         ÖLÇÜLEN KUSUR (once2.json A, taban): 50 MW/m² koşumunda ekran
         3,41 mm'yi kazanılmış hüküm gibi basıyordu — oysa o sayı panelin
-        KENDİ h_gas/T_recovery varsayılanlarından çıkmıştı.
+        KENDİ h_gas/T_recovery varsayılanlarından (3000 / 3200) çıkmıştı.
+
+        V307/GÜVERTE-ISIL (kalem 3) — BEKLENTİ DEĞİŞTİ. Eski: künye
+        ``assumed``, sayı basılmaz ("panelin kendi varsayılanları"). Kusurun
+        KÖKÜ kalktı: panelin h_gas / T_recovery / akı varsayılanı artık YOK
+        (alanlar boş; bekçisi ``tests/test_v307_guverte_isil.py``), form bu
+        çifti kendiliğinden gönderemez. Motor çifti okunmadan koşuma giren
+        çift kullanıcının yazdığı çifttir; ``assumed`` demek ve sonucu
+        gizlemek artık yanlış beyandır (panelin varsayılanı yok). Künye
+        ``user`` der ve çiftin formdan geldiğini adıyla yazar.
         """
         y = supurme[5.0e7]
         assert isinstance(y.get('required_thickness_mm'), float), (
             'uç sayıyı üretmiş olmalı — yoksa bekçi boşa döner')
         html = _panel_ciz(tmp_path, {'q5e7': y})['q5e7']
+        assert 'data-tps-flux-kind="user"' in html, (
+            'formdan gelen çiftle kurulan hüküm "user" künyesi taşımıyor')
+        assert 'data-tps-flux-kind="assumed"' not in html
+        assert 'come from the form' in html, (
+            'çiftin formdan geldiği ekranda söylenmiyor')
+        assert 'both read from' not in html, (
+            'motordan okunmamış çift okunmuş gibi gösteriliyor')
         sayi = '%.2f' % y['required_thickness_mm']
-        assert sayi not in html, (
-            f'kazanılmamış kalınlık ({sayi} mm) hâlâ kartta')
-        assert 'data-tps-flux-kind="assumed"' in html, (
-            'ölçülmemiş çiftle kurulan hüküm "assumed" künyesi taşımıyor')
+        assert sayi in html, (
+            f'kullanıcının girdisinin sonucu ({sayi} mm) kartta yok')
 
     @node_gerekli
     def test_eski_yol_bit_ayni_kaliyor(self, client, tmp_path):

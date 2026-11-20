@@ -43,11 +43,61 @@
     "isp_s": 120.4,
     "propellant_mass_g": 1508,
     "thrust_peak_lbf": 362,
-    "burn_time_s": 2.25,
+    "action_time_5pct_s": 2.25,
     "chamber_pressure_avg_psia": 735,
     "thrust_curve_lbf": {
-      "time_s": [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.7, 0.9, 1.0, 1.1, 1.2, 1.25, 1.3, 1.4, 1.5, 1.6, 1.7, 1.8, 1.9, 2.0, 2.1, 2.2, 2.3, 2.42],
-      "value": [0, 55, 70, 95, 120, 140, 175, 235, 270, 310, 345, 362, 355, 335, 265, 200, 155, 120, 85, 65, 50, 30, 15, 0]
+      "time_s": [
+        0.0,
+        0.1,
+        0.2,
+        0.3,
+        0.4,
+        0.5,
+        0.7,
+        0.9,
+        1.0,
+        1.1,
+        1.2,
+        1.25,
+        1.3,
+        1.4,
+        1.5,
+        1.6,
+        1.7,
+        1.8,
+        1.9,
+        2.0,
+        2.1,
+        2.2,
+        2.3,
+        2.42
+      ],
+      "value": [
+        0,
+        55,
+        70,
+        95,
+        120,
+        140,
+        175,
+        235,
+        270,
+        310,
+        345,
+        362,
+        355,
+        335,
+        265,
+        200,
+        155,
+        120,
+        85,
+        65,
+        50,
+        30,
+        15,
+        0
+      ]
     }
   },
   "units_original": "lb (itki, şekil ekseni), psi (basınç), N·s (impuls), s (süre), g (kütle), in ve mm (boyutlar) — rapor metni + şekil eksenleri aynen",
@@ -57,6 +107,18 @@
     "flag": true,
     "note": "Üç anormallik: (1) İtki başlangıcı yavaş/aşamalı — piroteknik ateşleyiciyle tutuşma gecikmesi; itki ~1.2 s boyunca yaklaşık doğrusal tırmandı (kappa.html: piroteknik ateşleyicide itki başlangıcı 2+ s sürebiliyordu; KSB-002'de pyrogen ile giderildi). (2) Oda basıncı ölçüm hattı egzoz kalıntısıyla KISMEN TIKALI — Şekil 6'da 'Blockage in sensor line' kesikli bölge; basınç verisinin bir bölümü geçersiz, bu yüzden basınç eğrisi kayda alınmadı ve ortalama basınç (735 psi) yalnız kaynak beyanı olarak taşındı. (3) İlk kez gözlenen 'üçgen' itki profili — teslim Isp'yi düşürdü (120.4 s; ikiz temiz test KSB-002'de 125.0 s). Ana istatistiğe girmemesi doğrudur; anomali katmanında skorlanır."
   },
-  "tags": ["static_fire", "kn_sugar", "bates", "amateur_rigorous", "published_literature", "f3_korelasyon_dongusu"],
-  "notes": "YAYIMLANMIŞ LİTERATÜR kaydı (F3 korelasyon döngüsü) — DIŞ KULLANICI VERİSİ DEĞİLDİR. Kappa-SB ilk testi; motor donanımı KDX-002 ile aynı (rapor: 'The motor for this test was the same as that used for the second Kappa static test'). STS-5000 standı, hidrolik yük hücresi + gösterge/video kaydı — elektronik DAQ yok, belirsizlik sınıfı yayımlanmamış (measurement_uncertainty bilinçli YOK). Şekil üzerine yazılı tepe oda basıncı 1235 psi (8.52 MPa) — skalar skor dışı (tasarım Pc girdi yankısı; ölçüldü, gerekçe KSB-002/KDX-002 kayıtlarının notlarında). CEBİRSEL BAĞ: Isp = I/(m·g0) — 1780/(1.508·9.80665) = 120.36 ≈ 120.4 doğrulandı. Rapor Update bölümü: motor içi türetilmiş yanma hızı r = 1.535·P^1.0 + 0.862 (mm/s, MPa) — strand fitlerinden köklü biçimde farklı; KNSB model-formu sınırının birincil kaynağı."
+  "tags": [
+    "static_fire",
+    "kn_sugar",
+    "bates",
+    "amateur_rigorous",
+    "published_literature",
+    "f3_korelasyon_dongusu",
+    "sure_tanimi_etki_5pct"
+  ],
+  "notes": "YAYIMLANMIŞ LİTERATÜR kaydı (F3 korelasyon döngüsü) — DIŞ KULLANICI VERİSİ DEĞİLDİR. Kappa-SB ilk testi; motor donanımı KDX-002 ile aynı (rapor: 'The motor for this test was the same as that used for the second Kappa static test'). STS-5000 standı, hidrolik yük hücresi + gösterge/video kaydı — elektronik DAQ yok, belirsizlik sınıfı yayımlanmamış (measurement_uncertainty bilinçli YOK). Şekil üzerine yazılı tepe oda basıncı 1235 psi (8.52 MPa) — skalar skor dışı (tasarım Pc girdi yankısı; ölçüldü, gerekçe KSB-002/KDX-002 kayıtlarının notlarında). CEBİRSEL BAĞ: Isp = I/(m·g0) — 1780/(1.508·9.80665) = 120.36 ≈ 120.4 doğrulandı. Rapor Update bölümü: motor içi türetilmiş yanma hızı r = 1.535·P^1.0 + 0.862 (mm/s, MPa) — strand fitlerinden köklü biçimde farklı; KNSB model-formu sınırının birincil kaynağı. SÜRE ALANI (V307 karar 2): 'action_time_5pct_s' itkinin tepe değerin ~%5'i üstünde kaldığı ETKİ süresidir (tutuşma yükselişi ve kuyruk dahil); kaynak raporu sayısal süre ve tanım vermez, değer eğriden okunmuştur. Eski alan adı 'burn_time_s' idi ve HRMA'nın web tükenme süresiyle eş tanımlıymış gibi skorlanıyordu.",
+  "model_scope": {
+    "in_scope": false,
+    "note": "Kapsam ölçütü ÖNCEDEN TANIMLI ve hata büyüklüğünden BAĞIMSIZ: kaynak yazarının belgelediği motor içi yanma davranışı tek üslü/parçalı Saint-Robert denge yasasının kapsamı dışında. KNSB'nin motor içi 'üçgen' itki/basınç profili yazarın kendi strand verisiyle de üretilemedi (KSB-001 raporu 'Update': motor içi türetilmiş üs n ≈ 1; KSB-002 raporu: gecikmeli tutuşma ve erozif yanma açıklamıyor). Kayıt sağlıklıdır; veritabanında kalır, hem kapsam içi hem bütün veri istatistiği yayımlanır (V307 karar 4)."
+  }
 }

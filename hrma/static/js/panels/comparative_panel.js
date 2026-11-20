@@ -39,6 +39,50 @@
     // Snapshot deposu — sayfa ömrü boyunca yaşar (kalıcı depolama yok)
     const snapshots = [];
 
+    // ------------------------------------------------------------------
+    // V307/GÜVERTE-ORTAM — TASARIM ORTAMINA BAĞLI METRİKLER
+    // ------------------------------------------------------------------
+    // Sıvı motorda deniz seviyesi dışındaki tasarımda itki, Isp ve toplam
+    // impuls TASARIM ORTAMININ sayılarıdır (girilen itki o ortamdaki
+    // itkidir; çözücünün `design_ambient` beyanı). Kütle ortamdan bağımsızdır.
+    // Ortamı farklı iki tasarımın bu üç sayısı aynı başlık altında
+    // sıralanmaz / birbirinden çıkarılmaz; ortam her anlık görüntüyle
+    // taşınır ve ekranda adıyla yazılır. Deniz seviyesi tasarımında ortam
+    // null'dır ve her şey bugünküyle aynıdır (gövde, satır, tablo).
+    const ORTAMA_BAGLI = ['thrust', 'isp', 'total_impulse'];
+
+    //: Son `currentMetrics` turunun tasarım ortamı (performance_panel.js
+    //: `HRMAIspAmbient.describe` tanımı); deniz seviyesinde null. Anlık
+    //: görüntüye `ortam` olarak girer, karşılaştırma gövdesine GİRMEZ.
+    let sonOrtam = null;
+
+    //: Son karşılaştırmada ortama bağlı metrikler farklı tasarım ortamlarında
+    //: mıydı? (BEST kartları ve özet satırı buna bakar.)
+    let ortamKarisik = false;
+    //: Son karşılaştırmanın ortak (deniz seviyesi dışı) ortamı ya da null.
+    let ortakOrtam = null;
+    //: Karışık ortamda ekrana yazılacak ortamların listesi (tanımlar; null =
+    //: deniz seviyesi).
+    let ortamListesi = [];
+
+    // Anlık görüntünün ortam kimliği: deniz seviyesi ⟷ tanımın `key`i. İki
+    // tasarım ancak bu kimlik aynıysa ortama bağlı metriklerde yan yana
+    // sıralanır.
+    function ortamKimligi(snap) {
+        return (snap && snap.ortam) ? snap.ortam.key : 'sea_level';
+    }
+
+    function ortamHtml(ortam) {
+        const AMB = window.HRMAIspAmbient;
+        return (ortam && AMB && typeof AMB.labelHtml === 'function')
+            ? AMB.labelHtml(ortam) : '';
+    }
+
+    function denizSeviyesiHtml() {
+        return `<span data-i18n="panel.comparative.ambientSeaLevel">${
+            T('panel.comparative.ambientSeaLevel', 'sea level')}</span>`;
+    }
+
     /* V3 SG-2 Bölüm B (12 Eki) — KALEM TAVANI AŞIMI İNSAN OKUR METİNLE.
        ÖLÇÜLDÜ (SG-2A devri): 256'dan fazla anlık görüntüyle karşılaştırma
        istendiğinde sunucu 413 `item_budget_exceeded` döner ve panel bu
@@ -102,9 +146,13 @@
         // "—" kalıyordu ve daha YÜKSEK Isp'li tasarım (253,98 s) elenip
         // daha düşüğü (242,49 s) yalnız itkiyle öne çıkıyordu.
         //
-        // Üç tipin de DENİZ SEVİYESİ Isp'si karşılaştırılır (ölçüldü:
-        // hibrit `isp` === `sea_level_isp`; katı `specific_impulse` ===
-        // `isp_sea_level`; sıvı `isp_sea_level`) — vakum Isp'si KARIŞTIRILMAZ.
+        // Üç tipin de DENİZ SEVİYESİ Isp'si karşılaştırılır (katı
+        // `specific_impulse` === `isp_sea_level`; sıvı `isp_sea_level`) —
+        // vakum Isp'si KARIŞTIRILMAZ. Hibrit `isp` tasarım ortamının Isp'sidir
+        // ve yalnız tasarım ortamı ISA deniz seviyesiyken deniz seviyesi
+        // Isp'sidir (V307/HİBRİT-ORTAM, ölçüldü: 1,0 bar varsayılanında
+        // `isp` 195,81 s ⟷ `sea_level_isp` 195,43 s); başka ortamda hibrit
+        // de aşağıdaki tasarım ortamı dalından (`design_ambient`) geçer.
         // Hangi anahtardan okunduğu `isp_basis` ile beyan edilir (uç bu
         // metni sayısal metrik saymaz, sıralamaya girmez). Anahtarların
         // hiçbiri yoksa alan HİÇ gönderilmez: uydurma yok, "—" dürüsttür.
@@ -117,18 +165,57 @@
         let isp = null;
         const mt = (window.AnalysisDock && window.AnalysisDock.getMotorType)
             ? window.AnalysisDock.getMotorType() : null;
-        // Tip çözülemezse (sayfa bağlamı yok) ÜÇ listenin birleşimi denenir:
-        // hepsi DENİZ SEVİYESİ Isp'sidir, tanım karışmaz. Vakum anahtarları
-        // (`isp_vacuum`, `vacuum_isp`) listeye ASLA girmez.
-        // Önce sayfanın tipi denenir; o listede karşılık YOKSA üç tipin
-        // birleşimine düşülür (hepsi deniz seviyesi Isp'si — tanım karışmaz).
-        // Tip yanlış raporlansa bile Isp sessizce kaybolmaz.
-        (ISP_KEYS[mt] || []).concat(ISP_KEYS.hybrid, ISP_KEYS.solid)
-            .forEach(function (k) {
-                if (isp === null && num(m[k]) !== null) {
-                    isp = num(m[k]); ispKey = k;
-                }
-            });
+        // V307/GÜVERTE-ORTAM — SIVIDA TASARIM ORTAMI DENİZ SEVİYESİ DEĞİLSE.
+        // ÖLÇÜLDÜ (docs/scofield/raw/OH/V307/guverte-ortam/olcum/
+        // ortam_once.json): aşağıdaki sıra deniz seviyesi DIŞINDAKİ sıvı
+        // tasarımda iki ayrı ortamı aynı "Isp" başlığına koyuyordu — nozul
+        // deniz seviyesinde yapışıksa `isp_sea_level` (vakum motorunun deniz
+        // seviyesi Isp'si, 254,71 s), ayrıksa `specific_impulse` (vakum
+        // Isp'si, 327,07 s); ikincisi deniz seviyesi tasarımlarıyla
+        // sıralanıp "BEST ISP" seçiliyordu. Böyle bir tasarımın Isp'si artık
+        // TASARIM ORTAMININ Isp'sidir (`isp_design_ambient`, yanıtın başlık
+        // Isp'si; sayı türetilmez). İtki ve toplam impuls zaten o ortamın
+        // sayılarıdır; ortam anlık görüntüyle birlikte taşınır: listede ve
+        // üst üste tabloda adıyla yazılır; ortamı farklı tasarımlar bu üç
+        // metrikte aynı sıralamaya girmez (runComparison, ORTAMA_BAGLI).
+        // Ortam okuyucusu tek kaynaktır (performance_panel.js
+        // window.HRMAIspAmbient); yoksa ortama bağlı üç metrik HİÇ
+        // gönderilmez (fail-closed). Deniz seviyesi tasarımında bu dal
+        // koşmaz: okunan anahtar, sayı ve gövde bugünküyle aynı.
+        sonOrtam = null;
+        const da = m.design_ambient;
+        // Sıvı ve hibrit (V307/HİBRİT-ORTAM) bloğu `mode` taşır.
+        const sivDisOrtam = !!(da && typeof da === 'object'
+            && da.is_sea_level === false && typeof da.mode === 'string');
+        let ortamYok = false;
+        if (sivDisOrtam) {
+            const AMB = window.HRMAIspAmbient;
+            const tanim = (AMB && typeof AMB.describe === 'function')
+                ? AMB.describe(da) : null;
+            if (tanim) {
+                ['isp_design_ambient', 'specific_impulse'].forEach(function (k) {
+                    if (isp === null && num(m[k]) !== null) {
+                        isp = num(m[k]); ispKey = k;
+                    }
+                });
+                sonOrtam = tanim;
+            } else {
+                ortamYok = true;
+            }
+        } else {
+            // Tip çözülemezse (sayfa bağlamı yok) ÜÇ listenin birleşimi
+            // denenir: hepsi DENİZ SEVİYESİ Isp'sidir, tanım karışmaz. Vakum
+            // anahtarları (`isp_vacuum`, `vacuum_isp`) listeye ASLA girmez.
+            // Önce sayfanın tipi denenir; o listede karşılık YOKSA üç tipin
+            // birleşimine düşülür (hepsi deniz seviyesi Isp'si — tanım
+            // karışmaz). Tip yanlış raporlansa bile Isp sessizce kaybolmaz.
+            (ISP_KEYS[mt] || []).concat(ISP_KEYS.hybrid, ISP_KEYS.solid)
+                .forEach(function (k) {
+                    if (isp === null && num(m[k]) !== null) {
+                        isp = num(m[k]); ispKey = k;
+                    }
+                });
+        }
         let totalImpulse = num(m.total_impulse);
         if (totalImpulse == null && thrust != null) {
             const burnTime = num(U.readBurnTime(r));
@@ -179,9 +266,11 @@
                 if (v != null) { totalMass = v; massScope = adaylar[i][1]; }
             }
         }
-        if (thrust != null) out.thrust = thrust;
-        if (isp != null) { out.isp = isp; out.isp_basis = ispKey; }
-        if (totalImpulse != null) out.total_impulse = totalImpulse;
+        // ortamYok: deniz seviyesi dışı tasarım ama ortam okuyucusu yok —
+        // ortama bağlı üç metrik ortamsız GÖNDERİLMEZ (fail-closed).
+        if (thrust != null && !ortamYok) out.thrust = thrust;
+        if (isp != null && !ortamYok) { out.isp = isp; out.isp_basis = ispKey; }
+        if (totalImpulse != null && !ortamYok) out.total_impulse = totalImpulse;
         if (totalMass != null) {
             out.total_mass = totalMass;
             out.total_mass_scope = massScope;
@@ -297,6 +386,16 @@
                             changed: false, onlyIn: (va == null ? 'b' : 'a') });
                 return;
             }
+            // V307/GÜVERTE-ORTAM: farklı tasarım ortamlarının itkisi / Isp'si /
+            // impulsu birbirinden çıkarılmaz (fark bir tasarım farkı değil,
+            // ortam farkıdır); satır iki sayıyı ortamlarıyla basar.
+            if (ORTAMA_BAGLI.indexOf(k) !== -1
+                    && ortamKimligi(a) !== ortamKimligi(b)) {
+                rows.push({ metric: k, a: va, b: vb, delta: null, rel: null,
+                            changed: false, onlyIn: null,
+                            ambientDiffers: true });
+                return;
+            }
             const delta = vb - va;
             const rel = relChange(va, vb);
             rows.push({ metric: k, a: va, b: vb, delta: delta, rel: rel,
@@ -377,10 +476,37 @@
             const unit = metricUnit(r.metric);
             const d = metricDigits(r.metric);
             const label = metricLabel(r.metric);
+            const ortamaBagli = (ORTAMA_BAGLI.indexOf(r.metric) !== -1);
+            if (r.ambientDiffers) {
+                // V307/GÜVERTE-ORTAM: iki sayı, iki ortam — fark sütunu yok.
+                const hucre = function (v, snap) {
+                    return U.fmt(v, d) + ' ' + unit + ' · '
+                        + (ortamHtml(snap.ortam) || denizSeviyesiHtml());
+                };
+                return `<tr data-cmp-metric="${escapeHtml(r.metric)}"
+                    data-cmp-changed="0" data-cmp-ambient-differs="1">
+                    <td style="${U.TD}"><strong>${escapeHtml(label)}</strong></td>
+                    <td style="${U.TD}">${hucre(r.a, a)}</td>
+                    <td style="${U.TD}">${hucre(r.b, b)}</td>
+                    <td style="${U.TD}" colspan="2" data-i18n="panel.comparative.ambientNotCompared">${
+                        T('panel.comparative.ambientNotCompared',
+                          'not compared: the two designs are at different '
+                          + 'design ambients')}</td></tr>`;
+            }
+            const ortakEtiket = (ortamaBagli && a.ortam
+                && ortamKimligi(a) === ortamKimligi(b)) ? ortamHtml(a.ortam) : '';
+            const etiketEki = function (o) {
+                return o ? ` <span style="font-weight:normal; color:var(--hd-ink-dim, #7d97a5);">(${
+                    o})</span>` : '';
+            };
+            const etiketHtml = escapeHtml(label) + etiketEki(ortakEtiket);
             if (r.onlyIn) {
                 const only = (r.onlyIn === 'a') ? a.name : b.name;
                 const val = (r.onlyIn === 'a') ? r.a : r.b;
-                return `<tr><td style="${U.TD}"><strong>${escapeHtml(label)}</strong></td>
+                const tekOrtam = ortamaBagli
+                    ? ortamHtml((r.onlyIn === 'a' ? a : b).ortam) : '';
+                return `<tr><td style="${U.TD}"><strong>${escapeHtml(label)}${
+                    etiketEki(tekOrtam)}</strong></td>
                     <td style="${U.TD}">${r.a == null ? '—' : U.fmt(r.a, d) + ' ' + unit}</td>
                     <td style="${U.TD}">${r.b == null ? '—' : U.fmt(r.b, d) + ' ' + unit}</td>
                     <td style="${U.TD}" colspan="2">${U.tf('panel.comparative.onlyIn',
@@ -399,7 +525,7 @@
             const relTitle = r.changed ? '' : ' title="' + escapeHtml(epsTip) + '"';
             return `<tr data-cmp-metric="${escapeHtml(r.metric)}"
                 data-cmp-changed="${r.changed ? '1' : '0'}">
-                <td style="${U.TD}"><strong>${escapeHtml(label)}</strong></td>
+                <td style="${U.TD}"><strong>${etiketHtml}</strong></td>
                 <td style="${U.TD}">${U.fmt(r.a, d)} ${unit}</td>
                 <td style="${U.TD}">${U.fmt(r.b, d)} ${unit}</td>
                 <td style="${U.TD}">${U.fmt(r.delta, d)} ${unit}</td>
@@ -464,6 +590,15 @@
             parts.push('It=' + U.fmt(snap.metrics.total_impulse, 0) + ' N·s');
         if (snap.metrics.total_mass != null)
             parts.push('m=' + U.fmt(snap.metrics.total_mass, 2) + ' kg');
+        // V307/GÜVERTE-ORTAM: deniz seviyesi dışındaki tasarımda F, Isp ve It
+        // o tasarım ortamının sayılarıdır — satır ortamı adıyla söyler
+        // (deniz seviyesinde satır bugünküyle aynı).
+        const ortamEtiketi = ortamHtml(snap.ortam);
+        if (ortamEtiketi) {
+            parts.push(`<span data-i18n="panel.comparative.snapAmbient">${
+                T('panel.comparative.snapAmbient',
+                  'design ambient of F, Isp, It:')}</span> ` + ortamEtiketi);
+        }
         return `<div style="display:flex; gap:10px; align-items:baseline;
                 padding:6px 10px; margin:4px 0; flex-wrap:wrap;
                 border:1px solid var(--hd-line, rgba(0,229,255,0.14));
@@ -512,13 +647,15 @@
         // Aynı ad ikinci kez gelirse üzerine yazılır (backend sözlüğü
         // isim-anahtarlı — sessiz kayıp yerine bilinçli güncelleme)
         const existing = snapshots.findIndex(function (s) { return s.name === name; });
+        // V307/GÜVERTE-ORTAM: Isp'nin tasarım ortamı (deniz seviyesinde null).
+        const kayit = { name: name, metrics: metrics, ortam: sonOrtam };
         if (existing !== -1) {
-            snapshots[existing] = { name: name, metrics: metrics };
+            snapshots[existing] = kayit;
             if (status) status.textContent = U.tf('panel.comparative.snapUpdated',
                 { name: name, count: snapshots.length },
                 'Snapshot "{name}" updated ({count} stored).');
         } else {
-            snapshots.push({ name: name, metrics: metrics });
+            snapshots.push(kayit);
             if (status) status.textContent = U.tf('panel.comparative.snapStored',
                 { name: name, count: snapshots.length },
                 'Snapshot "{name}" stored ({count} total).');
@@ -595,15 +732,57 @@
             return kapsamlar.indexOf(k) === i;
         });
         kutleKapsamiKarisik = (kapsamKumesi.length > 1);
+        // V307/GÜVERTE-ORTAM — ORTAM KAPISI (fail-closed, kütle kapsamı
+        // kapısıyla aynı desen). ÖLÇÜLDÜ (olcum/ortam_once.json, ds + vakL3):
+        // deniz seviyesi Isp'si 254,79 s ile vakum Isp'si 327,07 s aynı
+        // "isp" alanında uca gidiyor, uç "BEST ISP: vakL3" diyordu — fark
+        // bir tasarım üstünlüğü değil ortam farkıdır (itki ve toplam impuls
+        // da o ortamın sayılarıdır). Ortama bağlı metrik taşıyan anlık
+        // görüntülerin ortam kimlikleri farklıysa bu metrikler (ve Isp'nin
+        // kaynağı) hiç gönderilmez: uç bunları sıralamaz, Isp / kütle oranı
+        // üretmez; kartlar '—' kalır ve nedeni ortamların adıyla ekranda
+        // yazar. Kimlikler aynıysa gövde bugünküyle aynıdır.
+        const ortamlilar = snapshots.filter(function (s) {
+            return ORTAMA_BAGLI.some(function (k) {
+                return num(s.metrics[k]) !== null;
+            });
+        });
+        const ortamKimlikleri = [];
+        ortamListesi = [];
+        ortamlilar.forEach(function (s) {
+            const k = ortamKimligi(s);
+            if (ortamKimlikleri.indexOf(k) === -1) {
+                ortamKimlikleri.push(k);
+                ortamListesi.push(s.ortam || null);
+            }
+        });
+        ortamKarisik = (ortamKimlikleri.length > 1);
+        ortakOrtam = (!ortamKarisik && ortamlilar.length
+            && ortamlilar[0].ortam) ? ortamlilar[0].ortam : null;
         const motorConfigs = {};
         snapshots.forEach(function (s) {
             const kopya = {};
             Object.keys(s.metrics).forEach(function (k) {
                 if (kutleKapsamiKarisik && k === 'total_mass') return;
+                if (ortamKarisik && (ORTAMA_BAGLI.indexOf(k) !== -1
+                                     || k === 'isp_basis')) return;
                 kopya[k] = s.metrics[k];
             });
             motorConfigs[s.name] = kopya;
         });
+
+        // V307/KÜÇÜKLER-2 (kalem 3): ortama bağlı metrikler gönderiliyorsa
+        // (ortamlar aynı) o ortamın kaydı gövdeye ADIYLA girer; uç figürün
+        // Isp eksenine ve başlığına ekran satırıyla aynı ifadeyi yazar.
+        // Kayıt yalnız anlık görüntülerin çözücü beyanından kurulur.
+        // Kayıt kurucusu tek kaynaktır (performance_panel.js
+        // HRMAIspAmbient.record); yoksa kayıt gönderilmez (figür ortamsız).
+        const govde = { motor_configs: motorConfigs };
+        const AMBK = window.HRMAIspAmbient;
+        if (!ortamKarisik && ortamlilar.length && AMBK
+                && typeof AMBK.record === 'function') {
+            govde.design_ambient = AMBK.record(ortakOrtam);
+        }
 
         btn.disabled = true;
         root.style.display = 'none';
@@ -612,7 +791,7 @@
             const resp = await fetch(ENDPOINT, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ motor_configs: motorConfigs }),
+                body: JSON.stringify(govde),
             });
             let data = null;
             try { data = await resp.json(); } catch (e) { data = null; }
@@ -645,19 +824,30 @@
         return null;
     }
 
+    // V307/GÜVERTE-ORTAM: ortam kapısı kapandığında BEST kartlarının ipucu
+    // nedeni söyler (görünür satır ayrıca kartların altında).
+    function ortamKapisiIpucu() {
+        return T('panel.comparative.bestAmbientTip',
+            'Not computed: the stored designs are at different design ambients; '
+            + 'thrust, Isp and total impulse at one ambient pressure are not '
+            + 'ranked against those at another.');
+    }
+
     function summaryCards(analysis) {
         if (!analysis) return '';
         return '<div style="display:flex; gap:10px; flex-wrap:wrap;">'
             + U.statCard(T('panel.comparative.bestThrust', 'BEST THRUST'),
                 escapeHtml(analysis.best_thrust || '—'), '',
                 analysis.best_thrust ? 'ok' : 'dim',
-                T('panel.comparative.bestThrustTip',
-                  'Highest thrust among configurations that report it'))
+                ortamKarisik ? ortamKapisiIpucu()
+                    : T('panel.comparative.bestThrustTip',
+                        'Highest thrust among configurations that report it'))
             + U.statCard(T('panel.comparative.bestIsp', 'BEST ISP'),
                 escapeHtml(analysis.best_isp || '—'), '',
                 analysis.best_isp ? 'ok' : 'dim',
-                T('panel.comparative.bestIspTip',
-                  'Highest specific impulse among configurations that report it'))
+                ortamKarisik ? ortamKapisiIpucu()
+                    : T('panel.comparative.bestIspTip',
+                        'Highest specific impulse among configurations that report it'))
             + U.statCard(T('panel.comparative.bestEfficiency', 'BEST EFFICIENCY'),
                 escapeHtml(analysis.best_efficiency || '—'), '',
                 analysis.best_efficiency ? 'ok' : 'dim',
@@ -668,8 +858,9 @@
                         + 'hybrid/solid, dry engine mass for liquid), so the '
                         + 'Isp / mass ratio would not be comparable between '
                         + 'them. Compare configurations of the same motor type.')
-                    : T('panel.comparative.bestEfficiencyTip',
-                        'Highest Isp / total mass ratio (needs both metrics)'))
+                    : (ortamKarisik ? ortamKapisiIpucu()
+                        : T('panel.comparative.bestEfficiencyTip',
+                            'Highest Isp / total mass ratio (needs both metrics)')))
             // ÖH D25 / P11B2-12: `|| 0` yedeği uç sayımı yayımlamadığında
             // "CONFIGS 0" basıyordu — komşu iki kart ('—' + 'dim') zaten
             // fail-closed'dı; üçü de aynı sözleşmede.
@@ -681,10 +872,35 @@
             + '</div>';
     }
 
+    // V307/GÜVERTE-ORTAM: ortam özet kartlarının altında GÖRÜNÜR satırda
+    // (ipucu dokunmatik ekranda yoktur). Hepsi deniz seviyesiyse satır yoktur
+    // (ekran bugünküyle aynı).
+    function ortamSatiri() {
+        let ic = '';
+        if (ortamKarisik) {
+            const adlar = ortamListesi.map(function (o) {
+                return o ? ortamHtml(o) : denizSeviyesiHtml();
+            }).join(' · ');
+            ic = `<span data-i18n="panel.comparative.ambientMixed">${
+                T('panel.comparative.ambientMixed',
+                  'Thrust, Isp and total impulse are not ranked: the designs '
+                  + 'are at different design ambients —')}</span> ${adlar}`;
+        } else if (ortakOrtam) {
+            ic = `<span data-i18n="panel.comparative.ambientCommon">${
+                T('panel.comparative.ambientCommon',
+                  'Thrust, Isp and total impulse of every compared design are '
+                  + 'at its design ambient:')}</span> ${ortamHtml(ortakOrtam)}`;
+        }
+        return ic ? `<p data-cmp-ambient="${ortamKarisik ? 'mixed' : 'common'}"
+            style="font-size:0.74rem; margin:6px 0 0; white-space:normal;
+            color:var(${ortamKarisik ? '--hd-orange, #ff8c33' : '--hd-ink-dim, #7d97a5'});">${
+            ic}</p>` : '';
+    }
+
     function render(data, root) {
         const head = document.createElement('div');
         head.innerHTML = U.sectionTitle(T('panel.comparative.secSummary', 'Comparison Summary'))
-            + summaryCards(data && data.analysis);
+            + summaryCards(data && data.analysis) + ortamSatiri();
         root.appendChild(head);
 
         const wrap = document.createElement('div');
@@ -704,6 +920,21 @@
         // geçirir; beyan yoksa hiçbir düğüm eklenmez (fail-closed).
         U.source.ledgerInto(root, data && data.analysis, { deep: true });
 
+        // V307/GÜVERTE-ORTAM: ortam kapısı kapalıyken uca itki / Isp / impuls
+        // gitmez; ucun figürü yalnız boş eksenlerden oluşur (ölçüldü,
+        // tarayici/sivi_tr_1440_karsilastirma.jpg ilk koşu: "İtki (N)"
+        // ekseni -1…4, veri yok). Boş eksen çizilmez; neden yazılır.
+        if (ortamKarisik) {
+            plot.setAttribute('data-cmp-chart', 'ambient_mixed');
+            plot.innerHTML = `<p style="font-size:0.78rem; margin:6px 0;
+                color:var(--hd-ink-dim, #7d97a5); white-space:normal;"
+                data-i18n="panel.comparative.chartAmbientMixed">${
+                T('panel.comparative.chartAmbientMixed',
+                  'Chart not drawn: thrust, Isp and total impulse of these '
+                  + 'designs are at different design ambients, so there is no '
+                  + 'common quantity to plot.')}</p>`;
+            return;
+        }
         const fig = parseFigure(data && data.plot);
         if (!fig) {
             plot.textContent = T('common.badPayload', 'Unexpected plot payload from backend.');
@@ -742,6 +973,10 @@
         _overlayRows: overlayRows,
         _overlayTableHtml: overlayTableHtml,
         _overlayThreshold: overlayThreshold,
+        // V307/GÜVERTE-ORTAM — son okunan tasarım ortamı / son karşılaştırma
+        // ortam kapısı (bekçiler okur).
+        _lastAmbient: function () { return sonOrtam; },
+        _ambientMixed: function () { return ortamKarisik; },
         snapshot: takeSnapshot,
         run: runComparison,
         overlay: runOverlay,

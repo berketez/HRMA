@@ -687,7 +687,7 @@ def solve_steady_axisym(grid, P0, T0, gamma, R, Pb=None,
     T0 = float(T0)
     Rs = float(R)
     if P0 <= 0.0 or T0 <= 0.0 or Rs <= 0.0:
-        raise ValueError('P0, T0 ve R pozitif olmalı (uydurma yedek yok).')
+        raise ValueError('P0, T0 ve R pozitif olmalı (yedek değer yok).')
     if not (1.0 < g < 2.0):
         raise ValueError('gamma (1, 2) aralığında olmalı (mükemmel gaz).')
     if time_integrator not in TIME_INTEGRATORS:
@@ -2872,7 +2872,7 @@ def first_cell_for_y_plus(grid, P0, T0, gamma, R, transport,
     if not np.any(gecerli):
         raise ValueError(
             'Sınır tabakası marşı hiçbir istasyonda sonlu τ_w vermedi — '
-            f"marş durumu {bl['march']['status']!r}. Ön-tahmin uydurma bir "
+            f"marş durumu {bl['march']['status']!r}. Ön-tahmin varsayılan bir "
             'değere düşmez; vakayı ya da duvar sıcaklığını gözden geçirin.')
     u_tau = np.sqrt(tau_w[gecerli] / rho_w[gecerli])
     y_merkez = y_hedef * mu_w[gecerli] / (rho_w[gecerli] * u_tau)

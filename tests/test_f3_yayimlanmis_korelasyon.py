@@ -86,19 +86,33 @@ BANT_TOL = 1.0
 # +9,81, ksb001 −10,27 → −9,21, ksb002 −8,26 → −7,18); burn_time ve
 # propellant_mass DEĞİŞMEDİ. Ölçüm betiği:
 # docs/scofield/raw/OH/V301/tcapa-c1/f3_bant_olcum.py. Tolerans aynı (±1,0).
+#
+# V307 KATI-DOĞRULAMA faz 2 (16 Kas 2026) — KIYAS DONANIMLA; BANTLAR ÖLÇÜLDÜ.
+# Karar 2: adaptör kaydın boğazını (pin_throat_area), genleşme oranını
+# (pin_expansion_ratio) ve ölçülen kütle/tane hacmi yoğunluğunu motora verir.
+# Eski → yeni (neden):
+#   * burn_time → web_burn_time_vs_action_time: kayıttaki süre %5 eşikli
+#     ETKİ süresidir, HRMA web tükenme süresi yayımlar; kıyas ayrı adla ve
+#     'definition_mismatch' bayrağıyla. kdx002 −14,80 → −14,06; ksb001
+#     −22,02 → −22,03; ksb002 −20,29 → −18,84 (gerçek boğaz + yoğunluk).
+#   * propellant_mass: artık SKORLANMAZ (yoğunluk ölçülen kütleden alınır,
+#     kütle girdidir; eski +4,74 / +5,14 / +9,57 ideal yoğunluk farkıydı) —
+#     bekçi: test_olculen_kutle_tuketilir.
+#   * isp: kdx002 +10,68 → +11,16; ksb001 +23,33 → +23,32; ksb002 +18,90 →
+#     +18,49 (gerçek boğaz/ε ile basınç ve C_F değişti).
+#   * thrust_peak: kdx002 +9,81 → +4,37; ksb001 −9,21 → −13,59; ksb002
+#     −7,18 → −16,94 (ideal yoğunluk itkiyi şişiriyordu).
+# Ölçüm: docs/scofield/raw/OH/V307/kati-dogrulama/RAPOR.md (faz 2).
 BANTLAR = {
-    ("sol-nakka2000-kappa-kdx002", "burn_time"): -14.80,
-    ("sol-nakka2000-kappa-kdx002", "isp"): +10.68,
-    ("sol-nakka2000-kappa-kdx002", "propellant_mass"): +4.74,
-    ("sol-nakka2000-kappa-kdx002", "thrust_peak"): +9.81,
-    ("sol-nakka2000-kappa-ksb001", "burn_time"): -22.02,
-    ("sol-nakka2000-kappa-ksb001", "isp"): +23.33,
-    ("sol-nakka2000-kappa-ksb001", "propellant_mass"): +5.14,
-    ("sol-nakka2000-kappa-ksb001", "thrust_peak"): -9.21,
-    ("sol-nakka2000-kappa-ksb002", "burn_time"): -20.29,
-    ("sol-nakka2000-kappa-ksb002", "isp"): +18.90,
-    ("sol-nakka2000-kappa-ksb002", "propellant_mass"): +9.57,
-    ("sol-nakka2000-kappa-ksb002", "thrust_peak"): -7.18,
+    ("sol-nakka2000-kappa-kdx002", "isp"): +11.16,
+    ("sol-nakka2000-kappa-kdx002", "thrust_peak"): +4.37,
+    ("sol-nakka2000-kappa-kdx002", "web_burn_time_vs_action_time"): -14.06,
+    ("sol-nakka2000-kappa-ksb001", "isp"): +23.32,
+    ("sol-nakka2000-kappa-ksb001", "thrust_peak"): -13.59,
+    ("sol-nakka2000-kappa-ksb001", "web_burn_time_vs_action_time"): -22.03,
+    ("sol-nakka2000-kappa-ksb002", "isp"): +18.49,
+    ("sol-nakka2000-kappa-ksb002", "thrust_peak"): -16.94,
+    ("sol-nakka2000-kappa-ksb002", "web_burn_time_vs_action_time"): -18.84,
 }
 
 
@@ -264,21 +278,63 @@ class TestKorelasyonKosusu:
             f"Bilinçli değişimde bandı ölçüp güncelle.")
 
     def test_katmanlar(self, kosu):
-        """KSB-002 ana, KDX-002 low, KSB-001 anomaly — karantina bütünlüğü."""
+        """KDX-002 low; KSB-001/002 MODEL KAPSAMI DIŞI (V307 karar 4).
+
+        Kapsam ölçütü hata büyüklüğünden bağımsız ve önceden tanımlıdır:
+        KNSB'nin motor içi üçgen profili tek üslü yanma yasasının kapsamı
+        dışında. Kayıtlar silinmez; kapsam dışı katmanda ADIYLA yayımlanır.
+        KSB-001 ayrıca deney anomalisi bayraklıdır (iki gerekçe de görünür).
+        """
         stats = kosu["statistics"]
         ana_idler = {e["test_id"] for c in stats["cells"]
                      for e in c["entries"]}
         low_idler = {e["test_id"] for c in stats["low_confidence_cells"]
                      for e in c["entries"]}
-        anomali_idler = {e["test_id"] for e in stats["anomaly_entries"]}
-        assert ana_idler == {"sol-nakka2000-kappa-ksb002"}
+        kapsam_disi = {e["test_id"]: e for e in stats["out_of_scope_entries"]}
+        assert ana_idler == set()
         assert low_idler == {"sol-nakka2000-kappa-kdx002"}
-        assert anomali_idler == {"sol-nakka2000-kappa-ksb001"}
-        # 4 skorlanan büyüklük / kayıt (5'ti; total_impulse 19 Ağu'da
-        # F022-katı ile skor dışına alındı — BANTLAR yorumundaki gerekçe)
-        assert len(stats["cells"]) == 4
-        assert len(stats["low_confidence_cells"]) == 4
-        assert len({e["quantity"] for e in stats["anomaly_entries"]}) == 4
+        assert set(kapsam_disi) == {"sol-nakka2000-kappa-ksb001",
+                                    "sol-nakka2000-kappa-ksb002"}
+        assert kapsam_disi["sol-nakka2000-kappa-ksb001"]["also_anomaly_flagged"]
+        assert not kapsam_disi["sol-nakka2000-kappa-ksb002"]["also_anomaly_flagged"]
+        assert stats["anomaly_entries"] == []
+        # Kapsam dışı sayılar GERİ ÇEKİLMİŞ hücre olarak adıyla durur.
+        cekilen = {c["quantity"] for c in stats["out_of_scope_withheld_cells"]}
+        assert {"isp", "thrust_peak",
+                "web_burn_time_vs_action_time"} <= cekilen
+        assert {c["quantity"] for c in stats["low_confidence_cells"]} == {
+            "isp", "thrust_peak", "web_burn_time_vs_action_time"}
+        # İtici ailesi hücre kimliğinde (karar 3).
+        assert {c["propellant_family"]
+                for c in stats["low_confidence_cells"]} == {"sugar"}
+
+    def test_kapsam_olcutu_hata_buyuklugunden_bagimsiz(self, kayitlar):
+        for tid in ("sol-nakka2000-kappa-ksb001", "sol-nakka2000-kappa-ksb002"):
+            kapsam = kayitlar[tid]["model_scope"]
+            assert kapsam["in_scope"] is False
+            assert "ÖNCEDEN TANIMLI" in kapsam["note"]
+            assert "BAĞIMSIZ" in kapsam["note"]
+            assert "üçgen" in kapsam["note"]
+        assert "model_scope" not in kayitlar["sol-nakka2000-kappa-kdx002"]
+
+    def test_olculen_kutle_tuketilir(self, kosu):
+        """Yoğunluk ölçülen kütle / tane hacminden: kütle girdidir, skorlanmaz."""
+        for tid in F3_TEST_IDS:
+            rr = _skorlar(kosu, tid)
+            assert rr["scores"]["propellant_mass"]["status"] == "skipped_consumed"
+            assert "propellant_mass" in rr["consumed_measured"]
+
+    def test_sure_tanimi_ayri_adla(self, kosu, kayitlar):
+        """Etki süresi 'burn_time' adıyla skorlanmaz; çapraz tanım bayraklıdır."""
+        for tid in F3_TEST_IDS:
+            assert "burn_time_s" not in kayitlar[tid]["measured"]
+            assert "action_time_5pct_s" in kayitlar[tid]["measured"]
+            skorlar = _skorlar(kosu, tid)["scores"]
+            assert "burn_time" not in skorlar
+            assert skorlar["action_time_5pct"]["status"] == "no_prediction"
+            capraz = skorlar[ra.SOLID_CROSS_DEFINITION_TIME]
+            assert capraz["status"] == "scored"
+            assert "definition_mismatch" in capraz["flags"]
 
     def test_tahmin_tarafi_cebirsel_bag(self, kosu, kayitlar):
         """Tahmin tarafında da I_pred = m_pred·g0·Isp_pred (kopya zinciri).
@@ -318,33 +374,32 @@ class TestKorelasyonKosusu:
                 f"{tid}: F022-kati beyan notu yok — sessiz skor-dışı "
                 f"bırakma yasak, not zorunlu")
 
-    def test_girdi_yankisi_skorlanmiyor(self, kayitlar, kosu):
-        """Tepe oda basıncı skalar skorlanamaz: tahmin, tasarım Pc girdisinin
-        birebir yankısıdır (ölçüldü). Yankı kaybolursa bu test kırılır ve
-        kayıt politikası bilinçli yeniden değerlendirilir."""
+    def test_tepe_basinc_donanimdan_tahmin(self, kayitlar):
+        """V307 karar 2: boğaz kaydın donanım çapına sabit; tepe basınç artık
+        tasarım Pc'sinin yankısı DEĞİL, bir tahmindir.
+
+        Eski bekçi (test_girdi_yankisi_skorlanmiyor) yankıyı kilitliyordu:
+        motor boğazı tasarım basıncından açtığı için tahmin = girdi idi
+        (bağıl fark < 1e-4). Ölçülen yeni oranlar (tahmin / tasarım Pc):
+        kdx002 1,0501; ksb002 0,9727; ksb001 1,0027 (gerçek boğaz tasarım
+        boğazına çok yakın). Kayıtlar tepe basıncı hâlâ skalar taşımıyor;
+        eklenmesi ayrı karar (RAPOR, AÇIK KALANLAR).
+        """
         for tid, rec in kayitlar.items():
-            for key in rec["measured"]:
-                base, _ = ra.split_quantity_key(key)
-                base = ra.BASE_ALIASES.get(base, base)
-                assert base != "chamber_pressure_peak", (
-                    f"{tid}.{key}: tepe oda basıncı skalar olarak eklenmiş — "
-                    f"bu skor tasarım Pc girdisinin yankısı olur (kayıt "
-                    f"notlarındaki gerekçeye bakın)")
-            # Yankının kendisi hâlâ geçerli mi? (politikanın ölçülü dayanağı)
-            rr = _skorlar(kosu, tid)
-            pred_peak = None
             res = ra.adapt_record(rec)
-            pred_peak = res["predictions"].get("chamber_pressure_peak")
+            assert "throat_sized_from_design_pressure" not in res["assumed_defaults"]
+            assert "expansion_ratio_optimum_at_design" not in res["assumed_defaults"]
+            assert any("Bogaz kaydin donanim capina sabitlendi" in n
+                       for n in res["adapter_notes"])
+            assert res["predictions"].get("chamber_pressure_peak") is not None
+        for tid, alt in (("sol-nakka2000-kappa-kdx002", 0.02),
+                         ("sol-nakka2000-kappa-ksb002", 0.02)):
+            rec = kayitlar[tid]
             pc_in = rec["inputs"]["chamber_pressure_psia"] * 6894.757293168
-            assert pred_peak is not None
-            # Ölçülen yankı sapması ~2e-6 (eğri float zinciri); gerçek bir
-            # model tahmini yüzdelerle ayrışırdı — eşik 1e-4 bağıl.
-            assert abs(pred_peak - pc_in) / pc_in < 1e-4, (
-                f"{tid}: Pc tepe tahmini artık girdi yankısı DEĞİL "
-                f"({pred_peak:.0f} vs {pc_in:.0f} Pa) — model değişmiş; "
-                f"tepe basınç skorlanabilir hâle gelmiş olabilir, kayıt "
-                f"politikasını bilinçli güncelle")
-            assert rr is not None  # koşuda mevcut
+            tepe = ra.adapt_record(rec)["predictions"]["chamber_pressure_peak"]
+            assert abs(tepe - pc_in) / pc_in > alt, (
+                f"{tid}: tepe basınç yine tasarım Pc'sinin yankısı "
+                f"({tepe:.0f} vs {pc_in:.0f} Pa) — boğaz sabitlemesi düşmüş")
 
 
 # ---------------------------------------------------------------------------
@@ -470,15 +525,17 @@ if (!ordered.length || ordered[0].motor_type !== 'solid') {
 }
 
 const mainHtml = CP._cellTableHtml(mainCells);
-for (const needle of ['sol-nakka2000-kappa-ksb002', 'thrust_peak', 'propellant_mass', 'burn_time']) {
+for (const needle of ['sol-nasa1979-bates-e1484', 'thrust_mean', 'web_burn_time', 'isp']) {
     if (!mainHtml.includes(needle)) { console.error('FAIL: ana tabloda eksik: ' + needle); process.exit(1); }
 }
 
 const root = makeNode();
 CP._render(body, root);
 const allHtml = created.map(n => n.innerHTML).join('\n');
-for (const needle of ['sol-nakka2000-kappa-ksb002', 'sol-nakka2000-kappa-kdx002',
-                      'sol-nakka2000-kappa-ksb001', 'Low-confidence records', 'Anomalous records']) {
+for (const needle of ['sol-nasa1979-bates-e1484', 'sol-nakka2000-kappa-kdx002',
+                      'sol-nakka2000-kappa-ksb001', 'sol-nakka2000-kappa-ksb002',
+                      'Low-confidence records', 'Records outside the model scope',
+                      'data-propellant-family="sugar"', 'data-propellant-family="an_ap_al_htpb"']) {
     if (!allHtml.includes(needle)) { console.error('FAIL: render ciktisinda eksik: ' + needle); process.exit(1); }
 }
 console.log('PANEL-OK cells=' + body.cells.length);
@@ -486,12 +543,29 @@ console.log('PANEL-OK cells=' + body.cells.length);
 
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="node yok")
-def test_panel_gercek_render_uc_katmani_gosteriyor(kosu, tmp_path):
+def test_panel_gercek_render_uc_katmani_gosteriyor(kayitlar, tmp_path):
     """correlation_panel.js GERÇEK kaynak kodu, üretim fonksiyonlarıyla
     (correlation_cells + to_markdown) kurulmuş uç gövdesini node üzerinde
-    hatasız çizer; üç F3 kaydı üç ayrı katmanda görünür. Panel dosyasına
-    dokunulmadığının ve veri sözleşmesine uyduğunun kanıtı."""
+    hatasız çizer. Panel dosyasına dokunulmadığının ve veri sözleşmesine
+    uyduğunun kanıtı.
+
+    V307 karar 3-4 sonrası: ana katmanı bir NASA BATES kaydı (E-1484)
+    doldurur, KDX-002 düşük güven katmanındadır. KSB kayıtları 'out_of_scope'
+    katmanına geçti. Faz 3 (karar 4): panel artık kapsam dışı katmanı ve
+    itici ailesini de çiziyor; KSB kimlikleri, katman başlığı ve aile
+    etiketleri render çıktısında aranır.
+    """
     from hrma.validation.status_report import correlation_cells
+
+    nasa = KAYIT_DIZINI / "sol-nasa1979-bates-e1484.json"
+    with open(nasa, encoding="utf-8") as f:
+        nasa_kaydi = json.load(f)
+    kosu = run_correlation(records=list(kayitlar.values()) + [nasa_kaydi])
+    kapsam_disi_idler = {c["worst_test_id"]
+                         for c in correlation_cells(kosu["statistics"])
+                         if c["layer"] == "out_of_scope"}
+    assert kapsam_disi_idler == {"sol-nakka2000-kappa-ksb001",
+                                 "sol-nakka2000-kappa-ksb002"}
 
     body = {
         "status": "ok",
@@ -524,4 +598,6 @@ def test_markdown_ozeti_kayitlari_aniyor(kosu):
     md = to_markdown(kosu)
     for tid in F3_TEST_IDS:
         assert tid in md
-    assert "Anomaly-flagged records" in md
+    assert "Out-of-model-scope records" in md
+    assert "Cells withheld (entirely outside the model scope)" in md
+    assert "solid [sugar]" in md

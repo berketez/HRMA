@@ -115,10 +115,13 @@ class TestCalkalanmaKutlesiTekKaynak:
     def test_yalniz_yogunluk_tabani_degismedi(self):
         """Regresyon kilidi: ezme yokken sayı eskisiyle bit-aynı."""
         o = analyze_slosh(radius=0.5, fill_height=1.0, fluid_density=1000.0)
+        # 3.0.7 (V307/K1): ξ1 kesin kök (Dodge (1.41), scipy); 4 basamaklı
+        # 1,8412 ile 178.25343032069424 idi. CALKANTI §A.1.1 / betik v1 §2:
+        # m1 = 178,2594 kg.
         assert o['slosh_mass_kg'] == pytest.approx(
-            178.25343032069424, rel=1e-12)
+            178.25944034320682, rel=1e-12)
         assert o['fill_sweep']['slosh_mass_kg'][-1] == pytest.approx(
-            178.25343032069424, rel=1e-12)
+            178.25944034320682, rel=1e-12)
 
     def test_kutle_hic_bilinmiyorsa_sayi_uydurulmaz(self):
         o = analyze_slosh(radius=0.5, fill_height=1.0)

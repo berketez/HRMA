@@ -296,8 +296,9 @@ def test_install_auto_modda_helper_ve_kapanis(tmp_path, monkeypatch):
     monkeypatch.setattr(self_install, "plan_install",
                         lambda *a, **k: {"mode": "auto", "platform": "darwin",
                                          "target": "/Applications/HRMA.app"})
-    def sahte_helper(plan, path, pid=None):
+    def sahte_helper(plan, path, pid=None, versions=None):
         cagrilar["helper"] = (plan, path)
+        cagrilar["versions"] = versions
         return {"launched": True, "log": "/tmp/log"}
     monkeypatch.setattr(self_install, "launch_helper", sahte_helper)
     monkeypatch.setattr(self_install, "schedule_app_exit",
@@ -309,6 +310,8 @@ def test_install_auto_modda_helper_ve_kapanis(tmp_path, monkeypatch):
     assert res["started"] is True and res["mode"] == "auto"
     assert cagrilar["helper"][1] == str(dmg)
     assert cagrilar.get("exit") is True
+    # V307/GÜNCELLEME-EKRAN: pencere için kurulu sürüm betiğe gider
+    assert cagrilar["versions"][0] == uc.__version__
 
 
 def test_install_helper_baslatilamazsa_manuel_yedek(tmp_path, monkeypatch):

@@ -402,7 +402,11 @@ class TestB206FirlatmaSahasiKapisi:
         assert blok['status'] == 'modelled'
         assert blok['thrust_site_N'] > 0.0
         assert blok['isp_site_s'] > 0.0
-        assert blok['ambient_pressure_pa'] == pytest.approx(79495.2155105,
+        # V307/İRTİFA-TEK: saha rakımı GEOMETRİK okunur (ana model kararı,
+        # 16 Kas; launch_site.atmosphere_at -> isa_pressure_geometric).
+        # 2000 m: eski 79 495,2155105 Pa (dönüşümsüz isa_pressure(2000)),
+        # yeni 79 501,424641667 Pa (+%0,0078).
+        assert blok['ambient_pressure_pa'] == pytest.approx(79501.424641667,
                                                             rel=1e-9)
 
     def test_bantlar_TEK_KAYNAKTAN_okunur(self):

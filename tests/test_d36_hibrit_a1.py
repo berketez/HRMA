@@ -137,7 +137,18 @@ process.stdout.write(JSON.stringify(getFormData()));
 
 def _govde(damga: dict | None = None, deger: dict | None = None) -> dict:
     metin = _oku(SABLON)
+    # V307/ONARIM-İTKİ-A (M7-ITKI-12/13): getFormData tek irtifa kipinde
+    # basınç alanı boşsa irtifanın ISA basıncını (altitudeToPressure → ISA
+    # katman tablosu) ve saha basıncı bayrağını (pressureIsSiteSpecific)
+    # okur; ikiz sayfanın aynı tanımlarını taşır.
+    isa = metin[metin.index('var ISA_LAYERS_JS = ['):]
+    isa = isa[:isa.index('var ISA_TABLE_TOP_M_JS = ')]
+    isa += 'var ISA_TABLE_TOP_M_JS = ' + re.search(
+        r'var ISA_TABLE_TOP_M_JS = ([0-9.]+);', metin).group(1) + ';'
     kod = '\n'.join([
+        isa, 'var pressureIsSiteSpecific = false;',
+        _islev(metin, 'function _isaLayerJS('),
+        _islev(metin, 'function _isaPressurePaJS('),
         _islev(metin, 'function altitudeToPressure('),
         _islev(metin, 'function viskoziteKullaniciGirdisiMi('),
         _islev(metin, 'function viskoziteGovdeDegeri('),

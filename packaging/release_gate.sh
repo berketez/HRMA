@@ -99,32 +99,58 @@ dmg_coz() {     # $1 = mount noktası
 # ---------------------------------------------------------------------------
 baslik "1/10  Sürüm tutarlılığı"
 # ---------------------------------------------------------------------------
-VERSION="$(sed -n 's/^__version__ = "\(.*\)"/\1/p' hrma/__init__.py)"
-if [ -z "$VERSION" ]; then
-    basarisiz "hrma/__init__.py içinden sürüm okunamadı"
-else
+# 3.0.7 EKİ (SÜREÇ kalem 1): denetim işlevin İÇİNDE — sürüm adı üreticisinin
+# (tools/surum_commit_uret.py) bekçisi (tests/test_v307_surec.py) onu betikten
+# ÇIKARIP üreticinin geçici ağaçtaki çıktısına koşturur. 3.0.6'da kapı 3.0.6
+# adıyla ilk kez yayın günü koştu ve README'nin 3.0.5 bağlantılarını yakaladı
+# (rc.8 kesildi, +~2 saat). README denetimi de sıkılaştı: tek bir bağlantının
+# geçmesi yetmez; bağlantıların HEPSİ bu sürüme gider ve `**HRMA vX.Y.Z**`
+# satırı bu sürümü yazar (3.0.6 onarımı 324f88c72 ikisini birlikte düzeltti).
+# VERSION küresel kalır: sonraki adımlar (artefakt adları) onu kullanır.
+surum_tutarliligi_denetle() {
+    local changelog_ver notlar baska
+    VERSION="$(sed -n 's/^__version__ = "\(.*\)"/\1/p' hrma/__init__.py)"
+    if [ -z "$VERSION" ]; then
+        basarisiz "hrma/__init__.py içinden sürüm okunamadı"
+        return
+    fi
     basarili "paket sürümü: $VERSION"
 
-    CHANGELOG_VER="$("$PY" -c "import json;print(json.load(open('hrma/data/changelog.json'))['versions'][0]['version'])" 2>/dev/null)"
-    if [ "$CHANGELOG_VER" = "$VERSION" ]; then
-        basarili "changelog en üst girdi: $CHANGELOG_VER"
+    changelog_ver="$("$PY" -c "import json;print(json.load(open('hrma/data/changelog.json'))['versions'][0]['version'])" 2>/dev/null)"
+    if [ "$changelog_ver" = "$VERSION" ]; then
+        basarili "changelog en üst girdi: $changelog_ver"
     else
-        basarisiz "changelog en üst girdi '$CHANGELOG_VER', paket '$VERSION' — eşleşmiyor"
+        basarisiz "changelog en üst girdi '$changelog_ver', paket '$VERSION' — eşleşmiyor"
     fi
 
-    NOTLAR="packaging/release_notes_v${VERSION}.md"
-    if [ -f "$NOTLAR" ]; then
-        basarili "sürüm notu dosyası: $NOTLAR"
+    notlar="packaging/release_notes_v${VERSION}.md"
+    if [ -f "$notlar" ]; then
+        basarili "sürüm notu dosyası: $notlar"
     else
-        basarisiz "sürüm notu yok: $NOTLAR"
+        basarisiz "sürüm notu yok: $notlar"
     fi
 
-    if grep -q "HRMA-Setup-${VERSION}" README.md 2>/dev/null; then
+    # Borusuz sayım (pipefail altında eşleşmesiz grep boruyu düşürmesin).
+    baska="$(awk -v v="$VERSION" '{
+                 s = $0
+                 while (match(s, /\/releases\/download\/v[0-9][0-9.]*\//)) {
+                     u = substr(s, RSTART + 20, RLENGTH - 21)
+                     if (u != v) n++
+                     s = substr(s, RSTART + RLENGTH)
+                 }
+             } END { print n + 0 }' README.md 2>/dev/null || echo 'okunamadı')"
+    if grep -q "HRMA-Setup-${VERSION}" README.md 2>/dev/null && [ "$baska" = "0" ]; then
         basarili "README indirme linkleri $VERSION"
     else
-        basarisiz "README hâlâ eski sürümü gösteriyor (HRMA-Setup-${VERSION} geçmiyor)"
+        basarisiz "README hâlâ eski sürümü gösteriyor (HRMA-Setup-${VERSION} geçmiyor ya da başka sürüme giden $baska indirme bağlantısı var) — tools/surum_commit_uret.py"
     fi
-fi
+    if grep -qxF "**HRMA v${VERSION}**" README.md 2>/dev/null; then
+        basarili "README sürüm satırı **HRMA v${VERSION}**"
+    else
+        basarisiz "README sürüm satırı '**HRMA v${VERSION}**' yok — tools/surum_commit_uret.py"
+    fi
+}
+surum_tutarliligi_denetle
 
 # ---------------------------------------------------------------------------
 baslik "2/10  Git durumu"

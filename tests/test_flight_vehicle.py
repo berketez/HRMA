@@ -745,8 +745,12 @@ SOLID_PROJE_ALANLARI = {
 #: dış çap 0,1048 -> 0,13396 m (KT-02: kasa iç + 2·cidar, bu itkinin
 #: cidarıyla); boy 0,78599 -> 0,79716 m; termokimya N-CEA-2 (CEA, Pc'de).
 #: Aşağıdaki tarihçe yorumları eski sayılara aittir.
+#: V307 KATI-DOĞRULAMA faz 3 (B1, 16 Kas 2026): itki 10301,90633210043 -> 10193,016875694093 N
+#: (-%1,057): proje iticisi apcp, boğaz pencere içinde; modülün iki fazlı
+#: nozul kaybı tahmini (%1,0570) itki katsayısına uygulanıyor. Diğer beş çapa
+#: (süre, yakıt, atıl kütle, dış çap, boy) DEĞİŞMEDİ (ölçüldü).
 SOLID_PROJE_OLCUM = {
-    'thrust': 10301.90633210043,
+    'thrust': 10193.016875694093,
     'burn_time': 0.6865322362722804,
     'propellant_mass': 3.002357267182695,
     # ÖH D18 (P2B4-04): liner halkası kuru kütleye EKLENDİ (daha önce

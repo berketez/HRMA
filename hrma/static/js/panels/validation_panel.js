@@ -698,10 +698,10 @@
             const gradeTip = bands
                 ? U.tf('panel.validation.gradeTipBands',
                        { a: bands.excellent, b: bands.good, c: bands.fair },
-                       'Score buckets published by the endpoint: '
+                       'Score buckets published by the calculation: '
                        + '{a}% / {b}% / {c}% (engineering judgment)')
                 : T('panel.validation.gradeTipNoBands',
-                    'The endpoint published no score buckets with this '
+                    'The calculation published no score buckets with this '
                     + 'response; the cards are left uncoloured.');
             html += U.sectionTitle(T('panel.validation.secAgreement', 'Agreement With HRMA Prediction'))
                 + `<div style="margin:4px 0 8px;">${U.badge(

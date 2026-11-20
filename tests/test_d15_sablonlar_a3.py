@@ -379,14 +379,19 @@ def test_s1_04_sunucu_kopyasi_tek_kaynakla_ayni(istemci):
     """`/api/altitude-to-pressure` deponun ISA tablosuyla BİREBİR olmalı.
 
     ÖLÇÜLDÜ (once.json): 30 km −%3,469 · 40 km −%15,780 · 50 km −%36,411.
+
+    V307/İRTİFA-TEK: uç irtifayı GEOMETRİK okur (ana model kararı, 16 Kas;
+    yörünge ve motor yollarıyla aynı). Eski beklenti isa_pressure(h)
+    (dönüşümsüz), yeni isa_pressure_geometric(h): 20 km +%0,99, 50 km +%5,05.
     """
-    from hrma.constants import isa_pressure
+    from hrma.constants import isa_pressure_geometric
     for h in (0, 10000, 20000, 30000, 40000, 50000, 70000):
         d, y = _post(istemci, '/api/altitude-to-pressure', {'altitude': h})
         assert d == 200
-        assert y['pressure'] == pytest.approx(isa_pressure(h) / 1e5,
-                                              rel=1e-12), \
-            '%d m: uç %r ⟷ tablo %r' % (h, y['pressure'], isa_pressure(h) / 1e5)
+        assert y['pressure'] == pytest.approx(
+            isa_pressure_geometric(h) / 1e5, rel=1e-12), \
+            '%d m: uç %r ⟷ tablo %r' % (h, y['pressure'],
+                                         isa_pressure_geometric(h) / 1e5)
 
 
 def test_s1_04_uctaki_ikinci_kopya_soruldu():

@@ -607,8 +607,16 @@ class TestP7B106CozulenGeometriBandi:
             assert kayit['reason'] == 'above_generic_band'
         assert 'motor' not in govde, 'reddedilen tasarım yine de yayımlandı'
 
+    #: V307/ORTAM-TEK (19 Kas): bu çapanın konusu çözülen geometri bandıdır,
+    #: ortam değil; istek tasarım ortamını AÇIKÇA gönderir. Değer hibrit
+    #: sayfasının formunun gerçekten gönderdiği değerdir (ölçüldü:
+    #: docs/scofield/raw/OH/V307/ortam-tek/olcum/form_ortam.json).
+    FORM_ORTAM_BAR = 1.01325
+
     def test_gecerli_geometri_degismez(self, istemci):
-        r = _sessiz_post(istemci, '/calculate', dict(HIBRIT_TABAN))
+        r = _sessiz_post(istemci, '/calculate',
+                         dict(HIBRIT_TABAN,
+                              atmospheric_pressure=self.FORM_ORTAM_BAR))
         assert r.status_code == 200
         motor = r.get_json()['motor']
         # ÇAPA YENİLENDİ (ÖH D18 fizik-a2, 2 Eyl 2026):
@@ -643,19 +651,30 @@ class TestP7B106CozulenGeometriBandi:
         # istek), yani değişimin tek kaynağı η'dır. Tolerans DEĞİŞMEDİ.
         #   d_c 0,05323547085323697 -> 0,05562952212024063
         #   L_c 0,6727638085755462  -> 0,7122747385131958
+        # ÇAPA YENİLENDİ — V307/ORTAM-TEK (19 Kas): istek ortamı AÇIKÇA
+        # 1,01325 bar (formun gönderdiği). Ortamsız istek 18 Kas'tan beri
+        # ISA'ya düşüyordu (TEK-TANIM) ve çapa 1,0 bar'da ölçülmüştü. Kök
+        # ölçüldü (docs/scofield/raw/OH/V307/ortam-tek/olcum/k1_olcum.json
+        # 'd15_taban', 'd15_ideal'): açık 1,0 bar eski çapayı BİT-AYNI verir;
+        # ortamsız istek açık 1,01325 ile BİT-AYNI. Tolerans DEĞİŞMEDİ.
+        #   d_c 0,05562952212024063 -> 0,05566978411654218
+        #   L_c 0,7122747385131958  -> 0,712940757768171
+        #   (ideal) d_c 0,05323547085323697 -> 0,05327364972780992
+        #   (ideal) L_c 0,6727638085755462  -> 0,6733924333007723
         assert motor['chamber_diameter'] == pytest.approx(
-            0.05562952212024063, rel=1e-12)
+            0.05566978411654218, rel=1e-12)
         assert motor['chamber_diameter'] == motor['port_diameter_final']
         assert motor['chamber_length'] == pytest.approx(
-            0.7122747385131958, rel=1e-12)
+            0.712940757768171, rel=1e-12)
         ideal = _sessiz_post(istemci, '/calculate',
-                             dict(HIBRIT_TABAN, combustion_efficiency=100.0))
+                             dict(HIBRIT_TABAN, combustion_efficiency=100.0,
+                                  atmospheric_pressure=self.FORM_ORTAM_BAR))
         assert ideal.status_code == 200
         m_ideal = ideal.get_json()['motor']
         assert m_ideal['chamber_diameter'] == pytest.approx(
-            0.05323547085323697, rel=1e-12)
+            0.05327364972780992, rel=1e-12)
         assert m_ideal['chamber_length'] == pytest.approx(
-            0.6727638085755462, rel=1e-12)
+            0.6733924333007723, rel=1e-12)
 
     def test_bant_urunun_kendi_tablosundan_okunur(self):
         """Tek kaynak: eşik app.py'ye YAZILMAZ, limits'ten gelir."""

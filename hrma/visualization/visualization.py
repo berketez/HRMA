@@ -238,7 +238,8 @@ PERF_SURFACE_DEFAULT_OXIDIZER = 'N2O'
 NOZZLE_FIG_DEFAULT_GAMMA = 1.20
 NOZZLE_FIG_DEFAULT_MW = 24.0            # g/mol
 NOZZLE_FIG_DEFAULT_PC_BAR = 20.0
-NOZZLE_FIG_DEFAULT_TC_K = 3000.0
+#: V307/KÜÇÜKLER-2 (kalem 2): eski ``NOZZLE_FIG_DEFAULT_TC_K = 3000.0`` KALKTI —
+#: oda sıcaklığı figürün zorunlu girdisidir (``_nozzle_fig_motor_data``).
 NOZZLE_FIG_AMBIENT_PA = P_SEA_LEVEL_PA  # deniz seviyesi (ISA, merkez)
 NOZZLE_FIG_N_STATIONS = 45
 #: Kontur ızgarasının radyal düğüm sayısı (quasi-1D: M yarıçap boyunca
@@ -1301,6 +1302,16 @@ PERF_GAUGE_ROUND = 50.0         # skala taşarsa yuvarlanacağı adım
 ETA_GAUGE_LO_PCT = 90.0          # varsayılan skala tabanı
 ETA_GAUGE_LO_QUANTUM_PCT = 10.0  # taban bu adıma yuvarlanarak indirilir
 ETA_GAUGE_HI_QUANTUM_PCT = 5.0   # %100'ü aşan verimde tavanın yuvarlama adımı
+#: V307/GRAFİK-BİRİM (kalem 6) — η_c* göstergesinin farkı ("▼−11,00") ayrı
+#: bir 'delta' göstergesi olarak hücrenin ALT şeridine çizilir. ÖLÇÜLDÜ
+#: (``docs/scofield/raw/OH/V307/grafik-birim/olcum/k6_gosterge_once.json``,
+#: ürünün plotly 1.58.5'i, 900 / 1060 px, TR + EN): tek göstergede
+#: (gauge+number+delta) sayı ile fark metninin kutuları dikeyde 4,1–5,4 px
+#: kesişiyordu; yazı boyutu ve konum (top / right) denemelerinin hiçbiri
+#: kesişmeyi sıfırlamadı (plotly farkı sayının TAHMİNİ kutusuna göre
+#: yerleştiriyor). Şerit payı ve yazı boyutu HRMA görünüm seçimidir.
+ETA_GAUGE_DELTA_STRIP_FRAC = 0.18
+ETA_GAUGE_DELTA_FONT_PX = 20
 
 # P8B3-20 (ÖH D27 / fea-cfd a2) — SOĞUTMA ETKİNLİĞİ RENK BANTLARI.
 # Eşikler (0,8 / 0,6) ısı transferi panosunun içine GÖMÜLÜYDÜ, kaynağı
@@ -1450,6 +1461,24 @@ PERF_NOTE_OFFSET_PX = 72
 PERF_NOTE_LINE_PX = 13
 #: Pano alt boşluğunun tabanı [px] (dipnot yokken eski değer).
 PERF_MARGIN_B_PX = 100
+#: V307/GRAFİK-BİRİM (kalem 4) — 3B performans yüzeyi künye notu.
+#: ÖLÇÜLDÜ (V307/KÜÇÜKLER-2 ``olcum/not_genisligi.json``, 900 px kap): not
+#: 10 px yazıyla TEK satırdı, taban uyuşmazlığı kolunda 445 karakter /
+#: 2273 px — kabın dışına taşıyordu; yazı da çıtanın (≥ 12 px) altındaydı.
+#: 12 px yazıda ~6,4 px/karakter: 100 karakter ≈ 640 px, 900 px kabın
+#: çizim genişliğine (900 − 2·80 px kenar) sığar.
+PERF_SURFACE_NOTE_FONT_PX = 12
+PERF_SURFACE_NOTE_WRAP_CHARS = 100
+#: Satır yüksekliği [px] (12 px yazı) ve notun sahne altından uzaklığı [px].
+PERF_SURFACE_NOTE_LINE_PX = 16
+PERF_SURFACE_NOTE_OFFSET_PX = 8
+#: Not yokken / tek satırken eski alt boşluk [px].
+PERF_SURFACE_MARGIN_B_PX = 90
+#: Renk çubuğunun boyu (çizim yüksekliğinin kesri) — çubuk alttan başlar,
+#: üstteki pay lejanta kalır. ÖLÇÜLDÜ (``olcum/k45_tarayici.json`` önce,
+#: ekran görüntüsü): tam boy çubuğun başlığı ("Isp (s)") sağ üstteki
+#: lejantın ("Sweep maximum") altında kalıyordu (TR + EN, 900 / 1060 px).
+PERF_SURFACE_COLORBAR_LEN = 0.75
 
 
 def _wrap_category_label(label, max_lines=None):
@@ -3277,7 +3306,7 @@ def create_combustion_analysis_plots(combustion_data, propellant=None,
                 * ETA_GAUGE_HI_QUANTUM_PCT
         fig.add_trace(
             go.Indicator(
-                mode="gauge+number+delta",
+                mode="gauge+number",
                 value=eff_pct,
                 domain={'x': [0, 1], 'y': [0, 1]},
                 # Başlık BİLEREK yok: subplot_titles'tan gelen panel
@@ -3286,8 +3315,6 @@ def create_combustion_analysis_plots(combustion_data, propellant=None,
                 # not satırlarında; sayının yüzde soneki yeterli —
                 # _perf_gauge_panel emsali.
                 number={'suffix': ' %', 'valueformat': '.2f'},
-                # Referans = ideal (kuramsal denge) c*, η_c* = 1
-                delta={'reference': 100.0, 'valueformat': '.2f'},
                 gauge={
                     'axis': {'range': [eta_lo, eta_hi]},
                     'bar': {'color': PALETTE[6]},
@@ -3295,6 +3322,20 @@ def create_combustion_analysis_plots(combustion_data, propellant=None,
                     'steps': [],
                 }),
             row=2, col=1)
+        # V307/GRAFİK-BİRİM (kalem 6): fark ayrı göstergede, hücrenin alt
+        # şeridinde (bkz. ETA_GAUGE_DELTA_STRIP_FRAC). Sayı ve referans
+        # AYNI: η_c* − 100 (ideal, kuramsal denge c*, η_c* = 1).
+        _hucre = fig.data[-1].domain
+        _hx, _hy = list(_hucre.x), list(_hucre.y)
+        _ayrim = _hy[0] + ETA_GAUGE_DELTA_STRIP_FRAC * (_hy[1] - _hy[0])
+        fig.data[-1].update(domain={'x': _hx, 'y': [_ayrim, _hy[1]]})
+        fig.add_trace(
+            go.Indicator(
+                mode="delta",
+                value=eff_pct,
+                delta={'reference': 100.0, 'valueformat': '.2f',
+                       'font': {'size': ETA_GAUGE_DELTA_FONT_PX}},
+                domain={'x': _hx, 'y': [_hy[0], _ayrim]}))
     notes.extend(eff_notes)
 
     # --- (2,2) Gerçek O/F taraması ------------------------------------
@@ -4154,7 +4195,7 @@ def create_real_time_dashboard(motor_data, time_data):
             'No published reference series for '
             + ', '.join(olcusuz_alanlar)
             + ': the value is shown as a number, no needle is drawn '
-              '(a needle without a reference would be a fabricated scale).')
+              '(a needle without a reference would imply a scale that does not exist).')
     if yayimlanmayan_alanlar:
         pano_notlari.append('Not available for this run: '
                             + ', '.join(yayimlanmayan_alanlar) + '.')
@@ -4901,8 +4942,83 @@ def _validate_comparative_configs(motor_configs):
             "least one of: " + ", ".join(COMPARATIVE_METRIC_KEYS) + ".")
 
 
-def create_comparative_analysis_plot(motor_configs):
+#: V307/KÜÇÜKLER-2 (kalem 3) — karşılaştırma isteğinin İSTEĞE BAĞLI ortam
+#: kaydının kipleri (beyaz liste). Kayıt panelin ekran satırındaki tanımdır
+#: (performance_panel.js ``HRMAIspAmbient`` / çözücünün ``design_ambient``
+#: bloğu); sunucu sayı TÜRETMEZ, yalnız gelen sayıyı aynı ifadeyle yazar.
+DESIGN_AMBIENT_RECORD_MODES = ('sea_level', 'vacuum', 'pressure', 'altitude',
+                             'undeclared')
+
+
+def design_ambient_label(ortam):
+    """Ortam kaydının EN etiketi — panelin ``panel.ambient.*`` /
+    ``panel.comparative.ambientSeaLevel`` EN metinleriyle AYNI ifade
+    (basınç dört basamak, irtifa tam sayı metre). Kayıt yoksa None.
+    TR karşılığı istemcide ``i18n_charts.js`` (sözlük + desen) ile gelir.
+    """
+    if not ortam:
+        return None
+    if not isinstance(ortam, dict) or ortam.get('mode') not in \
+            DESIGN_AMBIENT_RECORD_MODES:
+        raise ValueError('design_ambient must be a record {mode, '
+                         'pressure_bar, altitude_m} with mode one of: '
+                         + ', '.join(DESIGN_AMBIENT_RECORD_MODES))
+    kip = ortam['mode']
+    p = ortam.get('pressure_bar')
+    h = ortam.get('altitude_m')
+    if kip == 'sea_level':
+        return 'sea level'
+    if kip == 'vacuum':
+        return 'vacuum'
+    if kip == 'undeclared':
+        return 'design ambient not declared by the result'
+    if kip == 'altitude':
+        if p is not None:
+            return '%d m design altitude (%.4f bar)' % (round(h), p)
+        return '%d m design altitude' % round(h)
+    return '%.4f bar design ambient' % p
+
+
+def design_ambient_pressure_pa(ortam):
+    """Ortam kaydının basıncı [Pa] — V307/ONARIM-İTKİ-A (M7-ITKI-7).
+
+    Kayıt uçta ``_tasarim_ortami_kaydi_oku`` kapısından geçmiştir (kip
+    beyaz listede; basınç kipi basınç, irtifa kipi irtifa taşır). Sayı
+    TÜRETİLMEZ, kaydın kendi tanımından okunur:
+      sea_level -> ISA deniz seviyesi (``hrma.constants.P_SEA_LEVEL_PA``)
+      vacuum    -> 0
+      pressure  -> ``pressure_bar``
+      altitude  -> ``pressure_bar`` (yanıtın kendi basıncı) ya da yoksa
+                   ``isa_pressure_geometric(altitude_m)`` (US Std Atm 1976,
+                   geometrik irtifa; motorların tasarım irtifası tanımı)
+      undeclared / kayıt yok -> None (ortam bilinmiyor; çağıran beyan eder)
+    """
+    from hrma.constants import PA_PER_BAR, isa_pressure_geometric
+    if not isinstance(ortam, dict):
+        return None
+    kip = ortam.get('mode')
+    p = _perf_num(ortam.get('pressure_bar'))
+    h = _perf_num(ortam.get('altitude_m'))
+    if kip == 'sea_level':
+        return float(P_SEA_LEVEL_PA)
+    if kip == 'vacuum':
+        return 0.0
+    if kip == 'pressure':
+        return None if p is None else float(p) * PA_PER_BAR
+    if kip == 'altitude':
+        if p is not None:
+            return float(p) * PA_PER_BAR
+        return None if h is None else float(isa_pressure_geometric(h))
+    return None
+
+
+def create_comparative_analysis_plot(motor_configs, design_ambient=None):
     """Create comparative analysis between different motor configurations.
+
+    V307/KÜÇÜKLER-2 (kalem 3): ``design_ambient`` (uçta doğrulanmış ortam
+    kaydı) verilirse Isp taşıyan panellerin başlığına ve Isp eksenine
+    ortamın etiketi ikinci satır olarak yazılır (ekran satırıyla aynı
+    ifade). Verilmezse figür bugünküyle aynıdır.
 
     Eksik metrik anahtarları tolere edilir: her panel yalnızca o metriğe
     sahip konfigürasyonlarla çizilir; hiçbir konfigürasyonda yoksa panel
@@ -4991,6 +5107,22 @@ def create_comparative_analysis_plot(motor_configs):
                          row=panel['row'], col=panel['col'])
         fig.update_yaxes(title_text=panel['y_label'],
                          row=panel['row'], col=panel['col'])
+
+    # V307/KÜÇÜKLER-2 (kalem 3): Isp tasarım ortamının sayısıdır; ortam
+    # kaydı geldiyse Isp ekseni ve Isp taşıyan panelin başlığı onu söyler.
+    etiket = design_ambient_label(design_ambient)
+    if etiket:
+        isp_basliklari = set()
+        for panel in COMPARATIVE_PANELS:
+            if 'isp' not in panel['metrics']:
+                continue
+            isp_basliklari.add(comparative_panel_title(panel))
+            if panel['y_label'].startswith('Isp'):
+                fig.update_yaxes(title_text=panel['y_label'] + '<br>' + etiket,
+                                 row=panel['row'], col=panel['col'])
+        for not_ in fig.layout.annotations:
+            if not_.text in isp_basliklari:
+                not_.text = not_.text + '<br>' + etiket
 
     return _fig_json(fig)
 
@@ -5285,7 +5417,8 @@ def create_chamber_pressure_mixture_ratio_3d_surface(engine_data: Dict) -> str:
         colorscale='Viridis',
         name='Equilibrium Isp',
         showscale=True,
-        colorbar=dict(title="Isp (s)", x=1.02),
+        colorbar=dict(title="Isp (s)", x=1.02,
+                      len=PERF_SURFACE_COLORBAR_LEN, y=0.0, yanchor='bottom'),
         hovertemplate=('Pc %{x:.1f} bar<br>O/F %{y:.2f}<br>'
                        'Isp %{z:.1f} s<extra></extra>')))
 
@@ -5466,6 +5599,11 @@ def create_chamber_pressure_mixture_ratio_3d_surface(engine_data: Dict) -> str:
             design_basis_gap = float(design_isp) - float(surface_isp_at_design)
 
     design_eps = _perf_num(ed.get('expansion_ratio'))
+    # V307/KÜÇÜKLER-2 (kalem 4): taban Isp hangi ortamın Isp'si? (çağıranın
+    # ortam kaydı; panel motorun tasarım ortamından tohumlar). Kayıt yoksa
+    # künye bugünküyle aynı — sunucu ortam VARSAYMAZ.
+    design_amb = design_ambient_label(ed.get('design_ambient'))
+    amb_txt = (f', design ambient: {design_amb}' if design_amb else '')
     basis_mismatch = bool(
         surface_isp_at_design
         and abs(design_basis_gap) >
@@ -5494,6 +5632,7 @@ def create_chamber_pressure_mixture_ratio_3d_surface(engine_data: Dict) -> str:
                 f'<br>{dp_kaynak}: {design_isp:.1f} s'
                 + (f' at expansion ratio {design_eps:.2f}'
                    if design_eps else ' (expansion ratio not reported)')
+                + amb_txt
                 + f'<br>Difference: {design_basis_gap:+.1f} s '
                   f'({100.0 * design_basis_gap / surface_isp_at_design:+.2f}%)'
                   ' — this is an expansion-basis difference, NOT a distance '
@@ -5507,6 +5646,10 @@ def create_chamber_pressure_mixture_ratio_3d_surface(engine_data: Dict) -> str:
                        'Design point AS SUPPLIED to this figure — the caller '
                        'did not declare it as a motor-solver result, so it '
                        'was not re-solved here')
+            if design_amb:
+                dp_head += (f'<br>Isp {design_isp:.1f} s'
+                            + (f' at expansion ratio {design_eps:.2f}'
+                               if design_eps else '') + amb_txt)
             if surface_isp_at_design:
                 dp_head += (
                     '<br>Expansion basis checked: this surface solves '
@@ -5537,58 +5680,78 @@ def create_chamber_pressure_mixture_ratio_3d_surface(engine_data: Dict) -> str:
     if failures:
         subtitle += f" | {failures} node(s) unsolved (drawn as gaps)"
 
-    note = ('Combustion-instability bands are NOT modeled here; the earlier '
-            'shaded band had no sourced criterion and was removed. '
-            'Sea-level expansion (Pe = 1 bar) is used for Isp.')
+    # V307/GRAFİK-BİRİM (kalem 4-5): künye MADDE listesidir — her madde
+    # '- ' ile başlar, sarılan devam satırları iki boşlukla (yanma panosu
+    # dipnot biçimi). TR ekran maddeyi BÜTÜN çevirir (i18n_charts
+    # ``sarilmisMaddeler`` → sunucu çevirmeni); metin ve sıra değişmedi.
+    note_items = [
+        'Combustion-instability bands are NOT modeled here; the earlier '
+        'shaded band had no sourced criterion and was removed.',
+        'Sea-level expansion (Pe = 1 bar) is used for Isp.']
     # P8B4-17: iki taban aynı figürde buluşuyorsa fark NOTA da yazılır —
     # hover'ı açmayan okuyucu da görsün.
     if basis_mismatch:
-        note = (
+        note_items.insert(0, (
             'The design-point cross is drawn at THIS surface\'s expansion '
             f'basis ({surface_isp_at_design:.1f} s at Pc {design_pc:.1f} bar, '
             f'O/F {design_of:.2f}); the motor itself reports '
             f'{design_isp:.1f} s'
             + (f' at expansion ratio {design_eps:.2f}'
-               if design_eps else '')
+               if design_eps else '') + amb_txt
             + f' — a {design_basis_gap:+.1f} s '
               f'({100.0 * design_basis_gap / surface_isp_at_design:+.2f}%) '
               'expansion-basis difference, not a distance from this '
-              'surface\'s optimum. ') + note
+              'surface\'s optimum.'))
     # Sıra ANLAMLIDIR: itici kimliği verilmediyse yüzey BAŞKA bir itici
     # çiftinin yüzeyidir, dolayısıyla "yüzeyin üstünde" karşılaştırması da
     # anlamsızdır — daha temel olan gerekçe önce söylenir.
     if prop_supplied is False and design_complete:
-        note = ('The motor design point is NOT drawn on this surface: the '
-                'sweep was solved for the reference pair above because the '
-                'caller did not supply this motor\'s propellant identity, so '
-                f'the design point (Pc {design_pc:.1f} bar, O/F '
-                f'{design_of:.2f}, Isp {design_isp:.1f} s) belongs to a '
-                'different propellant system and its position relative to '
-                'this surface would mean nothing. ') + note
+        note_items.insert(0, (
+            'The motor design point is NOT drawn on this surface: the '
+            'sweep was solved for the reference pair above because the '
+            'caller did not supply this motor\'s propellant identity, so '
+            f'the design point (Pc {design_pc:.1f} bar, O/F '
+            f'{design_of:.2f}, Isp {design_isp:.1f} s) belongs to a '
+            'different propellant system and its position relative to '
+            'this surface would mean nothing.'))
     elif design_above_surface:
         _ceil_src = ('local refinement around the grid maximum'
                      if ceiling_refined else 'the grid maximum')
-        note = (f'The design point is NOT drawn on this surface: its Isp of '
-                f'{design_isp:.1f} s is above the highest Isp this sweep '
-                f'actually solved ({ceiling_isp:.1f} s at Pc '
-                f'{ceiling_pc:.1f} bar, O/F {ceiling_of:.2f}, from '
-                f'{_ceil_src}) — by '
-                f'{design_isp - ceiling_isp:.1f} s '
-                f'({100.0 * (design_isp - ceiling_isp) / ceiling_isp:.1f}%'
-                '). A point above the equilibrium ceiling of its own surface '
-                'comes from a different basis (vacuum vs sea-level expansion, '
-                'or another operating point), so its position here would mean '
-                'nothing. Check the design point against the motor result '
-                'before reading it off this figure. ') + note
+        note_items.insert(0, (
+            f'The design point is NOT drawn on this surface: its Isp of '
+            f'{design_isp:.1f} s is above the highest Isp this sweep '
+            f'actually solved ({ceiling_isp:.1f} s at Pc '
+            f'{ceiling_pc:.1f} bar, O/F {ceiling_of:.2f}, from '
+            f'{_ceil_src}) — by '
+            f'{design_isp - ceiling_isp:.1f} s '
+            f'({100.0 * (design_isp - ceiling_isp) / ceiling_isp:.1f}%'
+            '). A point above the equilibrium ceiling of its own surface '
+            'comes from a different basis (vacuum vs sea-level expansion, '
+            'or another operating point), so its position here would mean '
+            'nothing. Check the design point against the motor result '
+            'before reading it off this figure.'))
     if solved == 0:
-        note = ('Surface not available: the equilibrium solver rejected every '
-                'node of this sweep'
-                + (f' ({first_error})' if first_error else '')
-                + '. No surrogate surface is drawn.')
+        note_items = [
+            'Surface not available: the equilibrium solver rejected every '
+            'node of this sweep'
+            + (f' ({first_error})' if first_error else '')
+            + '. No surrogate surface is drawn.']
+    # Madde içinde yalnız SÖZCÜK sınırında sarılır: ``_wrap_note_lines``
+    # önce '; ' sınırında böldüğü için maddenin ortasında "6.00);" gibi tek
+    # sözcüklük satırlar bırakıyordu (ölçüldü, EN ekran görüntüsü). Metin
+    # değişmez; kısaltma ve sözcük bölme yok.
+    import textwrap as _tw
+    not_satirlari = []
+    for _madde in note_items:
+        not_satirlari.extend(_tw.wrap(
+            '- ' + _madde, width=PERF_SURFACE_NOTE_WRAP_CHARS,
+            subsequent_indent='  ', break_long_words=False,
+            break_on_hyphens=False))
     fig.add_annotation(
-        x=0.0, y=-0.06, xref='paper', yref='paper', xanchor='left',
-        showarrow=False, align='left', text=note,
-        font=dict(size=10, color=STRUCT_DIM))
+        x=0.0, y=0.0, xref='paper', yref='paper', xanchor='left',
+        yanchor='top', yshift=-PERF_SURFACE_NOTE_OFFSET_PX,
+        showarrow=False, align='left', text='<br>'.join(not_satirlari),
+        font=dict(size=PERF_SURFACE_NOTE_FONT_PX, color=STRUCT_DIM))
 
     fig.update_layout(
         title={'text': ('3D Performance Map: Chamber Pressure vs O/F vs Isp'
@@ -5600,7 +5763,10 @@ def create_chamber_pressure_mixture_ratio_3d_surface(engine_data: Dict) -> str:
             zaxis_title='Specific Impulse (s)',
             camera=dict(eye=dict(x=1.5, y=1.5, z=1.2))),
         autosize=True, height=700, showlegend=True,
-        margin=dict(b=90))
+        margin=dict(b=max(PERF_SURFACE_MARGIN_B_PX,
+                          PERF_SURFACE_NOTE_OFFSET_PX
+                          + PERF_SURFACE_NOTE_LINE_PX * len(not_satirlari)
+                          + 8)))
 
     return _fig_json(fig)
 
@@ -5661,8 +5827,20 @@ def _nozzle_fig_motor_data(cfd_data: Dict) -> Tuple[Dict, List[str]]:
                f'MW = {NOZZLE_FIG_DEFAULT_MW:.0f} g/mol')
     pc_bar = _pick('chamber_pressure', NOZZLE_FIG_DEFAULT_PC_BAR,
                    f'Pc = {NOZZLE_FIG_DEFAULT_PC_BAR:.0f} bar')
-    tc = _pick('chamber_temperature', NOZZLE_FIG_DEFAULT_TC_K,
-               f'Tc = {NOZZLE_FIG_DEFAULT_TC_K:.0f} K')
+    # V307/KÜÇÜKLER-2 (kalem 2) — ODA SICAKLIĞI VARSAYILMAZ. Eskiden
+    # gönderilmezse 3000 K konup alt başlıkta "assumed" yazılıyordu.
+    # ÖLÇÜLDÜ (taban b3221d092, docs/scofield/raw/OH/V307/kucukler-2/olcum/
+    # k2_once.json): ``/api/advanced-performance-analysis`` (nozzle_mach,
+    # heat_flux) sıcaklıksız istekte 200 + "Tc = 3000 K" başlıklı figür
+    # dönüyordu. Panel alanı zaten zorunlu ve motordan tohumlu (V307/
+    # SEKME-GÜVERTE); uç kapısı ``_APA_REQUIRED_ANY_OF`` bu koşulun İKİZİDİR.
+    tc = _perf_num(cd.get('chamber_temperature'))
+    if tc is None or not (tc > 0.0) or not np.isfinite(tc):
+        raise ValueError(
+            'chamber_temperature (K) is required for the nozzle flow figure '
+            'and must be a finite absolute temperature above 0 K (got %r); '
+            'no chamber temperature is assumed.'
+            % (cd.get('chamber_temperature'),))
 
     md = {
         'throat_diameter': throat_d,
@@ -5717,6 +5895,21 @@ def create_nozzle_mach_area_ratio_contour(cfd_data: Dict) -> str:
 
     md, assumed = _nozzle_fig_motor_data(cfd_data)
     pa = _perf_num((cfd_data or {}).get('ambient_pressure'))
+    # V307/ONARIM-İTKİ-A (M7-ITKI-7): çağıran ortam basıncı yerine motorun
+    # tasarım ortamı kaydını (``design_ambient``) gönderdiyse basınç o
+    # kayıttan okunur ve ortam adıyla yazılır. ÖLÇÜLDÜ (mühendis turu
+    # L6_vak_perf): vakum tasarımı (ε 61) panelinden gelen istek
+    # ``design_ambient: {mode: vacuum}`` taşıyordu, figür onu okumadan 1 atm
+    # varsayıyor ve "regime: separated" basıyordu (izantropik çıkış M 4,662,
+    # vakumda ayrılma yok).
+    ortam_notu = None
+    if pa is None:
+        _ortam = (cfd_data or {}).get('design_ambient')
+        _pa_ortam = design_ambient_pressure_pa(_ortam)
+        if _pa_ortam is not None:
+            pa = _pa_ortam
+            ortam_notu = ('Ambient: design ambient of the motor, '
+                          + design_ambient_label(_ortam))
     if pa is None:
         pa = NOZZLE_FIG_AMBIENT_PA
         assumed.append('ambient = 1 atm (sea level)')
@@ -5796,6 +5989,8 @@ def create_nozzle_mach_area_ratio_contour(cfd_data: Dict) -> str:
     m_eff = _perf_num((perf.get('exit') or {}).get('mach'))
     if m_eff is not None and abs(m_eff - float(mach[-1])) > 1e-3:
         sub += f" (effective exit M = {m_eff:.2f})"
+    if ortam_notu:
+        sub += '<br>' + ortam_notu
     if assumed:
         sub += '<br>Assumed (not supplied by this call): ' + ', '.join(assumed)
 
